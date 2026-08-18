@@ -1,0 +1,72 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment: &backend_env
+      APP_NAME: ${APP_NAME:-ShortsFlow AI}
+      ENVIRONMENT: production
+      PORT: 8000
+      FRONTEND_URL: ${FRONTEND_URL}
+      CORS_ORIGINS: ${FRONTEND_URL}
+      SQLITE_PATH: data/app.db
+      DATA_DIR: data
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5}
+      OPENAI_TRANSCRIPTION_MODEL: ${OPENAI_TRANSCRIPTION_MODEL:-whisper-1}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      GOOGLE_OAUTH_PROJECT_ID: ${GOOGLE_OAUTH_PROJECT_ID:-shortsflow-ai}
+      YOUTUBE_OAUTH_REDIRECT_URI: ${YOUTUBE_OAUTH_REDIRECT_URI}
+      YOUTUBE_DEFAULT_REGION: ${YOUTUBE_DEFAULT_REGION:-BR}
+      YOUTUBE_DEFAULT_PRIVACY: ${YOUTUBE_DEFAULT_PRIVACY:-private}
+      YTDLP_COOKIE_FILE: ${YTDLP_COOKIE_FILE:-}
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
+    volumes:
+      - shorts_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment: *backend_env
+    volumes:
+      - shorts_data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  shorts_data:
