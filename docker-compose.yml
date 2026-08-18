@@ -52,11 +52,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
     restart: unless-stopped
     expose:
       - "3000"
     environment:
-      BACKEND_INTERNAL_URL: http://backend:8000
       NODE_ENV: production
     depends_on:
       backend:
