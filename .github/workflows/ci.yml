@@ -32,3 +32,10 @@ jobs:
         env:
           BACKEND_INTERNAL_URL: http://127.0.0.1:8000
         run: npm run build
+
+  easypanel-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build root Docker image
+        run: docker build --build-arg BACKEND_INTERNAL_URL=http://127.0.0.1:8000 -t shortsflow-easypanel:ci .
