@@ -1,0 +1,71 @@
+name: Deploy EasyPanel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-easypanel-shortsia
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secret
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+        run: |
+          if [ -z "$EASYPANEL_API_KEY" ]; then
+            echo "EASYPANEL_API_KEY secret is not configured."
+            exit 1
+          fi
+
+      - name: Install EasyPanel CLI
+        shell: bash
+        run: |
+          curl -fsSL https://get.easypanel.io/cli | sh
+          easypanel version
+
+      - name: Connect EasyPanel server
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+        run: |
+          printf '%s' "$EASYPANEL_API_KEY" | easypanel server add production https://ke4n49.easypanel.host --api-key-stdin
+          easypanel server check production
+          easypanel server refresh production
+
+      - name: Inspect target app
+        shell: bash
+        run: |
+          easypanel --server production app inspect r2rmarketingdigital/shortsia --format json
+
+      - name: Deploy target app
+        shell: bash
+        run: |
+          easypanel --server production app deploy r2rmarketingdigital/shortsia --format json
+
+      - name: Wait for application
+        shell: bash
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "Waiting for healthcheck... attempt $i/30"
+            sleep 10
+          done
+          echo "Healthcheck did not become available in time."
+          exit 1
+
+      - name: Check frontend
+        shell: bash
+        run: |
+          curl -fsSI --max-time 15 https://shorts.r2rmarketingdigital.com.br/
