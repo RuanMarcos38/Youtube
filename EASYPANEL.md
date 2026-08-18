@@ -1,8 +1,95 @@
 # Deploy no EasyPanel
 
-Este repositório foi preparado para ser implantado como **Compose Service** no EasyPanel. O Compose sobe três serviços: `frontend` (Next.js), `backend` (FastAPI) e `worker` (processamento yt-dlp/FFmpeg/OpenAI/upload), compartilhando o volume persistente `shorts_data`.
+O projeto suporta agora **dois modos** de implantação no EasyPanel:
 
-## 1. Criar o serviço
+1. **APP único** — recomendado para o serviço `shortsia` que já existe no painel. O `Dockerfile` da raiz sobe frontend Next.js, backend FastAPI e worker no mesmo container usando Supervisor.
+2. **Compose Service** — alternativa avançada, mantendo frontend/backend/worker em containers separados.
+
+---
+
+# Opção A — usar o APP `shortsia` existente
+
+## Fonte
+
+No serviço `r2rmarketingdigital / shortsia`, abra **Fonte**:
+
+- Source: `GitHub`
+- Repository: `RuanMarcos38/Youtube`
+- Branch: `main`
+- Build Path: `/`
+
+## Build
+
+Em **Build** selecione:
+
+- Builder: `Dockerfile`
+- Dockerfile: `Dockerfile`
+
+Não use Nixpacks/Railpack na raiz para este projeto monorepo.
+
+O Dockerfile da raiz executa:
+
+- Next.js na porta pública `3000`
+- FastAPI internamente na porta `8000`
+- Worker de yt-dlp/FFmpeg/OpenAI em processo separado
+
+## Ambiente
+
+Em **Ambiente**, use como base `.env.example` e configure:
+
+```env
+APP_NAME=ShortsFlow AI
+FRONTEND_URL=https://$(PRIMARY_DOMAIN)
+OPENAI_API_KEY=
+OPENAI_TEXT_MODEL=gpt-5
+OPENAI_TRANSCRIPTION_MODEL=whisper-1
+YOUTUBE_API_KEY=
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+GOOGLE_OAUTH_PROJECT_ID=
+YOUTUBE_OAUTH_REDIRECT_URI=https://$(PRIMARY_DOMAIN)/api/youtube/oauth/callback
+YOUTUBE_DEFAULT_REGION=BR
+YOUTUBE_DEFAULT_PRIVACY=private
+WORKER_POLL_SECONDS=2
+```
+
+## Persistência
+
+Em **Storage/Volumes**, adicione armazenamento persistente montado em:
+
+`/app/data`
+
+É onde ficam SQLite, vídeos, transcrições, cortes e tokens OAuth.
+
+## Domínio
+
+Em **Domínios**, o domínio deve apontar para:
+
+- Porta: `3000`
+- Protocolo interno: `HTTP`
+- HTTPS: habilitado pelo EasyPanel
+
+Não aponte o domínio para `8000`: essa porta é apenas do FastAPI interno.
+
+## Implantar
+
+Clique em **Implantar**. Nos logs de runtime devem aparecer três processos iniciados pelo Supervisor:
+
+- `backend`
+- `worker`
+- `frontend`
+
+Depois valide:
+
+- `/` abre o dashboard
+- `/api/health` retorna o diagnóstico
+- `worker_alive` = `true`
+- `ffmpeg_available` = `true`
+- `ffprobe_available` = `true`
+
+---
+
+# Opção B — Compose Service
 
 No EasyPanel: `Project > New Service > Compose > Git`.
 
@@ -11,50 +98,33 @@ No EasyPanel: `Project > New Service > Compose > Git`.
 - Build Path: `/`
 - Docker Compose File: `docker-compose.yml`
 
-Não publique portas no host. O domínio do EasyPanel deve apontar para o serviço interno `frontend`, porta `3000`.
+O Compose sobe `frontend`, `backend` e `worker` separadamente e compartilha o volume `shorts_data`.
 
-## 2. Variáveis de ambiente
-
-Cole o conteúdo de `.env.easypanel.example` no Environment e preencha os campos vazios. O EasyPanel substitui `$(PRIMARY_DOMAIN)` pelo domínio principal configurado.
-
-Obrigatórias para operação completa:
-
-- `OPENAI_API_KEY`
-- `YOUTUBE_API_KEY`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_OAUTH_PROJECT_ID`
-
-## 3. Google Cloud / YouTube
-
-No OAuth Client do Google Cloud, cadastre exatamente a URI exibida por `/api/health` em `oauth_redirect_uri`. Em produção ela deve ser:
-
-`https://SEU_DOMINIO/api/youtube/oauth/callback`
-
-Habilite YouTube Data API v3 e use um OAuth Client do tipo Web Application. Depois do deploy, abra o site e clique em **Conectar YouTube**. O refresh token fica salvo no volume persistente, não no GitHub.
-
-## 4. Domínio
-
-Crie um domínio no Compose apontando para:
+O domínio deve apontar para:
 
 - Internal service: `frontend`
 - Port: `3000`
 - Protocol: HTTP
-- HTTPS/certificado: habilitado no EasyPanel
 
-O frontend encaminha `/api/*` e `/media/*` internamente para o FastAPI; portanto somente um domínio público é necessário.
+---
 
-## 5. Validação
+# Google Cloud / YouTube
 
-Após o deploy:
+No OAuth Client do Google Cloud, cadastre exatamente:
 
-- `/` deve abrir o dashboard.
-- `/api/health` deve retornar os checks do backend/worker/API.
-- `worker_alive` deve ficar `true`.
-- `ffmpeg_available` e `ffprobe_available` devem ficar `true`.
-- Após preencher as credenciais, `openai_configured`, `youtube_api_configured` e `google_oauth_configured` devem ficar `true`.
-- Depois do OAuth, `youtube_channel_connected` deve ficar `true`.
+`https://SEU_DOMINIO/api/youtube/oauth/callback`
 
-## 6. Persistência
+Habilite a **YouTube Data API v3** e crie um OAuth Client do tipo **Web Application**.
 
-`shorts_data` guarda SQLite, vídeos gerados, transcrições e tokens OAuth. Não remova esse volume em atualizações normais.
+Depois do deploy, clique em **Conectar YouTube**. O refresh token é armazenado no volume persistente e não é enviado ao GitHub.
+
+# Validação final
+
+Após preencher as credenciais e concluir o OAuth:
+
+- `openai_configured` = `true`
+- `youtube_api_configured` = `true`
+- `google_oauth_configured` = `true`
+- `youtube_channel_connected` = `true`
+
+A aplicação poderá então executar o fluxo real de download autorizado, transcrição, seleção dos melhores momentos, renderização vertical, legendas, metadata por IA e upload para o YouTube.
