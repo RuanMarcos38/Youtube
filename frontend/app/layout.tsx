@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shorts Automation SaaS",
-  description: "Dashboard para descoberta, geração, aprovação e publicação de YouTube Shorts.",
+  title: "ShortsFlow AI | YouTube Shorts Automation",
+  description: "Automação de YouTube Shorts com IA: descoberta, cortes 9:16, legendas, metadata, aprovação e publicação.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
