@@ -1,0 +1,23 @@
+name: Network Diagnostics
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: DNS and HTTPS diagnostics
+        shell: bash
+        run: |
+          set +e
+          echo '=== DNS custom domain ==='
+          getent ahostsv4 shorts.r2rmarketingdigital.com.br || true
+          echo '=== DNS automatic domain ==='
+          getent ahostsv4 r2rmgdigital-shortsia.ke4n49.easypanel.host || true
+          echo '=== HTTPS custom domain ==='
+          curl -vkI --connect-timeout 10 --max-time 20 https://shorts.r2rmarketingdigital.com.br/ || true
+          echo '=== Health custom domain ==='
+          curl -vk --connect-timeout 10 --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/health || true
