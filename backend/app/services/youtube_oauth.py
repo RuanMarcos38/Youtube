@@ -34,11 +34,13 @@ def oauth_configured() -> bool:
     return bool(_env_client_config()) or settings.oauth_secrets_path.exists()
 
 
-def _new_flow(state: str | None = None) -> Flow:
+def _new_flow(state: str | None = None, code_verifier: str | None = None) -> Flow:
     config = _env_client_config()
     kwargs = {"scopes": SCOPES, "redirect_uri": settings.youtube_oauth_redirect_uri}
     if state:
         kwargs["state"] = state
+    if code_verifier:
+        kwargs["code_verifier"] = code_verifier
     if config:
         return Flow.from_client_config(config, **kwargs)
     if settings.oauth_secrets_path.exists():
@@ -49,6 +51,26 @@ def _new_flow(state: str | None = None) -> Flow:
     )
 
 
+def _write_oauth_state(state: str, code_verifier: str | None) -> None:
+    STATE_FILE.write_text(
+        json.dumps({"state": state, "code_verifier": code_verifier}),
+        encoding="utf-8",
+    )
+
+
+def _read_oauth_state() -> tuple[str, str | None]:
+    if not STATE_FILE.exists():
+        return "", None
+    raw = STATE_FILE.read_text(encoding="utf-8").strip()
+    if not raw:
+        return "", None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw, None
+    return str(payload.get("state") or ""), payload.get("code_verifier")
+
+
 def build_authorization_url() -> str:
     flow = _new_flow()
     authorization_url, state = flow.authorization_url(
@@ -56,7 +78,7 @@ def build_authorization_url() -> str:
         include_granted_scopes="true",
         prompt="consent",
     )
-    STATE_FILE.write_text(state, encoding="utf-8")
+    _write_oauth_state(state, flow.code_verifier)
     return authorization_url
 
 
@@ -76,10 +98,10 @@ def _write_channel_metadata(creds: Credentials) -> None:
 
 
 def complete_oauth(code: str, state: str) -> None:
-    expected_state = STATE_FILE.read_text(encoding="utf-8").strip() if STATE_FILE.exists() else ""
+    expected_state, code_verifier = _read_oauth_state()
     if not expected_state or state != expected_state:
         raise RuntimeError("Invalid OAuth state. Start the YouTube connection again.")
-    flow = _new_flow(state=state)
+    flow = _new_flow(state=state, code_verifier=code_verifier)
     flow.fetch_token(code=code)
     creds = flow.credentials
     TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
