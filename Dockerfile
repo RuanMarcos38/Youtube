@@ -10,6 +10,15 @@ ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL} \
     NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
+FROM node:22-bookworm-slim AS pot-provider-builder
+WORKDIR /build/pot-provider
+ADD https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/1.3.1.tar.gz /tmp/bgutil-ytdlp-pot-provider.tar.gz
+RUN tar -xzf /tmp/bgutil-ytdlp-pot-provider.tar.gz --strip-components=2 \
+    bgutil-ytdlp-pot-provider-1.3.1/server \
+    && npm ci --no-audit --no-fund \
+    && npx tsc \
+    && npm prune --omit=dev --no-audit --no-fund
+
 FROM node:22-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
@@ -19,7 +28,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     DATA_DIR=/app/data \
-    SQLITE_PATH=/app/data/app.db
+    SQLITE_PATH=/app/data/app.db \
+    YTDLP_POT_PROVIDER_URL=http://127.0.0.1:4416
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip ffmpeg ca-certificates fonts-dejavu-core supervisor \
@@ -32,6 +42,7 @@ RUN /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install -r requirements.txt
 COPY backend/ /app/backend/
 
+COPY --from=pot-provider-builder /build/pot-provider /app/pot-provider
 COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend
 COPY --from=frontend-builder /build/frontend/.next/static /app/frontend/.next/static
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/shortsflow.conf
