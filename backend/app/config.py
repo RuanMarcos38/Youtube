@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     data_dir: str = "data"
 
     openai_api_key: str = ""
-    openai_text_model: str = "gpt-5"
+    openai_text_model: str = Field(default="gpt-5", validation_alias=AliasChoices("OPENAI_MODEL", "OPENAI_TEXT_MODEL"))
     openai_transcription_model: str = "whisper-1"
     max_transcript_chars: int = 180000
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     youtube_default_privacy: str = "private"
 
     ytdlp_cookie_file: str = ""
+    ytdlp_pot_provider_url: str = ""
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
     worker_poll_seconds: float = 2.0

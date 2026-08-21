@@ -23,6 +23,17 @@ def _base_options(output_dir: Path) -> dict:
     return options
 
 
+def _pot_provider_args() -> dict | None:
+    if not settings.ytdlp_pot_provider_url:
+        return None
+    return {
+        "extractor_args": {
+            "youtube": {"player_client": ["mweb", "web_safari", "tv"]},
+            "youtubepot-bgutilhttp": {"base_url": [settings.ytdlp_pot_provider_url]},
+        }
+    }
+
+
 def _find_downloaded_file(output_dir: Path, info: dict) -> Path | None:
     requested = info.get("requested_downloads") or []
     candidates = [Path(item.get("filepath", "")) for item in requested if item.get("filepath")]
@@ -45,12 +56,15 @@ def _download_with_options(url: str, output_dir: Path, options: dict) -> Path | 
 def download_video(url: str, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     option_variants = [
-        {},
+        _pot_provider_args(),
         {"extractor_args": {"youtube": {"player_client": ["tv", "web_safari"]}}},
+        {},
     ]
     errors: list[str] = []
     try:
         for variant in option_variants:
+            if variant is None:
+                continue
             options = _base_options(output_dir)
             options.update(variant)
             try:
