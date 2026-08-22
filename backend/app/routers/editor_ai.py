@@ -26,6 +26,7 @@ from ..services.editor_ai import (
     save_project,
     save_timeline,
 )
+from ..services.editor_ai_pro import DEFAULT_EDIT_OPTIONS, MAX_MUSIC_BYTES, MUSIC_EXTENSIONS
 
 router = APIRouter(prefix="/editor-ai", tags=["editor-ai"])
 
@@ -36,29 +37,78 @@ def _now() -> str:
 
 class AutoEditRequest(BaseModel):
     preset: str = "tiktok_shop_sales"
+    captions_enabled: bool = True
+    caption_style: str = "auto"
+    music_mode: str = "auto"
+    music_mood: str = "auto"
+    music_volume: float = Field(default=0.18, ge=0.0, le=0.45)
+    edit_intensity: str = "high"
+    auto_reframe: bool = True
+    hook_variants: bool = True
 
 
 class TimelineUpdateRequest(BaseModel):
     timeline: dict[str, Any] = Field(default_factory=dict)
 
 
+def _normalize_edit_options(payload: AutoEditRequest) -> dict[str, Any]:
+    caption_style = payload.caption_style if payload.caption_style in {"auto", "impact", "ugc", "cinematic"} else "auto"
+    music_mode = payload.music_mode if payload.music_mode in {"auto", "none", "custom"} else "auto"
+    music_mood = payload.music_mood if payload.music_mood in {"auto", "energetic", "confident", "elegant", "natural"} else "auto"
+    edit_intensity = payload.edit_intensity if payload.edit_intensity in {"balanced", "high", "maximum"} else "high"
+    return {
+        "captions_enabled": bool(payload.captions_enabled),
+        "caption_style": caption_style,
+        "music_mode": music_mode,
+        "music_mood": music_mood,
+        "music_volume": max(0.0, min(0.45, float(payload.music_volume))),
+        "edit_intensity": edit_intensity,
+        "auto_reframe": bool(payload.auto_reframe),
+        "hook_variants": bool(payload.hook_variants),
+    }
+
+
 @router.get("/presets")
 def presets():
-    """Return static editor presets without requiring a DB/auth round-trip.
-
-    Presets contain no user data and are needed while the editor UI boots. Keeping
-    this endpoint independent prevents a temporary session/database issue from
-    breaking the entire editor with a generic HTTP 500 before upload starts.
-    """
     return [
         {
             "id": key,
             "label": value["label"],
             "description": value["description"],
-            "target": "TikTok Shop / Social Commerce",
+            "target": "TikTok Shop / Reels / YouTube Shorts",
         }
         for key, value in PRESETS.items()
     ]
+
+
+@router.get("/options")
+def editor_options():
+    return {
+        "defaults": DEFAULT_EDIT_OPTIONS,
+        "caption_styles": [
+            {"id": "auto", "label": "Automática pela IA"},
+            {"id": "impact", "label": "Impacto / Performance"},
+            {"id": "ugc", "label": "UGC / Natural"},
+            {"id": "cinematic", "label": "Cinematográfica"},
+        ],
+        "music_modes": [
+            {"id": "auto", "label": "Trilha automática"},
+            {"id": "custom", "label": "Minha música"},
+            {"id": "none", "label": "Sem música"},
+        ],
+        "music_moods": [
+            {"id": "auto", "label": "IA decide"},
+            {"id": "energetic", "label": "Energética"},
+            {"id": "confident", "label": "Confiante"},
+            {"id": "elegant", "label": "Elegante"},
+            {"id": "natural", "label": "Natural"},
+        ],
+        "edit_intensities": [
+            {"id": "balanced", "label": "Equilibrada"},
+            {"id": "high", "label": "Alta performance"},
+            {"id": "maximum", "label": "Máxima retenção"},
+        ],
+    }
 
 
 @router.get("/projects")
@@ -78,16 +128,13 @@ def project(project_id: str, user: User = Depends(get_current_user)):
 async def upload_video(
     file: UploadFile = File(...),
     preset: str = Form("tiktok_shop_sales"),
-    target_platform: str = Form("tiktok_shop"),
+    target_platform: str = Form("all_social"),
     rights_confirmed: bool = Form(False),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not rights_confirmed:
-        raise HTTPException(
-            status_code=400,
-            detail="Confirme que você possui direitos, licença ou autorização para editar e publicar este vídeo.",
-        )
+        raise HTTPException(status_code=400, detail="Confirme que você possui direitos, licença ou autorização para editar e publicar este vídeo.")
 
     allowed, reason = can_use_tool(db, user)
     if not allowed:
@@ -96,10 +143,7 @@ async def upload_video(
     original_name = Path(file.filename or "video.mp4").name
     extension = Path(original_name).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=415,
-            detail=f"Formato não suportado. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}.",
-        )
+        raise HTTPException(status_code=415, detail=f"Formato não suportado. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}.")
 
     chosen_preset = preset if preset in PRESETS else "tiktok_shop_sales"
     stored_filename = f"source{extension}"
@@ -112,6 +156,7 @@ async def upload_video(
         target_platform=target_platform,
         created_at=_now(),
     )
+    project["edit_options"] = dict(DEFAULT_EDIT_OPTIONS)
     root = project_dir(user.id, project["id"])
     target = root / stored_filename
 
@@ -137,6 +182,47 @@ async def upload_video(
     return project
 
 
+@router.post("/projects/{project_id}/music")
+async def upload_music(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    try:
+        project = read_project(user.id, project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Projeto de edição não encontrado.") from exc
+
+    original_name = Path(file.filename or "music.mp3").name
+    extension = Path(original_name).suffix.lower()
+    if extension not in MUSIC_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"Formato de áudio não suportado. Use: {', '.join(sorted(MUSIC_EXTENSIONS))}.")
+
+    root = project_dir(user.id, project_id)
+    stored_name = f"custom-music{extension}"
+    target = root / stored_name
+    total = 0
+    try:
+        with target.open("wb") as output:
+            while True:
+                chunk = await file.read(512 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_MUSIC_BYTES:
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="A música excede o limite de 50 MB.")
+                output.write(chunk)
+    finally:
+        await file.close()
+
+    project["custom_music_filename"] = stored_name
+    project["custom_music_original_name"] = original_name
+    project["updated_at"] = _now()
+    save_project(user.id, project_id, project)
+    return project
+
+
 @router.post("/projects/{project_id}/auto-edit", status_code=status.HTTP_202_ACCEPTED)
 def auto_edit(
     project_id: str,
@@ -148,7 +234,12 @@ def auto_edit(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
     try:
-        return queue_auto_edit(user.id, project_id, payload.preset, _now())
+        queued = queue_auto_edit(user.id, project_id, payload.preset, _now())
+        queued["edit_options"] = _normalize_edit_options(payload)
+        if queued["edit_options"]["music_mode"] == "custom" and not queued.get("custom_music_filename"):
+            raise HTTPException(status_code=409, detail="Selecione e envie uma música antes de iniciar a edição com música própria.")
+        save_project(user.id, project_id, queued)
+        return queued
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Projeto de edição não encontrado.") from exc
 
@@ -168,7 +259,7 @@ def update_timeline(
 
 
 @router.post("/projects/{project_id}/export/tiktok-shop", status_code=status.HTTP_202_ACCEPTED)
-def export_tiktok_shop(project_id: str, user: User = Depends(get_current_user)):
+def export_social_ready(project_id: str, user: User = Depends(get_current_user)):
     try:
         return queue_export(user.id, project_id, _now())
     except FileNotFoundError as exc:
