@@ -36,6 +36,13 @@ type Timeline = {
   tracks: TimelineTrack[];
 };
 
+type HookVariant = {
+  variant: string;
+  text: string;
+  duration_seconds: number;
+  media_url: string;
+};
+
 type Project = {
   id: string;
   original_filename: string;
@@ -47,6 +54,7 @@ type Project = {
   timeline?: Timeline | null;
   preview_url?: string | null;
   export_url?: string | null;
+  hook_variants?: HookVariant[];
   analysis?: {
     source_duration?: number;
     edited_duration?: number;
@@ -54,6 +62,11 @@ type Project = {
     keywords?: string[];
     notes?: string[];
     quality?: Record<string, string | number>;
+    auto_reframe?: { enabled?: boolean; mode?: string; tracked_shots?: number; total_shots?: number; aspect_ratio?: string };
+    sound_design?: { enabled?: boolean; mood?: string; music_source?: string; cut_sync_points?: number; voice_target_lufs?: number };
+    broll?: { enabled?: boolean; strategy?: string; items?: number; concepts?: string[]; rights?: string };
+    hook_variations?: HookVariant[];
+    social_formats?: Record<string, string>;
   };
 };
 
@@ -139,6 +152,8 @@ export default function EditorIAPage() {
     const track = timeline?.tracks?.find((item) => item.type === "video");
     return (track?.items || []) as TimelineItem[];
   }, [timeline]);
+
+  const hookVariants = project?.hook_variants || project?.analysis?.hook_variations || [];
 
   async function upload() {
     if (!file) {
@@ -267,8 +282,8 @@ export default function EditorIAPage() {
             Anexe seu vídeo e deixe a IA montar a edição para vendas.
           </h1>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-[#667169]">
-            A ferramenta remove pausas e erros detectáveis, ajusta ritmo, cria legendas cinematográficas, trata áudio e imagem,
-            entrega em 9:16 e mantém uma timeline estruturada para revisão.
+            A ferramenta remove pausas e erros detectáveis, ajusta ritmo, cria legendas cinematográficas, faz auto-reframe 9:16,
+            adiciona sound design, B-roll contextual derivado do seu próprio material e gera 3 ganchos para testes A/B.
           </p>
         </div>
 
@@ -370,10 +385,44 @@ export default function EditorIAPage() {
                 )}
 
                 {project.analysis && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Original</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.source_duration || 0)}s</div></div>
-                    <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Editado</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.edited_duration || 0)}s</div></div>
-                    <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Removido</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.removed_seconds || 0)}s</div></div>
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Original</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.source_duration || 0)}s</div></div>
+                      <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Editado</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.edited_duration || 0)}s</div></div>
+                      <div className="rounded-xl bg-white/10 p-3"><div className="text-[10px] text-white/50">Removido</div><div className="mt-1 text-sm font-black">{Math.round(project.analysis.removed_seconds || 0)}s</div></div>
+                    </div>
+
+                    {(project.analysis.auto_reframe || project.analysis.sound_design || project.analysis.broll) && (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="text-[10px] font-black uppercase tracking-[.15em] text-[#b8f238]">Acabamento IA</div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-white/10 p-3"><div className="text-white/50">Auto-reframe</div><div className="mt-1 font-black">9:16 • rosto/ação</div></div>
+                          <div className="rounded-xl bg-white/10 p-3"><div className="text-white/50">Sound design</div><div className="mt-1 font-black">{project.analysis.sound_design?.mood || "automático"}</div></div>
+                          <div className="rounded-xl bg-white/10 p-3"><div className="text-white/50">B-roll contextual</div><div className="mt-1 font-black">{project.analysis.broll?.items || 0} inserções</div></div>
+                          <div className="rounded-xl bg-white/10 p-3"><div className="text-white/50">Ganchos A/B</div><div className="mt-1 font-black">{hookVariants.length} versões</div></div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {hookVariants.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="text-[10px] font-black uppercase tracking-[.15em] text-[#b8f238]">Variações de gancho • 3 segundos</div>
+                    <div className="mt-3 space-y-2">
+                      {hookVariants.map((item) => (
+                        <a
+                          key={item.variant}
+                          href={`${API_URL}${item.media_url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between gap-3 rounded-xl bg-white/10 p-3 text-xs transition hover:bg-white/15"
+                        >
+                          <span><strong>Versão {item.variant}</strong><span className="ml-2 text-white/60">{item.text}</span></span>
+                          <span className="font-black text-[#b8f238]">Abrir</span>
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 )}
 
