@@ -308,8 +308,8 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
         if bot_blocked:
             if not download_access_configured():
                 raise DownloadError(
-                    "O YouTube bloqueou a saída da VPS. As estratégias públicas/PO Token também foram recusadas. "
-                    "Configure uma sessão autorizada ou uma saída de proxy no painel Administrador > Download YouTube."
+                    "O YouTube bloqueou a saída da VPS e os fallbacks públicos/PO Token também foram recusados. "
+                    "Configure YTDLP_COOKIES_B64 com uma sessão autorizada ou YTDLP_PROXY_URL no painel Administrador > Download YouTube."
                 )
             raise DownloadError(
                 "O YouTube recusou os cookies e também os fallbacks públicos desta VPS. "
