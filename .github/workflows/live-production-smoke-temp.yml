@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/system/public -o /tmp/public.json
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/billing/public -o /tmp/public.json
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/public.json'))
@@ -62,6 +62,17 @@ jobs:
           echo "HTTP=$code"
           cat /tmp/login.json || true
           test "$code" = "401"
+
+      - name: OAuth routes are protected and configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /api/youtube/oauth/status /api/youtube/oauth/start; do
+            code=$(curl -sS --max-time 20 -o /tmp/oauth.json -w '%{http_code}' "https://shorts.r2rmarketingdigital.com.br${path}")
+            echo "$path -> HTTP $code"
+            cat /tmp/oauth.json || true
+            test "$code" = "401"
+          done
 
       - name: Frontend and legal pages
         shell: bash
