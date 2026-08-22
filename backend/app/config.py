@@ -1,6 +1,39 @@
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Query parameters commonly appended by Prisma/Supabase examples but not
+# understood by libpq/psycopg. Passing any of these through makes psycopg fail
+# before a connection is even attempted (for example: invalid connection
+# option "schema"). Pool sizing is controlled by SQLAlchemy in database.py.
+_POSTGRES_CLIENT_ONLY_QUERY_KEYS = {
+    "schema",
+    "pgbouncer",
+    "connection_limit",
+    "pool_timeout",
+}
+
+
+def normalize_postgres_database_url(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("postgres://"):
+        normalized = "postgresql+psycopg://" + normalized[len("postgres://"):]
+    elif normalized.startswith("postgresql://"):
+        normalized = "postgresql+psycopg://" + normalized[len("postgresql://"):]
+
+    if not normalized.startswith("postgresql+psycopg://"):
+        return normalized
+
+    parts = urlsplit(normalized)
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parts.query, keep_blank_values=True)
+        if key.strip().lower() not in _POSTGRES_CLIENT_ONLY_QUERY_KEYS
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query, doseq=True), parts.fragment))
 
 
 class Settings(BaseSettings):
@@ -79,11 +112,7 @@ class Settings(BaseSettings):
     def sqlalchemy_database_url(self) -> str:
         value = self.database_url.strip()
         if value:
-            if value.startswith("postgres://"):
-                return "postgresql+psycopg://" + value[len("postgres://"):]
-            if value.startswith("postgresql://") and "+psycopg" not in value:
-                return "postgresql+psycopg://" + value[len("postgresql://"):]
-            return value
+            return normalize_postgres_database_url(value)
         return f"sqlite:///{self.sqlite_file.as_posix()}"
 
     @property
