@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..config import settings
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..models import SystemSetting, User
 from ..services.billing import apply_kiwify_webhook, plan_payload
+from ..services.system_config import get_public_config_safe
 
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -22,19 +23,20 @@ def _webhook_token(db: Session) -> str:
 
 @router.get("/public")
 def public_billing_config():
-    return {
-        "checkout_url": settings.kiwify_checkout_url,
-        "upgrade_url": settings.kiwify_upgrade_url,
-        "base_plan_job_limit": max(1, settings.base_plan_job_limit),
-    }
+    db = SessionLocal()
+    try:
+        return get_public_config_safe(db)
+    finally:
+        db.close()
 
 
 @router.get("/me")
 def my_billing(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     payload = plan_payload(db, user.tenant_id)
+    public_config = get_public_config_safe(db)
     payload.update({
-        "checkout_url": settings.kiwify_checkout_url,
-        "upgrade_url": settings.kiwify_upgrade_url,
+        "checkout_url": public_config["checkout_url"],
+        "upgrade_url": public_config["upgrade_url"],
     })
     return payload
 

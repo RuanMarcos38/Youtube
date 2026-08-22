@@ -1,3 +1,16 @@
+export type PublicConfig = {
+  brand_name: string;
+  marketing_badge: string;
+  marketing_headline: string;
+  marketing_description: string;
+  benefits: string[];
+  login_title: string;
+  login_description: string;
+  checkout_url: string;
+  upgrade_url: string;
+  base_plan_job_limit: number;
+};
+
 export type UserProfile = {
   id: number;
   tenant_id: number;
@@ -86,6 +99,8 @@ export type KiwifyAdminSettings = {
   checkout_url: string;
   upgrade_url: string;
   events: string[];
+  base_product_mapped?: boolean;
+  upgrade_product_mapped?: boolean;
 };
 
 export type TrendingVideo = {

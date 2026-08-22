@@ -3,16 +3,35 @@
 import { FormEvent, useEffect, useState } from "react";
 import AdminPanel from "./AdminPanel";
 import Dashboard from "./Dashboard";
-import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam } from "@/lib/api";
-import type { TeamUser, UserProfile } from "@/lib/types";
+import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam, publicConfig } from "@/lib/api";
+import type { PublicConfig, TeamUser, UserProfile } from "@/lib/types";
 
 const CHECKOUT = "https://pay.kiwify.com.br/tBv68U5";
 const UPGRADE = "https://pay.kiwify.com.br/8n30IZ9";
+
+const DEFAULT_CONFIG: PublicConfig = {
+  brand_name: "ShortsFlow AI",
+  marketing_badge: "Shorts com Inteligência Artificial",
+  marketing_headline: "Transforme vídeos do YouTube em Shorts prontos para publicar.",
+  marketing_description: "A IA encontra os melhores momentos do vídeo, cria cortes verticais 9:16, gera legendas, títulos, descrições, copy e tags e deixa cada Short pronto para revisão e publicação.",
+  benefits: [
+    "Cortes selecionados automaticamente pela IA",
+    "Formato vertical 9:16 com legendas",
+    "Títulos, descrições, copy e tags gerados por IA",
+    "Fluxo de revisão e publicação no YouTube",
+  ],
+  login_title: "Entrar no ShortsFlow",
+  login_description: "Entre para criar, revisar e gerenciar seus Shorts com Inteligência Artificial.",
+  checkout_url: CHECKOUT,
+  upgrade_url: UPGRADE,
+  base_plan_job_limit: 10,
+};
 
 const ACTIVE_BILLING = new Set(["active", "paid", "trial"]);
 
 export default function SaasApp() {
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [config, setConfig] = useState<PublicConfig>(DEFAULT_CONFIG);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,6 +52,7 @@ export default function SaasApp() {
   const [teamError, setTeamError] = useState("");
 
   useEffect(() => {
+    void publicConfig().then(setConfig).catch(() => setConfig(DEFAULT_CONFIG));
     authMe()
       .then(setUser)
       .catch(() => setUser(null))
@@ -104,7 +124,7 @@ export default function SaasApp() {
   }
 
   if (checking) {
-    return <main className="grid min-h-screen place-items-center bg-[#f8faf5] font-sans text-[#111815]"><div className="text-sm font-bold">Carregando ShortsFlow AI...</div></main>;
+    return <main className="grid min-h-screen place-items-center bg-[#f8faf5] font-sans text-[#111815]"><div className="text-sm font-bold">Carregando {config.brand_name}...</div></main>;
   }
 
   if (!user) {
@@ -112,23 +132,20 @@ export default function SaasApp() {
       <main className="min-h-screen bg-[#f8faf5] px-4 py-10 text-[#111815] md:py-16">
         <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] border border-black/5 bg-white shadow-[0_24px_90px_rgba(25,44,31,.12)] lg:grid-cols-[1.05fr_.95fr]">
           <section className="bg-[#0d241d] p-8 text-white md:p-12">
-            <div className="text-2xl font-black">ShortsFlow AI</div>
-            <div className="mt-2 text-xs font-bold uppercase tracking-[.18em] text-[#b8f238]">SaaS Multi-Tenant</div>
-            <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl">Um perfil, um canal, seus dados isolados.</h1>
-            <p className="mt-5 max-w-lg text-sm leading-7 text-white/70">Cada usuário possui login individual, jobs, cortes e conexão própria com o YouTube. Um perfil não acessa nem publica no canal de outro perfil.</p>
+            <div className="text-2xl font-black">{config.brand_name}</div>
+            <div className="mt-2 text-xs font-bold uppercase tracking-[.18em] text-[#b8f238]">{config.marketing_badge}</div>
+            <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl">{config.marketing_headline}</h1>
+            <p className="mt-5 max-w-lg text-sm leading-7 text-white/70">{config.marketing_description}</p>
             <div className="mt-8 grid gap-3 text-sm font-bold text-white/85">
-              <div>✓ Acesso liberado após pagamento aprovado</div>
-              <div>✓ PIX liberado assim que a confirmação de pagamento chegar</div>
-              <div>✓ Isolamento de jobs, cortes e arquivos</div>
-              <div>✓ OAuth do YouTube separado por perfil</div>
+              {config.benefits.slice(0, 4).map((benefit) => <div key={benefit}>✓ {benefit}</div>)}
             </div>
-            <a href={CHECKOUT} target="_blank" rel="noreferrer" className="mt-10 inline-flex rounded-xl bg-[#b8f238] px-6 py-3.5 text-sm font-black text-[#111815]">Assine já</a>
+            <a href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-10 inline-flex rounded-xl bg-[#b8f238] px-6 py-3.5 text-sm font-black text-[#111815]">Assine já</a>
           </section>
 
           <section className="p-8 md:p-12">
             <div className="mb-8 inline-flex rounded-full bg-[#edf6d9] px-3 py-1 text-[11px] font-black uppercase tracking-[.12em] text-[#5f8500]">Área do assinante</div>
-            <h2 className="text-2xl font-black">Entrar no ShortsFlow</h2>
-            <p className="mt-2 text-sm leading-6 text-[#6e7971]">Use o login e a senha liberados após a confirmação da compra.</p>
+            <h2 className="text-2xl font-black">{config.login_title}</h2>
+            <p className="mt-2 text-sm leading-6 text-[#6e7971]">{config.login_description}</p>
 
             <form onSubmit={submit} className="mt-8 space-y-4">
               <label className="block text-xs font-black">E-mail<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-[#91c51d]" /></label>
@@ -138,7 +155,7 @@ export default function SaasApp() {
             </form>
 
             <div className="mt-6 grid gap-2 sm:grid-cols-2">
-              <a className="rounded-xl bg-[#b8f238] px-5 py-3 text-center text-sm font-black text-[#111815]" href={CHECKOUT} target="_blank" rel="noreferrer">Assine já</a>
+              <a className="rounded-xl bg-[#b8f238] px-5 py-3 text-center text-sm font-black text-[#111815]" href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer">Assine já</a>
               <button onClick={() => setActivationOpen((value) => !value)} className="rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-black">Já pagou? Ativar acesso</button>
             </div>
 
@@ -168,8 +185,8 @@ export default function SaasApp() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3"><strong>{user.display_name}</strong><span className="rounded-full bg-white/10 px-2.5 py-1 text-white/70">{user.role}</span><span className="hidden text-white/50 sm:inline">{user.email}</span><span className="rounded-full bg-[#b8f238]/15 px-2.5 py-1 font-bold text-[#d9ff7d]">{usageLabel}</span></div>
           <div className="flex items-center gap-2">
-            {!billingActive && <a href={user.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Assine já</a>}
-            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Upgrade ilimitado</a>}
+            {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Assine já</a>}
+            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Upgrade ilimitado</a>}
             {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Administrador</button>}
             {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="rounded-lg bg-white/10 px-3 py-2 font-black">Perfis</button>}
             <button onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 font-black">Sair</button>
@@ -190,7 +207,7 @@ export default function SaasApp() {
 
       {!billingActive ? (
         <main className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8">
-          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o webhook de pagamento confirmar <strong>paid</strong>, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
+          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o pagamento for confirmado, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
         </main>
       ) : <Dashboard />}
     </div>

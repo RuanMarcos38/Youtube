@@ -8,12 +8,14 @@ import {
   adminMarkCredentialDelivered,
   adminMetrics,
   adminRegisterKiwify,
+  adminSystemConfig,
   adminTestDownloadAuth,
   adminUpdateDownloadAuth,
   adminUpdatePlan,
+  adminUpdateSystemConfig,
   adminUsers,
 } from "@/lib/api";
-import type { AdminMetrics, AdminUser, DownloadAuthStatus, KiwifyAdminSettings, ProvisionedCredential } from "@/lib/types";
+import type { AdminMetrics, AdminUser, DownloadAuthStatus, KiwifyAdminSettings, ProvisionedCredential, PublicConfig } from "@/lib/types";
 
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format((cents || 0) / 100);
@@ -25,6 +27,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [credentials, setCredentials] = useState<ProvisionedCredential[]>([]);
   const [downloadAuth, setDownloadAuth] = useState<DownloadAuthStatus | null>(null);
   const [kiwify, setKiwify] = useState<KiwifyAdminSettings | null>(null);
+  const [systemConfig, setSystemConfig] = useState<PublicConfig | null>(null);
   const [cookiesB64, setCookiesB64] = useState("");
   const [proxyUrl, setProxyUrl] = useState("");
   const [kiwifyClientId, setKiwifyClientId] = useState("");
@@ -34,23 +37,26 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [testingDownload, setTestingDownload] = useState(false);
   const [connectingKiwify, setConnectingKiwify] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
 
   async function refresh() {
     setLoading(true);
     setMessage("");
     try {
-      const [m, u, c, d, k] = await Promise.all([
+      const [m, u, c, d, k, s] = await Promise.all([
         adminMetrics(),
         adminUsers(),
         adminCredentials(),
         adminDownloadAuth(),
         adminKiwifySettings(),
+        adminSystemConfig(),
       ]);
       setMetrics(m);
       setUsers(u);
       setCredentials(c);
       setDownloadAuth(d);
       setKiwify(k);
+      setSystemConfig(s);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao carregar o painel administrativo.");
     } finally {
@@ -59,6 +65,30 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   }
 
   useEffect(() => { void refresh(); }, []);
+
+  async function saveSystemConfig(event: FormEvent) {
+    event.preventDefault();
+    if (!systemConfig) return;
+    setSavingConfig(true);
+    setMessage("");
+    try {
+      const saved = await adminUpdateSystemConfig(systemConfig);
+      setSystemConfig(saved);
+      setKiwify((current) => current ? { ...current, checkout_url: saved.checkout_url, upgrade_url: saved.upgrade_url } : current);
+      setMessage("Parametrização salva. A página de entrada, links comerciais e limite padrão foram atualizados sem redeploy.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Falha ao salvar a parametrização.");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  function setBenefit(index: number, value: string) {
+    if (!systemConfig) return;
+    const benefits = [...systemConfig.benefits];
+    benefits[index] = value;
+    setSystemConfig({ ...systemConfig, benefits });
+  }
 
   async function saveDownloadAuth(event: FormEvent) {
     event.preventDefault();
@@ -71,7 +101,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       setDownloadAuth(status);
       setCookiesB64("");
       setProxyUrl("");
-      setMessage("Autenticação atualizada. Clique em ‘Testar download’ para confirmar que o IP da VPS foi aceito pelo YouTube.");
+      setMessage("Autenticação atualizada. Clique em ‘Testar download’ para validar o acesso do YouTube.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao atualizar a autenticação do YouTube.");
     }
@@ -104,6 +134,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       });
       setKiwifyClientSecret("");
       setMessage(`Kiwify conectada. Webhook ${result.action === "created" ? "criado" : "atualizado"} com sucesso.`);
+      setKiwify(await adminKiwifySettings());
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao conectar a Kiwify.");
     } finally {
@@ -146,6 +177,22 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
             ["Ilimitados", String(metrics.unlimited_subscribers)],
           ].map(([label, value]) => <div key={label} className="rounded-2xl bg-white p-4 shadow-sm"><div className="text-[10px] font-black uppercase tracking-[.12em] text-[#7a847d]">{label}</div><div className="mt-2 text-xl font-black">{value}</div></div>)}
         </div>}
+
+        {systemConfig && <form onSubmit={saveSystemConfig} className="mt-6 rounded-2xl bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-black">Parametrização da ferramenta</h3><p className="mt-1 text-xs text-[#6e7971]">Altere textos comerciais, links e limite padrão diretamente no painel. Não exige alteração de código nem novo deploy.</p></div><button disabled={savingConfig} className="rounded-xl bg-[#111815] px-4 py-3 text-xs font-black text-white disabled:opacity-50">{savingConfig ? "Salvando..." : "Salvar parâmetros"}</button></div>
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            <label className="text-xs font-black">Nome da ferramenta<input value={systemConfig.brand_name} onChange={(e) => setSystemConfig({ ...systemConfig, brand_name: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">Selo da página de entrada<input value={systemConfig.marketing_badge} onChange={(e) => setSystemConfig({ ...systemConfig, marketing_badge: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black lg:col-span-2">Título principal<input value={systemConfig.marketing_headline} onChange={(e) => setSystemConfig({ ...systemConfig, marketing_headline: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black lg:col-span-2">Descrição comercial<textarea rows={3} value={systemConfig.marketing_description} onChange={(e) => setSystemConfig({ ...systemConfig, marketing_description: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 p-3 font-normal" /></label>
+            {systemConfig.benefits.slice(0, 4).map((benefit, index) => <label key={index} className="text-xs font-black">Benefício {index + 1}<input value={benefit} onChange={(e) => setBenefit(index, e.target.value)} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>)}
+            <label className="text-xs font-black">Título do login<input value={systemConfig.login_title} onChange={(e) => setSystemConfig({ ...systemConfig, login_title: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">Texto do login<input value={systemConfig.login_description} onChange={(e) => setSystemConfig({ ...systemConfig, login_description: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">Checkout assinatura<input value={systemConfig.checkout_url} onChange={(e) => setSystemConfig({ ...systemConfig, checkout_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">Checkout Upgrade<input value={systemConfig.upgrade_url} onChange={(e) => setSystemConfig({ ...systemConfig, upgrade_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">Limite mensal padrão<input type="number" min={1} max={100000} value={systemConfig.base_plan_job_limit} onChange={(e) => setSystemConfig({ ...systemConfig, base_plan_job_limit: Math.max(1, Number(e.target.value) || 1) })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+          </div>
+        </form>}
 
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <form onSubmit={saveDownloadAuth} className="rounded-2xl bg-white p-5 shadow-sm">
