@@ -39,7 +39,24 @@ class Settings(BaseSettings):
 
     auth_cookie_name: str = "shortsflow_session"
     auth_session_hours: int = 168
+
     kiwify_checkout_url: str = "https://pay.kiwify.com.br/tBv68U5"
+    kiwify_upgrade_url: str = "https://pay.kiwify.com.br/8n30IZ9"
+    kiwify_base_checkout_code: str = "tBv68U5"
+    kiwify_upgrade_checkout_code: str = "8n30IZ9"
+    kiwify_webhook_token: str = ""
+    base_plan_job_limit: int = 10
+    billing_require_active: bool = True
+
+    admin_bootstrap_email: str = "admin@r2rmarketingdigital.com.br"
+    admin_bootstrap_password_hash: str = "pbkdf2_sha256$260000$TAZfxFCzS7eQkm_UPco2ZQ==$RIjdlZl30n9mIrZYd1Q_5lBK1t9hmoy9Nvls2ji2B04="
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
