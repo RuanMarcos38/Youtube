@@ -1,6 +1,21 @@
+import secrets
+
 from ..config import settings
 from ..database import SessionLocal
-from ..models import Tenant, TenantPlan, User
+from ..models import SystemSetting, Tenant, TenantPlan, User
+
+
+def _ensure_kiwify_webhook_token(db) -> None:
+    row = db.get(SystemSetting, "kiwify_webhook_token")
+    if row and row.value.strip():
+        return
+    value = settings.kiwify_webhook_token.strip() or secrets.token_urlsafe(32)
+    if row:
+        row.value = value
+        row.secret = True
+    else:
+        db.add(SystemSetting(key="kiwify_webhook_token", value=value, secret=True))
+    db.commit()
 
 
 def ensure_superadmin() -> None:
@@ -11,6 +26,7 @@ def ensure_superadmin() -> None:
 
     db = SessionLocal()
     try:
+        _ensure_kiwify_webhook_token(db)
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.role = "superadmin"
