@@ -30,7 +30,6 @@ def _download_progress_updater(job_id: int):
         nonlocal last_progress
         status = str(event.get("status") or "")
         next_progress = last_progress
-
         if status == "downloading":
             downloaded = event.get("downloaded_bytes") or 0
             total = event.get("total_bytes") or event.get("total_bytes_estimate") or 0
@@ -38,11 +37,9 @@ def _download_progress_updater(job_id: int):
                 ratio = max(0.0, min(1.0, float(downloaded) / float(total)))
                 next_progress = 15 + int(ratio * 13)
             elif downloaded:
-                # Show liveness even when YouTube does not expose a total size.
                 next_progress = min(27, last_progress + 1)
         elif status == "finished":
             next_progress = 29
-
         if next_progress > last_progress:
             last_progress = next_progress
             _set_status(job_id, "downloading", next_progress)
@@ -60,18 +57,14 @@ def run_pipeline(job_id: int) -> None:
         for existing_clip in list(job.clips):
             db.delete(existing_clip)
         db.commit()
-        work_dir = settings.data_path / "jobs" / str(job_id)
+
+        work_dir = settings.data_path / "users" / str(job.user_id) / "jobs" / str(job_id)
         work_dir.mkdir(parents=True, exist_ok=True)
 
         _set_status(job_id, "checking_ffmpeg", 5)
         ensure_ffmpeg()
-
         _set_status(job_id, "downloading", 15)
-        video_path = download_video(
-            source.original_url,
-            work_dir,
-            progress_hook=_download_progress_updater(job_id),
-        )
+        video_path = download_video(source.original_url, work_dir, progress_hook=_download_progress_updater(job_id))
 
         _set_status(job_id, "extracting_audio", 30)
         duration = get_duration(video_path)
@@ -93,6 +86,8 @@ def run_pipeline(job_id: int) -> None:
             write_clip_srt(segments, candidate.start, candidate.end, srt_path)
             render_vertical_clip(video_path, output_path, candidate.start, candidate.end, srt_path)
             clip = Clip(
+                tenant_id=job.tenant_id,
+                user_id=job.user_id,
                 job_id=job.id,
                 start_seconds=candidate.start,
                 end_seconds=candidate.end,
