@@ -1,0 +1,77 @@
+name: Production Smoke Test
+
+on:
+  workflow_run:
+    workflows: ["Deploy EasyPanel"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate public health and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))
+          checks = data.get('checks') or {}
+          required = {
+              'status_ok': data.get('status') == 'ok',
+              'configuration_complete': data.get('configuration_complete') is True,
+              'openai': checks.get('openai_configured') is True,
+              'youtube_api': checks.get('youtube_api_configured') is True,
+              'google_oauth': checks.get('google_oauth_configured') is True,
+              'download_ready': checks.get('youtube_download_ready') is True,
+              'worker': checks.get('worker_alive') is True,
+              'ffmpeg': checks.get('ffmpeg_available') is True,
+              'ffprobe': checks.get('ffprobe_available') is True,
+          }
+          failed = [name for name, ok in required.items() if not ok]
+          if failed:
+              raise SystemExit('Production runtime checks failed: ' + ', '.join(failed))
+          print('Production runtime is healthy.')
+          PY
+
+      - name: Validate public configuration endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/system/public > /tmp/public.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/public.json').read_text(encoding='utf-8'))
+          for key in ('brand_name', 'marketing_headline', 'login_title', 'checkout_url', 'base_plan_job_limit'):
+              if key not in data or data[key] in ('', None):
+                  raise SystemExit(f'Missing public parameter: {key}')
+          print('Public parameters are available.')
+          PY
+
+      - name: Validate login route without using real credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"shortsflow-smoke-test-9f4d7c@example.com","password":"invalid-smoke-password"}' \
+            https://shorts.r2rmarketingdigital.com.br/api/auth/login)
+          if [ "$code" != "401" ]; then
+            echo "Login route returned HTTP $code; expected 401 for invalid credentials."
+            cat /tmp/login.json || true
+            exit 1
+          fi
+          echo "Login route is responding correctly (401 for invalid credentials, not 500)."
+
+      - name: Validate frontend
+        shell: bash
+        run: curl -fsSI --max-time 20 https://shorts.r2rmarketingdigital.com.br/
