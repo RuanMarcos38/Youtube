@@ -1,4 +1,6 @@
 import json
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest, urlopen
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -64,10 +66,9 @@ def build_authorization_url(db: Session, user: User) -> str:
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        # Always show Google's account picker before consent. This is required
-        # for the multi-tenant SaaS flow so each ShortsFlow profile can choose
-        # the exact Google/YouTube account that owns the channel it wants to use,
-        # instead of silently reusing the account already active in the browser.
+        # Multi-tenant SaaS: always display Google's account picker so each
+        # ShortsFlow profile can explicitly choose the Google/YouTube account
+        # that owns the channel it wants to use.
         prompt="select_account consent",
     )
     connection = _connection(db, user.id)
@@ -96,6 +97,8 @@ def complete_oauth(db: Session, code: str, state: str) -> int:
     flow.fetch_token(code=code)
     creds = flow.credentials
     channel_id, channel_title = _channel_metadata(creds)
+    if not channel_id:
+        raise RuntimeError("A Conta Google autorizada não possui um canal do YouTube acessível.")
 
     connection.token_json = creds.to_json()
     connection.channel_id = channel_id
@@ -158,8 +161,31 @@ def is_connected(user_id: int) -> bool:
         db.close()
 
 
+def _revoke_google_token(connection: YouTubeConnection) -> None:
+    if not connection.token_json:
+        return
+    try:
+        info = json.loads(connection.token_json)
+        token = str(info.get("refresh_token") or info.get("token") or "").strip()
+        if not token:
+            return
+        request = UrlRequest(
+            "https://oauth2.googleapis.com/revoke",
+            data=urlencode({"token": token}).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with urlopen(request, timeout=4):
+            pass
+    except Exception:
+        # Local disconnect must still complete if Google's revoke endpoint is
+        # temporarily unavailable. Token values are never logged.
+        pass
+
+
 def disconnect(db: Session, user_id: int) -> None:
     connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
     if connection:
+        _revoke_google_token(connection)
         db.delete(connection)
         db.commit()
