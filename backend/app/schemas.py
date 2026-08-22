@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 
 class TrendingVideo(BaseModel):
@@ -13,6 +13,46 @@ class TrendingVideo(BaseModel):
     like_count: int = 0
     comment_count: int = 0
     duration_seconds: int = 0
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+    company_name: str | None = Field(default=None, max_length=180)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=200)
+
+
+class TeamUserCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+    role: str = Field(default="member", pattern="^(admin|member)$")
+
+
+class UserOut(BaseModel):
+    id: int
+    tenant_id: int
+    email: str
+    display_name: str
+    role: str
+    active: bool
+    billing_status: str
+    checkout_url: str
+
+
+class TeamUserOut(BaseModel):
+    id: int
+    email: str
+    display_name: str
+    role: str
+    active: bool
+    youtube_connected: bool = False
+    youtube_channel_title: str | None = None
 
 
 class JobCreate(BaseModel):
