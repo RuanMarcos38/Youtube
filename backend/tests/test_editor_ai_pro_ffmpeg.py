@@ -4,11 +4,11 @@ import subprocess
 import pytest
 
 from app.services.editor_ai_pro import (
-    _mix_sound_design,
     _render_reframed,
     _write_original_soundtrack,
     _write_pro_ass,
 )
+from app.services.editor_audio_mix import mix_sound_design
 
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg/FFprobe required")
@@ -45,7 +45,7 @@ def test_professional_render_and_audio_ducking_pipeline(tmp_path):
 
     music = _write_original_soundtrack(tmp_path / "music.wav", 1.2, [0.4, 0.8], "energetic")
     final = tmp_path / "final.mp4"
-    _mix_sound_design(reframed, music, final, 0.18)
+    mix_sound_design(reframed, music, final, 0.18)
     assert final.is_file() and final.stat().st_size > 1000
 
     probe = subprocess.run(
