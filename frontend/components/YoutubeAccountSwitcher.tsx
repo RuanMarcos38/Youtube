@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { youtubeStart, youtubeStatus } from "@/lib/api";
 
+function YoutubeIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true"><rect x="2.2" y="5.2" width="19.6" height="13.6" rx="4" fill="currentColor"/><path d="m10 9 5.2 3-5.2 3V9Z" fill="#0d241d"/></svg>;
+}
+
 export default function YoutubeAccountSwitcher() {
   const [configured, setConfigured] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -42,29 +46,27 @@ export default function YoutubeAccountSwitcher() {
   if (!configured) return null;
 
   return (
-    <div className="fixed bottom-5 left-5 z-[70] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-black/10 bg-white p-2 shadow-xl">
-      <div className="mb-2 max-w-[260px] px-2 pt-1 text-[10px] font-bold text-[#6e7971]">
-        {connected
-          ? <>Canal atual: <strong className="text-[#111815]">{channelTitle || "YouTube conectado"}</strong></>
-          : "Nenhum canal conectado neste perfil."}
+    <div className="fixed bottom-[92px] left-3 right-3 z-[80] rounded-2xl border border-white/10 bg-[#122e25] p-3 text-white shadow-[0_18px_55px_rgba(13,36,29,.30)] xl:bottom-6 xl:left-6 xl:right-auto xl:w-[196px]">
+      <div className="flex items-center gap-2 text-[10px] font-bold text-white/55">
+        <YoutubeIcon />
+        <span>Canal atual</span>
+      </div>
+      <div className="mt-1 truncate text-xs font-black text-white">
+        {connected ? channelTitle || "YouTube conectado" : "Nenhum canal conectado"}
       </div>
       <button
         type="button"
         onClick={chooseAccount}
         disabled={loading}
         title="Abrir o Google para escolher outro e-mail ou canal do YouTube"
-        className="w-full rounded-xl bg-[#111815] px-4 py-3 text-xs font-black text-white transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60"
+        className="mt-3 w-full rounded-xl bg-[#b8f238] px-3 py-2.5 text-[11px] font-black text-[#111815] transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60"
       >
-        {loading ? "Abrindo Google..." : connected ? "Escolher outra conta YouTube" : "Conectar conta YouTube"}
+        {loading ? "Abrindo Google..." : connected ? "Escolher outra conta" : "Conectar YouTube"}
       </button>
-      <div className="mt-2 max-w-[260px] px-2 pb-1 text-[10px] leading-4 text-[#6e7971]">
-        O Google abrirá <strong>Escolher uma conta</strong> / <strong>Usar outra conta</strong>. Cada perfil mantém seu próprio canal isolado.
+      <div className="mt-2 text-[9px] leading-4 text-white/45">
+        Cada perfil mantém seu próprio canal isolado.
       </div>
-      {error && (
-        <div className="mt-2 max-w-[300px] rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-2 rounded-xl border border-red-300/20 bg-red-500/10 px-2 py-2 text-[10px] font-bold text-red-100">{error}</div>}
     </div>
   );
 }
