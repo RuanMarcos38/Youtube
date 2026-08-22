@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import AdminPanel from "./AdminPanel";
 import Dashboard from "./Dashboard";
-import { authLogin, authLogout, authMe, createTeamUser, listTeam } from "@/lib/api";
+import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam } from "@/lib/api";
 import type { TeamUser, UserProfile } from "@/lib/types";
 
 const CHECKOUT = "https://pay.kiwify.com.br/tBv68U5";
@@ -18,6 +18,12 @@ export default function SaasApp() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [activationEmail, setActivationEmail] = useState("");
+  const [activationOrder, setActivationOrder] = useState("");
+  const [activationPassword, setActivationPassword] = useState("");
+  const [activationError, setActivationError] = useState("");
+  const [activationLoading, setActivationLoading] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [team, setTeam] = useState<TeamUser[]>([]);
@@ -45,6 +51,21 @@ export default function SaasApp() {
       setError(err instanceof Error ? err.message : "Não foi possível acessar sua conta.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function activate(event: FormEvent) {
+    event.preventDefault();
+    setActivationLoading(true);
+    setActivationError("");
+    try {
+      const result = await authActivate(activationEmail, activationOrder, activationPassword);
+      setUser(result);
+      setActivationPassword("");
+    } catch (err) {
+      setActivationError(err instanceof Error ? err.message : "Não foi possível ativar o acesso.");
+    } finally {
+      setActivationLoading(false);
     }
   }
 
@@ -97,7 +118,7 @@ export default function SaasApp() {
             <p className="mt-5 max-w-lg text-sm leading-7 text-white/70">Cada usuário possui login individual, jobs, cortes e conexão própria com o YouTube. Um perfil não acessa nem publica no canal de outro perfil.</p>
             <div className="mt-8 grid gap-3 text-sm font-bold text-white/85">
               <div>✓ Acesso liberado após pagamento aprovado</div>
-              <div>✓ PIX liberado assim que a Kiwify confirmar a baixa</div>
+              <div>✓ PIX liberado assim que a confirmação de pagamento chegar</div>
               <div>✓ Isolamento de jobs, cortes e arquivos</div>
               <div>✓ OAuth do YouTube separado por perfil</div>
             </div>
@@ -115,7 +136,23 @@ export default function SaasApp() {
               {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{error}</div>}
               <button disabled={loading} className="w-full rounded-xl bg-[#111815] px-5 py-3.5 text-sm font-black text-white disabled:opacity-50">{loading ? "Aguarde..." : "Entrar no ShortsFlow"}</button>
             </form>
-            <div className="mt-6 text-center"><a className="inline-flex rounded-xl bg-[#b8f238] px-6 py-3 text-sm font-black text-[#111815]" href={CHECKOUT} target="_blank" rel="noreferrer">Assine já</a></div>
+
+            <div className="mt-6 grid gap-2 sm:grid-cols-2">
+              <a className="rounded-xl bg-[#b8f238] px-5 py-3 text-center text-sm font-black text-[#111815]" href={CHECKOUT} target="_blank" rel="noreferrer">Assine já</a>
+              <button onClick={() => setActivationOpen((value) => !value)} className="rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-black">Já pagou? Ativar acesso</button>
+            </div>
+
+            {activationOpen && <form onSubmit={activate} className="mt-5 rounded-2xl border border-[#ddecbb] bg-[#f8faf5] p-5">
+              <h3 className="font-black">Ativar compra aprovada</h3>
+              <p className="mt-1 text-xs leading-5 text-[#6e7971]">Depois que o pagamento aparecer como aprovado, informe o mesmo e-mail da compra e o código do pedido recebido no comprovante/e-mail da compra. Você escolhe sua própria senha.</p>
+              <div className="mt-4 grid gap-3">
+                <input required type="email" placeholder="E-mail usado na compra" value={activationEmail} onChange={(e) => setActivationEmail(e.target.value)} className="rounded-xl border border-black/10 bg-white px-3 py-3 text-sm outline-none focus:border-[#91c51d]" />
+                <input required placeholder="Código do pedido" value={activationOrder} onChange={(e) => setActivationOrder(e.target.value)} className="rounded-xl border border-black/10 bg-white px-3 py-3 text-sm outline-none focus:border-[#91c51d]" />
+                <input required minLength={8} type="password" placeholder="Crie sua senha (mín. 8 caracteres)" value={activationPassword} onChange={(e) => setActivationPassword(e.target.value)} className="rounded-xl border border-black/10 bg-white px-3 py-3 text-sm outline-none focus:border-[#91c51d]" />
+                {activationError && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{activationError}</div>}
+                <button disabled={activationLoading} className="rounded-xl bg-[#0d241d] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{activationLoading ? "Validando pagamento..." : "Ativar meu acesso"}</button>
+              </div>
+            </form>}
           </section>
         </div>
       </main>
@@ -153,7 +190,7 @@ export default function SaasApp() {
 
       {!billingActive ? (
         <main className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8">
-          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Pagamentos via PIX normalmente são aprovados pela Kiwify em poucos minutos. Assim que o webhook confirmar <strong>paid</strong>, a conta fica ativa.</p><a href={user.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
+          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o webhook de pagamento confirmar <strong>paid</strong>, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
         </main>
       ) : <Dashboard />}
     </div>
