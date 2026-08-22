@@ -100,7 +100,12 @@ def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
     return _copy_cookie_text(text, target)
 
 
-def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -> dict:
+def _base_options(
+    output_dir: Path,
+    progress_hook: ProgressHook | None = None,
+    *,
+    include_cookies: bool = True,
+) -> dict:
     YTDLP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     options: dict = {
         "outtmpl": str(output_dir / "source.%(ext)s"),
@@ -133,9 +138,11 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -
 
         options["progress_hooks"] = [safe_progress_hook]
 
-    cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
-    if cookie_file:
-        options["cookiefile"] = cookie_file
+    if include_cookies:
+        cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
+        if cookie_file:
+            options["cookiefile"] = cookie_file
+
     proxy_url = effective_proxy_url()
     if proxy_url:
         options["proxy"] = proxy_url
@@ -156,6 +163,52 @@ def _pot_provider_args(player_client: str = "mweb") -> dict | None:
             },
         }
     }
+
+
+def _client_args(player_client: str) -> dict:
+    return {
+        "extractor_args": {
+            "youtube": {
+                "player_client": [player_client],
+            }
+        }
+    }
+
+
+def _strategy_variants() -> list[tuple[str, dict, bool]]:
+    """Return download strategies in order.
+
+    Rejected account cookies can make every authenticated player client return
+    LOGIN_REQUIRED. For public videos, retrying without those cookies can still
+    work (especially with PO-token/client rotation). This also prevents one
+    stale browser session from taking the whole SaaS offline.
+    """
+    strategies: list[tuple[str, dict, bool]] = []
+
+    if download_auth_configured():
+        authenticated = [
+            ("auth:default", {}),
+            ("auth:web_safari+pot", _pot_provider_args("web_safari")),
+            ("auth:mweb+pot", _pot_provider_args("mweb")),
+            ("auth:web_embedded", _client_args("web_embedded")),
+        ]
+        for name, variant in authenticated:
+            if variant is not None:
+                strategies.append((name, variant, True))
+
+    guest = [
+        ("guest:android_vr", _client_args("android_vr")),
+        ("guest:tv_downgraded", _client_args("tv_downgraded")),
+        ("guest:web_embedded", _client_args("web_embedded")),
+        ("guest:mweb+pot", _pot_provider_args("mweb")),
+        ("guest:web_safari+pot", _pot_provider_args("web_safari")),
+        ("guest:default", {}),
+    ]
+    for name, variant in guest:
+        if variant is not None:
+            strategies.append((name, variant, False))
+
+    return strategies
 
 
 def _find_downloaded_file(output_dir: Path, info: dict) -> Path | None:
@@ -185,74 +238,54 @@ def _compact_error(message: str) -> str:
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
-    """Validate that the current VPS egress can access YouTube before a real job is queued."""
+    """Validate the current VPS egress using the same fallback chain as real jobs."""
+    errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
         output_dir = Path(tmp)
-        options = _base_options(output_dir)
-        options.update({
-            "skip_download": True,
-            "simulate": True,
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-        })
-        try:
-            with YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-            return {
-                "ok": True,
-                "video_id": (info or {}).get("id"),
-                "title": (info or {}).get("title"),
-                "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
-            }
-        except Exception as exc:
-            message = _compact_error(str(exc))
-            bot_blocked = "Sign in to confirm" in message or "not a bot" in message.lower()
-            return {
-                "ok": False,
-                "error": message,
-                "bot_blocked": bot_blocked,
-                "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
-            }
+        for strategy, variant, include_cookies in _strategy_variants():
+            options = _base_options(output_dir, include_cookies=include_cookies)
+            options.update({
+                "skip_download": True,
+                "simulate": True,
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": False,
+            })
+            options.update(variant)
+            try:
+                with YoutubeDL(options) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                return {
+                    "ok": True,
+                    "video_id": (info or {}).get("id"),
+                    "title": (info or {}).get("title"),
+                    "mode": "cookies+proxy" if include_cookies and download_proxy_configured() else "cookies" if include_cookies else "proxy" if download_proxy_configured() else "guest-fallback",
+                    "strategy": strategy,
+                }
+            except Exception as exc:
+                message = _compact_error(str(exc))
+                if message and message not in errors:
+                    errors.append(message)
+
+    message = errors[-1] if errors else "Sessão de download indisponível."
+    bot_blocked = any("Sign in to confirm" in item or "not a bot" in item.lower() for item in errors)
+    return {
+        "ok": False,
+        "error": message,
+        "bot_blocked": bot_blocked,
+        "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
+        "attempts": len(_strategy_variants()),
+    }
 
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if download_auth_configured():
-        option_variants = [
-            {},
-            _pot_provider_args("web_safari"),
-            _pot_provider_args("mweb"),
-            {
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["web_embedded"],
-                    }
-                }
-            },
-        ]
-    else:
-        option_variants = [
-            _pot_provider_args("mweb"),
-            _pot_provider_args("web_safari"),
-            {
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["web_embedded"],
-                    }
-                }
-            },
-            {},
-        ]
-
     errors: list[str] = []
     attempts = 0
-    for variant in option_variants:
-        if variant is None:
-            continue
+    for strategy, variant, include_cookies in _strategy_variants():
         attempts += 1
-        options = _base_options(output_dir, progress_hook=progress_hook)
+        options = _base_options(output_dir, progress_hook=progress_hook, include_cookies=include_cookies)
         options.update(variant)
         try:
             video_path = _download_with_options(url, output_dir, options)
@@ -260,26 +293,29 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
                 return video_path
         except Exception as exc:
             error = _compact_error(str(exc))
-            if error and error not in errors:
-                errors.append(error)
+            if error:
+                tagged = f"{strategy}: {error}"
+                if tagged not in errors:
+                    errors.append(tagged)
 
     if errors:
         bot_blocked = any(
             "Sign in to confirm you're not a bot" in error
             or "Sign in to confirm you’re not a bot" in error
+            or "not a bot" in error.lower()
             for error in errors
         )
         if bot_blocked:
             if not download_access_configured():
                 raise DownloadError(
-                    "O YouTube bloqueou a sessão da VPS na etapa de download. "
-                    "Configure YTDLP_COOKIES_B64 com uma sessão autorizada ou uma saída de proxy no painel administrador."
+                    "O YouTube bloqueou a saída da VPS e os fallbacks públicos/PO Token também foram recusados. "
+                    "Configure YTDLP_COOKIES_B64 com uma sessão autorizada ou YTDLP_PROXY_URL no painel Administrador > Download YouTube."
                 )
             raise DownloadError(
-                "O YouTube recusou a sessão de download da VPS. "
-                "Abra o painel Administrador > Download YouTube e renove os cookies do Firefox. "
-                "Se a sessão voltar a expirar rapidamente, configure um proxy residencial/estático no mesmo painel; "
-                "cookies obtidos em uma rede e usados por um IP de datacenter podem ser recusados pelo YouTube."
+                "O YouTube recusou os cookies e também os fallbacks públicos desta VPS. "
+                "Isso normalmente acontece quando os cookies foram obtidos em outro IP e o datacenter foi desafiado. "
+                "Renove a sessão e teste pelo painel Administrador > Download YouTube; se a recusa persistir, "
+                "use um proxy residencial/estático para manter o mesmo IP da sessão."
             )
 
         raise DownloadError(
