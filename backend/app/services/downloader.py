@@ -220,7 +220,7 @@ def _strategy_variants() -> list[tuple[str, dict, bool]]:
         ("guest:android_vr", _client_args("android_vr", skip_webpage=True)),
         ("guest:ios", _client_args("ios", skip_webpage=True)),
         ("guest:web_embedded", _client_args("web_embedded", skip_webpage=True)),
-        ("guest:chrome:mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
+        ("guest:chrome+mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
         ("guest:chrome:web_safari", _impersonated_client_args("web_safari", skip_webpage=True)),
     ]
     if socket.has_ipv6:
