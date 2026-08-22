@@ -1,17 +1,21 @@
 from app.services import youtube_oauth
 
 
-def test_oauth_state_roundtrip_includes_code_verifier(tmp_path, monkeypatch):
-    monkeypatch.setattr(youtube_oauth, "STATE_FILE", tmp_path / "oauth_state.json")
+def test_oauth_env_client_config(monkeypatch):
+    monkeypatch.setattr(youtube_oauth.settings, "google_oauth_client_id", "client-id")
+    monkeypatch.setattr(youtube_oauth.settings, "google_oauth_client_secret", "client-secret")
+    monkeypatch.setattr(youtube_oauth.settings, "google_oauth_project_id", "project")
+    monkeypatch.setattr(youtube_oauth.settings, "youtube_oauth_redirect_uri", "https://example.com/api/youtube/oauth/callback")
 
-    youtube_oauth._write_oauth_state("state-123", "verifier-456")
+    config = youtube_oauth._env_client_config()
 
-    assert youtube_oauth._read_oauth_state() == ("state-123", "verifier-456")
+    assert config is not None
+    assert config["web"]["client_id"] == "client-id"
+    assert config["web"]["client_secret"] == "client-secret"
+    assert config["web"]["redirect_uris"] == ["https://example.com/api/youtube/oauth/callback"]
 
 
-def test_oauth_state_legacy_plain_text(tmp_path, monkeypatch):
-    state_file = tmp_path / "oauth_state.txt"
-    state_file.write_text("legacy-state", encoding="utf-8")
-    monkeypatch.setattr(youtube_oauth, "STATE_FILE", state_file)
-
-    assert youtube_oauth._read_oauth_state() == ("legacy-state", None)
+def test_oauth_configured_from_environment(monkeypatch):
+    monkeypatch.setattr(youtube_oauth.settings, "google_oauth_client_id", "client-id")
+    monkeypatch.setattr(youtube_oauth.settings, "google_oauth_client_secret", "client-secret")
+    assert youtube_oauth.oauth_configured() is True
