@@ -221,6 +221,9 @@ def apply_kiwify_webhook(db: Session, payload: dict) -> dict:
                 row = db.query(ProvisionedCredential).filter(ProvisionedCredential.order_id == order_id).first()
                 if row:
                     row.delivered = True
+                    # Once delivered, retain only the password hash on User. The
+                    # plaintext bootstrap password must not remain in the database.
+                    row.temporary_password = ""
                     db.commit()
 
     elif cancelled and user:
