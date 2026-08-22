@@ -7,6 +7,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
+$ScriptVersion = "2.1"
 $TempDir = Join-Path $env:TEMP "ShortsFlow-YouTube-Auth"
 $TempCookies = Join-Path $TempDir "youtube-cookies.txt"
 $FirefoxProfiles = Join-Path $env:APPDATA "Mozilla\Firefox\Profiles"
@@ -31,7 +32,79 @@ function Get-YtDlpPath {
         }
     }
 
-    throw "yt-dlp nao foi encontrado. Instale com: winget install yt-dlp.yt-dlp"
+    Write-Step "Instalando yt-dlp automaticamente"
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        throw "yt-dlp nao foi encontrado e o winget nao esta disponivel."
+    }
+    & winget install --id yt-dlp.yt-dlp -e --accept-package-agreements --accept-source-agreements --silent | Out-Host
+
+    $cmd = Get-Command yt-dlp -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) {
+        return $cmd.Source
+    }
+
+    if (Test-Path $wingetRoot) {
+        $candidate = Get-ChildItem -Path $wingetRoot -Filter "yt-dlp.exe" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ($candidate) {
+            return $candidate
+        }
+    }
+
+    throw "O yt-dlp foi instalado, mas nao foi localizado. Feche e abra o PowerShell e execute novamente."
+}
+
+function Get-FirefoxPath {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles "Mozilla Firefox\firefox.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Mozilla Firefox\firefox.exe"),
+        (Join-Path $env:LOCALAPPDATA "Mozilla Firefox\firefox.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+
+    if ($candidates) {
+        return [string]$candidates[0]
+    }
+
+    $cmd = Get-Command firefox -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) {
+        return $cmd.Source
+    }
+    return $null
+}
+
+function Ensure-Firefox {
+    $firefox = Get-FirefoxPath
+    if ($firefox) {
+        return $firefox
+    }
+
+    Write-Step "Instalando Firefox automaticamente para evitar o bloqueio DPAPI do Chrome"
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        throw "Firefox nao foi encontrado e o winget nao esta disponivel."
+    }
+
+    & winget install --id Mozilla.Firefox -e --accept-package-agreements --accept-source-agreements --silent | Out-Host
+    Start-Sleep -Seconds 2
+    $firefox = Get-FirefoxPath
+    if (-not $firefox) {
+        throw "Firefox foi solicitado ao winget, mas nao foi localizado. Reinicie o Windows e execute novamente."
+    }
+    return $firefox
+}
+
+function Prepare-FirefoxSession([string]$FirefoxPath) {
+    Write-Step "Abrindo o YouTube no Firefox"
+    Start-Process -FilePath $FirefoxPath -ArgumentList "https://www.youtube.com/" | Out-Null
+    Write-Host "`nIMPORTANTE: o OAuth verde 'YouTube conectado' da plataforma nao e o mesmo que a sessao de download do yt-dlp." -ForegroundColor Yellow
+    Write-Host "No Firefox, confirme que o YouTube mostra sua conta logada." -ForegroundColor White
+    Write-Host "Se pedir login, entre normalmente na sua conta do YouTube." -ForegroundColor White
+    [void](Read-Host "Quando o YouTube estiver LOGADO no Firefox, pressione ENTER aqui")
+
+    Write-Step "Fechando o Firefox para liberar o banco de cookies"
+    Get-Process firefox -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
 }
 
 function Test-NetscapeCookies([string]$Path) {
@@ -85,23 +158,18 @@ function Export-FirefoxCookies([string]$YtDlp) {
         return $null
     }
 
-    if (Get-Process firefox -ErrorAction SilentlyContinue) {
-        Write-Host "O Firefox esta aberto. Feche todas as janelas do Firefox e pressione ENTER." -ForegroundColor Yellow
-        [void](Read-Host)
-    }
-
     New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
     Remove-Item -LiteralPath $TempCookies -Force -ErrorAction SilentlyContinue
 
-    Write-Step "Tentando exportar os cookies pelo Firefox (metodo recomendado pelo yt-dlp no Windows)"
+    Write-Step "Extraindo cookies do Firefox com yt-dlp"
     $output = & $YtDlp --cookies-from-browser firefox --cookies $TempCookies --skip-download --no-warnings --ignore-errors $TestVideo 2>&1 | Out-String
 
     if (Test-NetscapeCookies $TempCookies) {
         return $TempCookies
     }
 
-    if ($output -match "decrypt|DPAPI|cookie") {
-        Write-Host "A exportacao automatica do Firefox nao ficou valida." -ForegroundColor Yellow
+    if ($output) {
+        Write-Host ($output.Trim()) -ForegroundColor DarkGray
     }
     return $null
 }
@@ -118,11 +186,12 @@ function Copy-SecretToClipboard([string]$Value) {
 
 try {
     Clear-Host
-    Write-Host "===============================================" -ForegroundColor DarkCyan
-    Write-Host " ShortsFlow AI - Autenticacao de download YouTube" -ForegroundColor Cyan
-    Write-Host "===============================================" -ForegroundColor DarkCyan
+    Write-Host "======================================================" -ForegroundColor DarkCyan
+    Write-Host " ShortsFlow AI - YouTube Auth v$ScriptVersion" -ForegroundColor Cyan
+    Write-Host " METODO NOVO: FIREFOX / cookies.txt - NAO USA CHROME" -ForegroundColor Green
+    Write-Host "======================================================" -ForegroundColor DarkCyan
     Write-Host "Este utilitario NAO altera senhas, OAuth, Chrome ou outros projetos."
-    Write-Host "Ele somente prepara um cookies.txt autorizado para YTDLP_COOKIES_B64."
+    Write-Host "Ele gera YTDLP_COOKIES_B64 localmente e copia o valor para a area de transferencia."
 
     $ytDlp = Get-YtDlpPath
     Write-Host "yt-dlp: $ytDlp" -ForegroundColor Green
@@ -131,45 +200,29 @@ try {
 
     if ($CookiesFile) {
         $selected = (Resolve-Path -LiteralPath $CookiesFile).Path
-    } elseif ($Modo -eq "Firefox") {
-        $selected = Export-FirefoxCookies $ytDlp
-        if (-not $selected) {
-            throw "Nao foi possivel obter um cookies.txt valido do Firefox. Confirme que voce esta logado no YouTube pelo Firefox."
-        }
     } elseif ($Modo -eq "Arquivo") {
         $selected = Select-CookiesFile
     } else {
+        $firefox = Ensure-Firefox
+        Prepare-FirefoxSession $firefox
         $selected = Export-FirefoxCookies $ytDlp
         if (-not $selected) {
-            Write-Host "`nO Chrome atual usa App-Bound Encryption. O erro 'Failed to decrypt with DPAPI' e conhecido e nao e corrigido fechando o Chrome." -ForegroundColor Yellow
-            Write-Host "Por seguranca, este script NAO desativa protecoes do Chrome e NAO tenta extrair cookies protegidos diretamente." -ForegroundColor Yellow
-            Write-Host "`nNo Chrome, use a extensao recomendada pelo proprio projeto yt-dlp: Get cookies.txt LOCALLY." -ForegroundColor White
-            Write-Host "1. Abra o YouTube e confirme que esta logado." -ForegroundColor White
-            Write-Host "2. Exporte SOMENTE os cookies de youtube.com no formato Netscape cookies.txt." -ForegroundColor White
-            Write-Host "3. Salve como cookies.txt." -ForegroundColor White
-            Write-Host "4. Volte a esta janela e selecione o arquivo." -ForegroundColor White
-            try {
-                Start-Process "https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc"
-                Start-Process "https://www.youtube.com/"
-            } catch {}
-            [void](Read-Host "Pressione ENTER depois de exportar o cookies.txt")
-            $selected = Select-CookiesFile
+            throw "Nao foi possivel obter cookies validos do Firefox. Confirme que o YouTube ficou logado no Firefox e execute novamente."
         }
     }
 
     Write-Step "Validando cookies.txt"
     if (-not (Test-NetscapeCookies $selected)) {
-        throw "O arquivo selecionado nao e um cookies.txt Netscape valido do youtube.com. Exporte novamente os cookies do YouTube."
+        throw "O arquivo selecionado nao e um cookies.txt Netscape valido do youtube.com."
     }
 
     if (-not (Test-LikelyLoggedIn $selected)) {
-        throw "O arquivo parece conter cookies do YouTube, mas nao uma sessao autenticada. Entre no YouTube e exporte novamente."
+        throw "Os cookies existem, mas nao foi detectada uma sessao autenticada do YouTube."
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($selected)
     $base64 = [Convert]::ToBase64String($bytes)
 
-    # Validacao final sem exibir o segredo.
     $roundTrip = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
     if ($roundTrip -notmatch "Cookie File" -or $roundTrip -notmatch "youtube\.com") {
         throw "Falha ao validar o Base64 gerado."
@@ -177,20 +230,24 @@ try {
 
     Copy-SecretToClipboard $base64
 
-    Write-Host "`n[OK] YTDLP_COOKIES_B64 foi gerado e copiado para a area de transferencia." -ForegroundColor Green
-    Write-Host "O valor completo NAO foi exibido na tela para proteger sua sessao." -ForegroundColor Green
-    Write-Host "`nNo EasyPanel, altere SOMENTE o servico r2rmarketingdigital/shortsia:" -ForegroundColor Cyan
-    Write-Host "Ambiente -> YTDLP_COOKIES_B64 -> cole o valor -> Salvar -> Implantar/Force Rebuild" -ForegroundColor White
-    Write-Host "Nao apague nem altere as outras variaveis existentes." -ForegroundColor Yellow
-    Write-Host "`nDepois, valide em:" -ForegroundColor Cyan
+    Write-Host "`n======================================================" -ForegroundColor Green
+    Write-Host " [OK] YTDLP_COOKIES_B64 GERADO COM SUCESSO" -ForegroundColor Green
+    Write-Host "======================================================" -ForegroundColor Green
+    Write-Host "O codigo ja esta COPIADO na area de transferencia." -ForegroundColor White
+    Write-Host "Tamanho do codigo: $($base64.Length) caracteres." -ForegroundColor DarkGray
+    Write-Host "`nAgora no EasyPanel, altere SOMENTE:" -ForegroundColor Cyan
+    Write-Host "r2rmarketingdigital -> shortsia -> Ambiente -> YTDLP_COOKIES_B64" -ForegroundColor White
+    Write-Host "Cole com CTRL+V, salve e execute Force Rebuild/Implantar." -ForegroundColor White
+    Write-Host "Nao apague nem altere nenhuma outra variavel." -ForegroundColor Yellow
+    Write-Host "`nDepois valide:" -ForegroundColor Cyan
     Write-Host "https://shorts.r2rmarketingdigital.com.br/api/health" -ForegroundColor White
-    Write-Host "O campo youtube_download_mode deve mudar de guest para cookies." -ForegroundColor White
+    Write-Host "Esperado: youtube_download_mode = cookies" -ForegroundColor White
 
     if ($selected -eq $TempCookies) {
         Remove-Item -LiteralPath $TempCookies -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "`nIMPORTANTE: trate cookies.txt e o valor Base64 como senha. Nao envie em chat, GitHub ou print." -ForegroundColor Red
+    Write-Host "`nIMPORTANTE: o codigo da area de transferencia equivale a uma sessao autenticada. Nao envie em chat, GitHub ou print." -ForegroundColor Red
     [void](Read-Host "Pressione ENTER para fechar")
     exit 0
 } catch {
