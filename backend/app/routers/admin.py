@@ -19,6 +19,7 @@ from ..services.runtime_download_auth import (
     set_proxy_override,
     status_payload as download_auth_status,
 )
+from ..services.system_config import get_public_config, update_public_config
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -49,6 +50,19 @@ class KiwifyConnectRequest(BaseModel):
     products: str = Field(default="all", min_length=1, max_length=500)
 
 
+class PublicConfigUpdate(BaseModel):
+    brand_name: str = Field(min_length=2, max_length=120)
+    marketing_badge: str = Field(min_length=2, max_length=120)
+    marketing_headline: str = Field(min_length=5, max_length=240)
+    marketing_description: str = Field(min_length=10, max_length=700)
+    benefits: list[str] = Field(min_length=4, max_length=4)
+    login_title: str = Field(min_length=3, max_length=120)
+    login_description: str = Field(min_length=5, max_length=300)
+    checkout_url: str = Field(min_length=10, max_length=500)
+    upgrade_url: str = Field(min_length=10, max_length=500)
+    base_plan_job_limit: int = Field(ge=1, le=100000)
+
+
 def _month_start() -> datetime:
     now = datetime.now(timezone.utc)
     return datetime(now.year, now.month, 1, tzinfo=timezone.utc)
@@ -73,6 +87,24 @@ def _set_system_setting(db: Session, key: str, value: str, *, secret: bool = Fal
         row.secret = secret
     else:
         db.add(SystemSetting(key=key, value=value, secret=secret))
+
+
+@router.get("/system-config")
+def system_config(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
+    return get_public_config(db)
+
+
+@router.put("/system-config")
+def save_system_config(
+    payload: PublicConfigUpdate,
+    _: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    if not payload.checkout_url.startswith("https://") or not payload.upgrade_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Os links de checkout e upgrade precisam usar HTTPS.")
+    if any(not item.strip() for item in payload.benefits):
+        raise HTTPException(status_code=400, detail="Preencha os quatro benefícios exibidos na página de entrada.")
+    return update_public_config(db, payload.model_dump())
 
 
 @router.get("/dashboard")
@@ -244,10 +276,11 @@ def test_download_auth(_: User = Depends(require_superadmin)):
 def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
     base_product = db.get(SystemSetting, "kiwify_base_product_id")
     upgrade_product = db.get(SystemSetting, "kiwify_upgrade_product_id")
+    public_config = get_public_config(db)
     return {
         "webhook_url": _kiwify_webhook_url(db),
-        "checkout_url": settings.kiwify_checkout_url,
-        "upgrade_url": settings.kiwify_upgrade_url,
+        "checkout_url": public_config["checkout_url"],
+        "upgrade_url": public_config["upgrade_url"],
         "events": [
             "compra_aprovada/order_approved",
             "compra_reembolsada/order_refunded",
