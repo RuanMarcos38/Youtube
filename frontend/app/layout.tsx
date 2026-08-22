@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,6 +12,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="pt-BR">
       <body>
         {children}
+        <YoutubeAccountSwitcher />
         <footer className="border-t border-black/5 bg-white px-6 py-6 text-center text-xs text-[#6d776f]">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-5 gap-y-2">
             <span>ShortsFlow AI • R2R Marketing Digital</span>
