@@ -5,7 +5,7 @@ from ..database import SessionLocal
 from ..models import SystemSetting, Tenant, TenantPlan, User
 
 
-ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v2"
+ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v3"
 
 
 def _ensure_kiwify_webhook_token(db) -> None:
