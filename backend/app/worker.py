@@ -7,6 +7,8 @@ from .database import SessionLocal
 from .models import Clip, Job
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
+from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
+from .services.editor_ai_pro import run_claimed_editor_task
 from .services.pipeline import run_pipeline
 from .services.upload_task import run_upload
 
@@ -39,6 +41,7 @@ def _recover_interrupted() -> None:
         db.commit()
     finally:
         db.close()
+    recover_interrupted_editor_tasks()
 
 
 def _claim_next_job_id() -> int | None:
@@ -101,12 +104,14 @@ def main() -> None:
     active_jobs: dict[Future, int] = {}
     active_upload: Future | None = None
     active_probe: Future | None = None
+    active_editor: Future | None = None
     last_probe_started = 0.0
 
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-upload") as upload_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-probe") as probe_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-editor-ai") as editor_pool,
     ):
         while True:
             _heartbeat()
@@ -126,8 +131,17 @@ def main() -> None:
                     pass
                 active_probe = None
 
+            if active_editor is not None and active_editor.done():
+                try:
+                    active_editor.result()
+                except Exception:
+                    pass
+                active_editor = None
+
             now = time.monotonic()
-            if active_probe is None and (last_probe_started == 0.0 or now - last_probe_started >= DOWNLOAD_PROBE_INTERVAL_SECONDS):
+            if active_probe is None and (
+                last_probe_started == 0.0 or now - last_probe_started >= DOWNLOAD_PROBE_INTERVAL_SECONDS
+            ):
                 last_probe_started = now
                 active_probe = probe_pool.submit(run_and_store_download_probe)
 
@@ -141,6 +155,16 @@ def main() -> None:
                 upload = _claim_next_upload()
                 if upload is not None:
                     active_upload = upload_pool.submit(run_upload, upload[0], upload[1])
+
+            if active_editor is None:
+                editor_task = claim_next_editor_task()
+                if editor_task is not None:
+                    active_editor = editor_pool.submit(
+                        run_claimed_editor_task,
+                        editor_task[0],
+                        editor_task[1],
+                        editor_task[2],
+                    )
 
             time.sleep(max(0.5, settings.worker_poll_seconds))
 
