@@ -3,12 +3,14 @@ import binascii
 import hashlib
 import os
 import shutil
+import socket
 import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+
 from ..config import settings
 from .runtime_download_auth import cookie_override_file, effective_proxy_url
 
@@ -38,9 +40,6 @@ def download_proxy_configured() -> bool:
 
 
 def download_access_configured() -> bool:
-    # PO-token + public clients can work without cookies/proxy. Keep this true
-    # when the embedded provider is configured so health does not incorrectly
-    # report an otherwise healthy installation as incomplete.
     return bool(download_auth_configured() or download_proxy_configured() or settings.ytdlp_pot_provider_url.strip())
 
 
@@ -63,14 +62,12 @@ def _copy_cookie_text(text: str, target: Path) -> str:
 
 def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
     target = runtime_file or COOKIE_RUNTIME_FILE
-
     override = cookie_override_file()
     if override is not None:
         try:
             return _copy_cookie_text(override.read_text(encoding="utf-8"), target)
         except Exception as exc:
             raise DownloadError("O cookie renovado pelo administrador não pôde ser lido.") from exc
-
     configured_file = settings.ytdlp_cookie_file.strip()
     if configured_file:
         path = Path(configured_file)
@@ -80,28 +77,22 @@ def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
             return _copy_cookie_text(path.read_text(encoding="utf-8"), target)
         except Exception as exc:
             raise DownloadError("YTDLP_COOKIE_FILE existe, mas não pôde ser lido.") from exc
-
     encoded = "".join(settings.ytdlp_cookies_b64.split())
     if not encoded:
         return None
-
     try:
         raw = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise DownloadError("YTDLP_COOKIES_B64 não contém um cookies.txt válido em Base64.") from exc
-
     if not raw or len(raw) > 2_000_000:
         raise DownloadError("YTDLP_COOKIES_B64 está vazio ou excede o tamanho permitido.")
-
     try:
         text = raw.decode("utf-8-sig").strip()
     except UnicodeDecodeError as exc:
         raise DownloadError("YTDLP_COOKIES_B64 precisa representar um arquivo cookies.txt UTF-8.") from exc
-
     first_line = text.splitlines()[0] if text else ""
     if "Cookie File" not in first_line and "\t" not in text:
         raise DownloadError("O cookie informado não parece estar no formato Netscape cookies.txt.")
-
     return _copy_cookie_text(text, target)
 
 
@@ -109,9 +100,6 @@ def _runtime_binary(name: str) -> str | None:
     configured = shutil.which(name)
     if configured:
         return configured
-    # Python packages such as `deno` install the executable next to the active
-    # interpreter inside /opt/venv/bin. Supervisor does not always prepend that
-    # directory to PATH, so detect it explicitly.
     candidate = Path(sys.executable).with_name(name)
     if candidate.is_file():
         return str(candidate)
@@ -121,12 +109,7 @@ def _runtime_binary(name: str) -> str | None:
 def js_runtime_status() -> dict[str, str | bool]:
     node_path = settings.ytdlp_node_path.strip() or _runtime_binary("node") or ""
     deno_path = _runtime_binary("deno") or ""
-    return {
-        "node": bool(node_path),
-        "node_path": node_path,
-        "deno": bool(deno_path),
-        "deno_path": deno_path,
-    }
+    return {"node": bool(node_path), "node_path": node_path, "deno": bool(deno_path), "deno_path": deno_path}
 
 
 def _js_runtimes() -> dict:
@@ -139,12 +122,7 @@ def _js_runtimes() -> dict:
     return runtimes
 
 
-def _base_options(
-    output_dir: Path,
-    progress_hook: ProgressHook | None = None,
-    *,
-    include_cookies: bool = True,
-) -> dict:
+def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None, *, include_cookies: bool = True) -> dict:
     YTDLP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     options: dict = {
         "outtmpl": str(output_dir / "source.%(ext)s"),
@@ -155,110 +133,109 @@ def _base_options(
         "no_warnings": False,
         "overwrites": True,
         "restrictfilenames": True,
-        "source_address": "0.0.0.0",
         "socket_timeout": 35,
         "retries": 5,
         "fragment_retries": 5,
         "extractor_retries": 4,
         "file_access_retries": 2,
         "concurrent_fragment_downloads": 2,
+        "sleep_interval_requests": 1,
         "cachedir": str(YTDLP_CACHE_DIR),
         "js_runtimes": _js_runtimes(),
     }
-
     if progress_hook is not None:
         def safe_progress_hook(event: dict) -> None:
             try:
                 progress_hook(event)
             except Exception:
                 pass
-
         options["progress_hooks"] = [safe_progress_hook]
-
     if include_cookies:
         cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
         if cookie_file:
             options["cookiefile"] = cookie_file
-
     proxy_url = effective_proxy_url()
     if proxy_url:
         options["proxy"] = proxy_url
     return options
 
 
-def _pot_provider_args(player_client: str = "mweb") -> dict | None:
+def _pot_provider_args(player_client: str = "mweb", *, skip_webpage: bool = False) -> dict | None:
     if not settings.ytdlp_pot_provider_url:
         return None
-    return {
-        "extractor_args": {
-            "youtube": {
-                "player_client": [player_client],
-                "fetch_pot": ["always"],
-            },
-            "youtubepot-bgutilhttp": {
-                "base_url": [settings.ytdlp_pot_provider_url],
-            },
-        }
-    }
+    youtube_args: dict[str, list[str]] = {"player_client": [player_client], "fetch_pot": ["always"]}
+    if skip_webpage:
+        youtube_args["player_skip"] = ["webpage", "configs"]
+    return {"extractor_args": {"youtube": youtube_args, "youtubepot-bgutilhttp": {"base_url": [settings.ytdlp_pot_provider_url]}}}
 
 
-def _client_args(player_client: str) -> dict:
-    return {
-        "extractor_args": {
-            "youtube": {
-                "player_client": [player_client],
-            }
-        }
-    }
+def _client_args(player_client: str, *, skip_webpage: bool = False) -> dict:
+    youtube_args: dict[str, list[str]] = {"player_client": [player_client]}
+    if skip_webpage:
+        youtube_args["player_skip"] = ["webpage", "configs"]
+    return {"extractor_args": {"youtube": youtube_args}}
 
 
-def _impersonated_client_args(player_client: str) -> dict:
-    variant = _client_args(player_client)
+def _hls_client_args(player_client: str = "web_safari", *, skip_webpage: bool = False) -> dict:
+    variant = _client_args(player_client, skip_webpage=skip_webpage)
+    variant["format"] = "best[protocol*=m3u8][height<=1080]/best[height<=1080]/best"
+    return variant
+
+
+def _impersonated_client_args(player_client: str, *, skip_webpage: bool = False) -> dict:
+    variant = _client_args(player_client, skip_webpage=skip_webpage)
     variant["impersonate"] = "chrome"
     return variant
 
 
+def _ipv6_variant(variant: dict) -> dict:
+    copy = dict(variant)
+    copy["source_address"] = "::"
+    return copy
+
+
 def _strategy_variants() -> list[tuple[str, dict, bool]]:
-    """Return resilient YouTube download strategies in priority order.
-
-    YouTube currently applies separate session-authentication, JS challenge,
-    PO-token and IP-reputation gates. A strategy that works for one video/IP can
-    fail on another, so ShortsFlow rotates official yt-dlp player clients and
-    also retries without browser cookies. This prevents a stale or IP-bound
-    cookie from taking every tenant offline.
-    """
     strategies: list[tuple[str, dict, bool]] = []
-
     if download_auth_configured():
         authenticated = [
+            ("auth:mweb+pot:skip-webpage", _pot_provider_args("mweb", skip_webpage=True)),
             ("auth:mweb+pot", _pot_provider_args("mweb")),
             ("auth:web_safari+pot", _pot_provider_args("web_safari")),
-            ("auth:tv_embedded", _client_args("tv_embedded")),
-            ("auth:web_embedded", _client_args("web_embedded")),
+            ("auth:web_safari:hls", _hls_client_args("web_safari", skip_webpage=True)),
+            ("auth:tv_embedded", _client_args("tv_embedded", skip_webpage=True)),
+            ("auth:web_embedded", _client_args("web_embedded", skip_webpage=True)),
             ("auth:default", {}),
         ]
         for name, variant in authenticated:
             if variant is not None:
                 strategies.append((name, variant, True))
-
-    # Prefer the current yt-dlp recommendation first (mweb + PO token), then
-    # rotate through clients whose GVS path has different PO-token requirements.
     guest = [
+        ("guest:mweb+pot:skip-webpage", _pot_provider_args("mweb", skip_webpage=True)),
         ("guest:mweb+pot", _pot_provider_args("mweb")),
+        ("guest:web_safari:hls:skip-webpage", _hls_client_args("web_safari", skip_webpage=True)),
         ("guest:web_safari+pot", _pot_provider_args("web_safari")),
         ("guest:web_safari", _client_args("web_safari")),
-        ("guest:tv", _client_args("tv")),
-        ("guest:android_vr", _client_args("android_vr")),
-        ("guest:ios", _client_args("ios")),
-        ("guest:web_embedded", _client_args("web_embedded")),
-        ("guest:chrome+mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb"), "impersonate": "chrome"}),
-        ("guest:chrome:web_safari", _impersonated_client_args("web_safari")),
-        ("guest:default", {}),
+        ("guest:tv", _client_args("tv", skip_webpage=True)),
+        ("guest:tv_simply", _client_args("tv_simply", skip_webpage=True)),
+        ("guest:android_vr", _client_args("android_vr", skip_webpage=True)),
+        ("guest:ios", _client_args("ios", skip_webpage=True)),
+        ("guest:web_embedded", _client_args("web_embedded", skip_webpage=True)),
+        ("guest:chrome+mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
+        ("guest:chrome:web_safari", _impersonated_client_args("web_safari", skip_webpage=True)),
     ]
+    if socket.has_ipv6:
+        ipv6_candidates = [
+            ("guest:ipv6:mweb+pot", _pot_provider_args("mweb", skip_webpage=True)),
+            ("guest:ipv6:web_safari:hls", _hls_client_args("web_safari", skip_webpage=True)),
+            ("guest:ipv6:web_safari", _client_args("web_safari", skip_webpage=True)),
+        ]
+        for name, variant in ipv6_candidates:
+            if variant is not None:
+                guest.insert(0, (name, _ipv6_variant(variant)))
+    guest.append(("guest:default", {}))
     for name, variant in guest:
         if variant is not None:
             strategies.append((name, variant, False))
-
     return strategies
 
 
@@ -283,24 +260,15 @@ def _download_with_options(url: str, output_dir: Path, options: dict) -> Path | 
 
 def _compact_error(message: str) -> str:
     text = " ".join(str(message).split())
-    if len(text) > 500:
-        return text[:497] + "..."
-    return text
+    return text[:497] + "..." if len(text) > 500 else text
 
 
 def _is_bot_block(message: str) -> bool:
     lowered = message.lower()
-    return (
-        "sign in to confirm" in lowered
-        or "not a bot" in lowered
-        or "login_required" in lowered
-        or "http error 403" in lowered
-        or "forbidden" in lowered
-    )
+    return "sign in to confirm" in lowered or "not a bot" in lowered or "login_required" in lowered or "http error 403" in lowered or "forbidden" in lowered
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
-    """Validate the current VPS egress using the same fallback chain as real jobs."""
     errors: list[str] = []
     attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
@@ -308,13 +276,7 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
         for strategy, variant, include_cookies in _strategy_variants():
             attempted.append(strategy)
             options = _base_options(output_dir, include_cookies=include_cookies)
-            options.update({
-                "skip_download": True,
-                "simulate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": False,
-            })
+            options.update({"skip_download": True, "simulate": True, "quiet": True, "no_warnings": True, "extract_flat": False})
             options.update(variant)
             try:
                 with YoutubeDL(options) as ydl:
@@ -333,13 +295,11 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                 message = _compact_error(str(exc))
                 if message and message not in errors:
                     errors.append(message)
-
     message = errors[-1] if errors else "Sessão de download indisponível."
-    bot_blocked = any(_is_bot_block(item) for item in errors)
     return {
         "ok": False,
         "error": message,
-        "bot_blocked": bot_blocked,
+        "bot_blocked": any(_is_bot_block(item) for item in errors),
         "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
         "attempts": len(attempted),
         "strategies": attempted,
@@ -350,7 +310,6 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-
     errors: list[str] = []
     attempts = 0
     for strategy, variant, include_cookies in _strategy_variants():
@@ -367,25 +326,12 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
                 tagged = f"{strategy}: {error}"
                 if tagged not in errors:
                     errors.append(tagged)
-
     if errors:
-        bot_blocked = any(_is_bot_block(error) for error in errors)
-        if bot_blocked:
+        if any(_is_bot_block(error) for error in errors):
             if not download_proxy_configured():
                 raise DownloadError(
-                    "O YouTube recusou todas as estratégias automáticas desta VPS, inclusive PO Token, clientes alternativos, "
-                    "Deno/Node e tentativas sem cookies. Isso indica bloqueio/reputação do IP de saída do datacenter. "
-                    "Para tornar o download estável em produção, configure no Administrador > Download YouTube um proxy "
-                    "residencial/estático com IP persistente. Os cookies são opcionais quando o vídeo público funciona sem login, "
-                    "mas se forem usados devem ser renovados através do mesmo IP do proxy."
+                    "O YouTube recusou todas as rotas automáticas desta VPS, incluindo PO Token, clientes alternativos, web_safari/HLS, tentativas sem webpage, Deno/Node e saída IPv6 quando disponível. Isso caracteriza bloqueio de reputação da rede de saída. Para estabilidade de produção, configure no Administrador > Download YouTube um proxy residencial/estático com IP persistente. Se usar cookies, renove-os através do mesmo IP do proxy."
                 )
-            raise DownloadError(
-                "O YouTube recusou o IP/proxy atual mesmo após a cadeia completa de fallbacks. "
-                "Valide a reputação/saída do proxy no Administrador > Download YouTube e mantenha cookies e proxy no mesmo IP."
-            )
-
-        raise DownloadError(
-            f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}"
-        )
-
+            raise DownloadError("O YouTube recusou o IP/proxy atual mesmo após a cadeia completa de fallbacks. Valide a reputação/saída do proxy no Administrador > Download YouTube e mantenha cookies e proxy no mesmo IP.")
+        raise DownloadError(f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}")
     raise DownloadError("yt-dlp terminou sem produzir um arquivo de vídeo")
