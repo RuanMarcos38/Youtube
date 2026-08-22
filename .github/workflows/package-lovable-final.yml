@@ -1,0 +1,115 @@
+name: Package Lovable Final
+
+on:
+  push:
+    branches:
+      - package/lovable-final-20260822
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Build clean Lovable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="dist/ShortsFlow-AI-Lovable-Final"
+          mkdir -p "$ROOT"
+
+          rsync -a ./ "$ROOT/" \
+            --exclude='.git/' \
+            --exclude='dist/' \
+            --exclude='data/' \
+            --exclude='cookies.txt' \
+            --exclude='*.db' \
+            --exclude='.env' \
+            --exclude='.env.local' \
+            --exclude='node_modules/' \
+            --exclude='.next/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc'
+
+          rm -f "$ROOT/.github/workflows/package-lovable-final.yml"
+
+          cat > "$ROOT/PROMPT_FINALIZAR_NO_LOVABLE.md" <<'EOF'
+          # ShortsFlow AI — instrução final para o Lovable
+
+          Importe este projeto completo e use o código existente como fonte de verdade. O objetivo é finalizar e validar o ShortsFlow AI sem reescrever o projeto nem remover recursos já funcionais.
+
+          ## Regras obrigatórias
+
+          - Não apagar, substituir ou expor credenciais existentes.
+          - Não alterar outros projetos do Supabase, Google Cloud, GitHub ou EasyPanel.
+          - Não remover o backend FastAPI, worker, Docker, EasyPanel, testes ou integrações existentes.
+          - Não trocar a arquitetura multi-tenant por um sistema de usuário único.
+          - Não fazer force-push, rebase, amend ou squash destrutivo do histórico conectado.
+          - Não incluir cookies do YouTube, tokens, Client Secrets ou arquivos `.env` reais no código.
+          - Preservar o layout visual atual, fazendo apenas correções necessárias de UX, responsividade e funcionamento.
+
+          ## Estado atual que deve ser preservado
+
+          - SaaS multi-tenant com login individual e isolamento de dados.
+          - Perfis separados, cada um com seu próprio canal do YouTube.
+          - OAuth do YouTube com escolha/troca de Conta Google (`select_account` + consentimento).
+          - Botão para trocar a conta do YouTube mesmo quando já existe canal conectado.
+          - Processamento de vídeo em fila com worker.
+          - Pipeline: download, áudio, transcrição, seleção por IA, render 9:16, legendas, revisão e upload.
+          - Títulos, descrições, copy e tags gerados por IA/SEO.
+          - Checkout Kiwify principal e upgrade ilimitado.
+          - Painel administrativo, usuários, assinantes, limites e planos.
+          - Páginas de Privacidade, Termos e Exclusão de Dados.
+          - Docker/EasyPanel e smoke tests de produção.
+
+          ## Validação final obrigatória
+
+          1. Executar build do frontend sem erros.
+          2. Executar testes do backend sem erros.
+          3. Validar login e sessão multi-tenant.
+          4. Validar que um usuário nunca enxerga jobs, cortes, arquivos ou canal de outro usuário.
+          5. Validar Conectar YouTube e Trocar conta YouTube.
+          6. Garantir que o OAuth sempre permita "Escolher uma conta" / "Usar outra conta".
+          7. Validar criação de 1, 3, 5 e 10 Shorts.
+          8. Validar processamento em tempo real e atualização de status.
+          9. Validar geração automática de título, descrição, tags e metadata SEO antes da publicação.
+          10. Validar aprovação e upload para o canal do usuário correto.
+          11. Validar limites de uso, plano ilimitado e painel administrativo.
+          12. Validar responsividade desktop/mobile e mensagens de erro legíveis.
+          13. Manter compatibilidade com o deploy atual no EasyPanel e domínio `shorts.r2rmarketingdigital.com.br`.
+
+          ## Importante sobre Google OAuth
+
+          Se uma Conta Google externa receber `403 access_denied` informando que o aplicativo está em fase de testes, isso é uma restrição do status de publicação/verificação no Google Auth Platform e não deve ser "corrigido" removendo OAuth, trocando Client ID ou criando bypass. O código deve continuar usando o OAuth oficial e a seleção de conta. A liberação pública depende do app estar em produção/aprovado pelo Google.
+
+          ## Entrega esperada do Lovable
+
+          Entregar o projeto sem erros de build, sem mocks no fluxo principal e sem telas apenas demonstrativas. Corrigir somente falhas reais encontradas. Ao finalizar, gerar um resumo objetivo do que foi testado, o que foi corrigido e o que depende de serviço externo.
+          EOF
+
+          cat > "$ROOT/LEIA-ME-PRIMEIRO.txt" <<'EOF'
+          SHORTSFLOW AI — PACOTE COMPLETO PARA LOVABLE
+
+          Este pacote foi gerado da versão atual da branch main após a correção de troca de Conta Google/YouTube.
+
+          1) Importe a pasta/projeto completo no Lovable.
+          2) Abra e use o arquivo PROMPT_FINALIZAR_NO_LOVABLE.md como instrução principal.
+          3) Não envie credenciais reais para o Lovable por arquivo. Configure secrets apenas nos campos próprios da plataforma/ambiente.
+          4) Os arquivos .env.example são modelos; não contêm as credenciais reais de produção.
+          5) Cookies do YouTube, bancos locais e arquivos .env reais foram intencionalmente excluídos deste ZIP.
+          EOF
+
+          cd dist
+          zip -r -q ShortsFlow-AI-Lovable-Final.zip ShortsFlow-AI-Lovable-Final
+
+      - name: Upload complete ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShortsFlow-AI-Lovable-Final
+          path: dist/ShortsFlow-AI-Lovable-Final.zip
+          if-no-files-found: error
+          retention-days: 3
