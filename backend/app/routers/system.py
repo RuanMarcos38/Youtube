@@ -7,6 +7,11 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter
 from ..config import settings
+from ..services.downloader import (
+    download_access_configured,
+    download_auth_configured,
+    download_proxy_configured,
+)
 from ..services.youtube_oauth import get_connection_status
 
 router = APIRouter(tags=["system"])
@@ -36,13 +41,6 @@ def _pot_provider_alive() -> bool:
         return False
 
 
-def _download_auth_configured() -> bool:
-    if settings.ytdlp_cookies_b64.strip():
-        return True
-    configured_file = settings.ytdlp_cookie_file.strip()
-    return bool(configured_file and Path(configured_file).is_file())
-
-
 def _js_runtime_available() -> bool:
     configured = settings.ytdlp_node_path.strip()
     if configured:
@@ -68,9 +66,10 @@ def health():
         "pot_provider_alive": _pot_provider_alive(),
         "ytdlp_js_runtime_available": _js_runtime_available(),
         "ytdlp_ejs_available": _ejs_available(),
-        # These are informational and never expose cookie/proxy values.
-        "youtube_download_auth_configured": _download_auth_configured(),
-        "youtube_download_proxy_configured": bool(settings.ytdlp_proxy_url.strip()),
+        # Informational only; values are never exposed.
+        "youtube_download_auth_configured": download_auth_configured(),
+        "youtube_download_proxy_configured": download_proxy_configured(),
+        "youtube_download_ready": download_access_configured(),
     }
 
     required_runtime = [
@@ -88,6 +87,7 @@ def health():
         checks["youtube_api_configured"],
         checks["google_oauth_configured"],
         checks["youtube_channel_connected"],
+        checks["youtube_download_ready"],
         *required_runtime,
     ]
 
