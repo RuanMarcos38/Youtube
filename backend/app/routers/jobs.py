@@ -6,6 +6,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import Job, SourceVideo, User
 from ..schemas import JobCreate, JobOut
+from ..services.billing import can_use_tool
 from ..services.downloader import download_access_configured
 from ..services.serializers import job_to_dict
 
@@ -20,10 +21,14 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
             detail="Confirme que você possui direitos, licença ou autorização para reutilizar o conteúdo.",
         )
 
+    allowed, reason = can_use_tool(db, user)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+
     if settings.environment.strip().lower() == "production" and not download_access_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="O download do YouTube ainda não está autenticado no servidor.",
+            detail="O download do YouTube ainda não está autenticado no servidor. O administrador precisa renovar a sessão de download.",
         )
 
     source = (
