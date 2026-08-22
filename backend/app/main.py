@@ -15,7 +15,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="2.3.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.3.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -38,4 +38,4 @@ app.include_router(youtube_auth.router, prefix=settings.api_prefix)
 
 @app.get("/")
 def root():
-    return {"message": settings.app_name, "version": "2.3.0", "docs": "/docs"}
+    return {"message": settings.app_name, "version": "2.3.1", "docs": "/docs"}

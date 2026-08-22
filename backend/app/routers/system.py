@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from ..config import settings
 from ..database import SessionLocal
 from ..models import YouTubeConnection
+from ..services.download_probe import read_download_probe
 from ..services.downloader import (
     download_access_configured,
     download_auth_configured,
@@ -62,6 +63,7 @@ def health():
     connected_profiles = _connected_profiles()
     runtimes = js_runtime_status()
     js_runtime_available = bool(runtimes.get("node") or runtimes.get("deno"))
+    download_probe = read_download_probe()
     checks = {
         "openai_configured": bool(settings.openai_api_key),
         "youtube_api_configured": bool(settings.youtube_api_key),
@@ -78,6 +80,7 @@ def health():
         "youtube_download_auth_configured": download_auth_configured(),
         "youtube_download_proxy_configured": download_proxy_configured(),
         "youtube_download_ready": download_access_configured(),
+        "youtube_download_probe_ok": None if download_probe is None else bool(download_probe.get("ok")),
     }
 
     required_runtime = [
@@ -98,6 +101,13 @@ def health():
         *required_runtime,
     ]
 
+    # Once the continuous real-world probe has produced a result, include it in
+    # the health state. Before the first probe finishes, deployment health is
+    # based on process/configuration checks so startup is not falsely marked bad.
+    operational_runtime = list(required_runtime)
+    if download_probe is not None:
+        operational_runtime.append(bool(download_probe.get("ok")))
+
     auth_mode = "guest+pot"
     if checks["youtube_download_auth_configured"] and checks["youtube_download_proxy_configured"]:
         auth_mode = "cookies+proxy"
@@ -107,12 +117,13 @@ def health():
         auth_mode = "proxy+fallbacks"
 
     return {
-        "status": "ok" if all(required_runtime) else "degraded",
+        "status": "ok" if all(operational_runtime) else "degraded",
         "configuration_complete": all(required_configuration),
         "app": settings.app_name,
-        "version": "2.3.0",
+        "version": "2.3.1",
         "checks": checks,
         "youtube_download_mode": auth_mode,
+        "youtube_download_probe": download_probe,
         "ytdlp_js_runtimes": {"node": bool(runtimes.get("node")), "deno": bool(runtimes.get("deno"))},
         "oauth_redirect_uri": settings.youtube_oauth_redirect_uri,
     }

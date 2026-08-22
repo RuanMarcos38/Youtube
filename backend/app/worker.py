@@ -6,6 +6,7 @@ from .config import settings
 from .database import SessionLocal
 from .models import Clip, Job
 from .services.database_bootstrap import initialize_database
+from .services.download_probe import run_and_store_download_probe
 from .services.pipeline import run_pipeline
 from .services.upload_task import run_upload
 
@@ -18,6 +19,7 @@ PROCESSING_STATES = {
     "rendering",
 }
 HEARTBEAT_FILE = settings.data_path / "worker_heartbeat.txt"
+DOWNLOAD_PROBE_INTERVAL_SECONDS = 15 * 60
 
 
 def _heartbeat() -> None:
@@ -98,11 +100,14 @@ def main() -> None:
     concurrency = max(1, min(int(settings.worker_concurrency), 4))
     active_jobs: dict[Future, int] = {}
     active_upload: Future | None = None
+    active_probe: Future | None = None
+    last_probe_started = 0.0
 
-    with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool, ThreadPoolExecutor(
-        max_workers=1,
-        thread_name_prefix="shortsflow-upload",
-    ) as upload_pool:
+    with (
+        ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-upload") as upload_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-probe") as probe_pool,
+    ):
         while True:
             _heartbeat()
             _collect_finished_jobs(active_jobs)
@@ -113,6 +118,18 @@ def main() -> None:
                 except Exception:
                     pass
                 active_upload = None
+
+            if active_probe is not None and active_probe.done():
+                try:
+                    active_probe.result()
+                except Exception:
+                    pass
+                active_probe = None
+
+            now = time.monotonic()
+            if active_probe is None and (last_probe_started == 0.0 or now - last_probe_started >= DOWNLOAD_PROBE_INTERVAL_SECONDS):
+                last_probe_started = now
+                active_probe = probe_pool.submit(run_and_store_download_probe)
 
             while len(active_jobs) < concurrency:
                 job_id = _claim_next_job_id()
