@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from ..config import settings
 from ..database import get_db
 from ..models import Job, SourceVideo
 from ..schemas import JobCreate, JobOut
+from ..services.downloader import download_access_configured
 from ..services.serializers import job_to_dict
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -14,6 +16,17 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=400,
             detail="Confirm that you own the source or have permission/license to download, edit and republish it.",
+        )
+
+    # The production VPS is challenged by YouTube when it runs as a guest.
+    # Reject before creating a doomed job instead of showing 100%/Falhou later.
+    if settings.environment.strip().lower() == "production" and not download_access_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "O download do YouTube ainda não está autenticado no servidor. "
+                "Configure YTDLP_COOKIES_B64 ou YTDLP_PROXY_URL no serviço shortsia e faça o deploy."
+            ),
         )
 
     source = db.query(SourceVideo).filter(SourceVideo.youtube_id == payload.video_id).first()
