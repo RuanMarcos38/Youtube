@@ -7,7 +7,8 @@ from .database import SessionLocal
 from .models import Clip, Job
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
-from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks, run_claimed_editor_task
+from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
+from .services.editor_ai_pro import run_claimed_editor_task
 from .services.pipeline import run_pipeline
 from .services.upload_task import run_upload
 
