@@ -7,7 +7,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "2.1"
+$ScriptVersion = "2.2"
 $TempDir = Join-Path $env:TEMP "ShortsFlow-YouTube-Auth"
 $TempCookies = Join-Path $TempDir "youtube-cookies.txt"
 $FirefoxProfiles = Join-Path $env:APPDATA "Mozilla\Firefox\Profiles"
@@ -33,16 +33,12 @@ function Get-YtDlpPath {
     }
 
     Write-Step "Instalando yt-dlp automaticamente"
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $winget) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw "yt-dlp nao foi encontrado e o winget nao esta disponivel."
     }
-    & winget install --id yt-dlp.yt-dlp -e --accept-package-agreements --accept-source-agreements --silent | Out-Host
 
-    $cmd = Get-Command yt-dlp -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source) {
-        return $cmd.Source
-    }
+    & winget install --id yt-dlp.yt-dlp -e --accept-package-agreements --accept-source-agreements --silent | Out-Host
+    Start-Sleep -Seconds 2
 
     if (Test-Path $wingetRoot) {
         $candidate = Get-ChildItem -Path $wingetRoot -Filter "yt-dlp.exe" -Recurse -ErrorAction SilentlyContinue |
@@ -52,51 +48,91 @@ function Get-YtDlpPath {
         }
     }
 
-    throw "O yt-dlp foi instalado, mas nao foi localizado. Feche e abra o PowerShell e execute novamente."
-}
-
-function Get-FirefoxPath {
-    $candidates = @(
-        (Join-Path $env:ProgramFiles "Mozilla Firefox\firefox.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Mozilla Firefox\firefox.exe"),
-        (Join-Path $env:LOCALAPPDATA "Mozilla Firefox\firefox.exe")
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-
-    if ($candidates) {
-        return [string]$candidates[0]
-    }
-
-    $cmd = Get-Command firefox -ErrorAction SilentlyContinue
+    $cmd = Get-Command yt-dlp -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source) {
         return $cmd.Source
     }
+
+    throw "O yt-dlp foi instalado, mas nao foi localizado. Execute novamente o arquivo automatico."
+}
+
+function Get-FirefoxPath {
+    # IMPORTANT: return the full string directly. Using $candidates[0] when
+    # PowerShell collapses a one-item array to a string returns only the first
+    # character (for example 'C'), which caused Start-Process to fail.
+    $roots = @()
+    if ($env:ProgramFiles) { $roots += $env:ProgramFiles }
+    if (${env:ProgramFiles(x86)}) { $roots += ${env:ProgramFiles(x86)} }
+    if ($env:LOCALAPPDATA) { $roots += $env:LOCALAPPDATA }
+
+    foreach ($root in $roots) {
+        $candidate = Join-Path $root "Mozilla Firefox\firefox.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    $registryKeys = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe"
+    )
+    foreach ($key in $registryKeys) {
+        try {
+            $item = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+            $path = [string]$item.'(default)'
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+                return (Resolve-Path -LiteralPath $path).Path
+            }
+        } catch {}
+    }
+
+    $cmd = Get-Command firefox.exe -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source -PathType Leaf)) {
+        return $cmd.Source
+    }
+
     return $null
 }
 
 function Ensure-Firefox {
     $firefox = Get-FirefoxPath
     if ($firefox) {
+        Write-Host "Firefox localizado: $firefox" -ForegroundColor Green
         return $firefox
     }
 
     Write-Step "Instalando Firefox automaticamente para evitar o bloqueio DPAPI do Chrome"
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $winget) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw "Firefox nao foi encontrado e o winget nao esta disponivel."
     }
 
     & winget install --id Mozilla.Firefox -e --accept-package-agreements --accept-source-agreements --silent | Out-Host
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 3
+
     $firefox = Get-FirefoxPath
     if (-not $firefox) {
-        throw "Firefox foi solicitado ao winget, mas nao foi localizado. Reinicie o Windows e execute novamente."
+        throw "Firefox foi instalado, mas o executavel nao foi localizado. Execute novamente o arquivo automatico."
     }
+
+    Write-Host "Firefox localizado apos instalacao: $firefox" -ForegroundColor Green
     return $firefox
 }
 
 function Prepare-FirefoxSession([string]$FirefoxPath) {
+    if (-not $FirefoxPath -or -not (Test-Path -LiteralPath $FirefoxPath -PathType Leaf)) {
+        throw "Caminho do Firefox invalido: $FirefoxPath"
+    }
+
     Write-Step "Abrindo o YouTube no Firefox"
-    Start-Process -FilePath $FirefoxPath -ArgumentList "https://www.youtube.com/" | Out-Null
+    Write-Host "Executavel: $FirefoxPath" -ForegroundColor DarkGray
+
+    try {
+        Start-Process -FilePath $FirefoxPath -ArgumentList @("-new-window", "https://www.youtube.com/") -ErrorAction Stop | Out-Null
+    } catch {
+        throw "Nao foi possivel abrir o Firefox em '$FirefoxPath': $($_.Exception.Message)"
+    }
+
     Write-Host "`nIMPORTANTE: o OAuth verde 'YouTube conectado' da plataforma nao e o mesmo que a sessao de download do yt-dlp." -ForegroundColor Yellow
     Write-Host "No Firefox, confirme que o YouTube mostra sua conta logada." -ForegroundColor White
     Write-Host "Se pedir login, entre normalmente na sua conta do YouTube." -ForegroundColor White
@@ -108,24 +144,13 @@ function Prepare-FirefoxSession([string]$FirefoxPath) {
 }
 
 function Test-NetscapeCookies([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return $false
-    }
-
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     $info = Get-Item -LiteralPath $Path
-    if ($info.Length -lt 20 -or $info.Length -gt 2000000) {
-        return $false
-    }
+    if ($info.Length -lt 20 -or $info.Length -gt 2000000) { return $false }
 
     $lines = Get-Content -LiteralPath $Path -ErrorAction Stop
-    if (-not $lines -or $lines.Count -lt 2) {
-        return $false
-    }
-
-    $first = [string]$lines[0]
-    if ($first -notmatch "Cookie File") {
-        return $false
-    }
+    if (-not $lines -or $lines.Count -lt 2) { return $false }
+    if ([string]$lines[0] -notmatch "Cookie File") { return $false }
 
     $youtubeLine = $lines | Where-Object { $_ -match "youtube\.com" -and $_ -match "`t" } | Select-Object -First 1
     return [bool]$youtubeLine
@@ -149,12 +174,12 @@ function Select-CookiesFile {
 }
 
 function Export-FirefoxCookies([string]$YtDlp) {
-    if (-not (Test-Path $FirefoxProfiles)) {
+    if (-not (Test-Path -LiteralPath $FirefoxProfiles)) {
         return $null
     }
 
-    $profiles = Get-ChildItem -LiteralPath $FirefoxProfiles -Directory -ErrorAction SilentlyContinue
-    if (-not $profiles) {
+    $profiles = @(Get-ChildItem -LiteralPath $FirefoxProfiles -Directory -ErrorAction SilentlyContinue)
+    if ($profiles.Count -eq 0) {
         return $null
     }
 
@@ -177,7 +202,6 @@ function Export-FirefoxCookies([string]$YtDlp) {
 function Copy-SecretToClipboard([string]$Value) {
     try {
         Set-Clipboard -Value $Value -ErrorAction Stop
-        return
     } catch {
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.Clipboard]::SetText($Value)
@@ -188,7 +212,7 @@ try {
     Clear-Host
     Write-Host "======================================================" -ForegroundColor DarkCyan
     Write-Host " ShortsFlow AI - YouTube Auth v$ScriptVersion" -ForegroundColor Cyan
-    Write-Host " METODO NOVO: FIREFOX / cookies.txt - NAO USA CHROME" -ForegroundColor Green
+    Write-Host " FIREFOX / cookies.txt - NAO USA CHROME" -ForegroundColor Green
     Write-Host "======================================================" -ForegroundColor DarkCyan
     Write-Host "Este utilitario NAO altera senhas, OAuth, Chrome ou outros projetos."
     Write-Host "Ele gera YTDLP_COOKIES_B64 localmente e copia o valor para a area de transferencia."
@@ -197,7 +221,6 @@ try {
     Write-Host "yt-dlp: $ytDlp" -ForegroundColor Green
 
     $selected = $null
-
     if ($CookiesFile) {
         $selected = (Resolve-Path -LiteralPath $CookiesFile).Path
     } elseif ($Modo -eq "Arquivo") {
@@ -215,14 +238,12 @@ try {
     if (-not (Test-NetscapeCookies $selected)) {
         throw "O arquivo selecionado nao e um cookies.txt Netscape valido do youtube.com."
     }
-
     if (-not (Test-LikelyLoggedIn $selected)) {
         throw "Os cookies existem, mas nao foi detectada uma sessao autenticada do YouTube."
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($selected)
     $base64 = [Convert]::ToBase64String($bytes)
-
     $roundTrip = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64))
     if ($roundTrip -notmatch "Cookie File" -or $roundTrip -notmatch "youtube\.com") {
         throw "Falha ao validar o Base64 gerado."
@@ -235,19 +256,15 @@ try {
     Write-Host "======================================================" -ForegroundColor Green
     Write-Host "O codigo ja esta COPIADO na area de transferencia." -ForegroundColor White
     Write-Host "Tamanho do codigo: $($base64.Length) caracteres." -ForegroundColor DarkGray
-    Write-Host "`nAgora no EasyPanel, altere SOMENTE:" -ForegroundColor Cyan
-    Write-Host "r2rmarketingdigital -> shortsia -> Ambiente -> YTDLP_COOKIES_B64" -ForegroundColor White
+    Write-Host "`nEasyPanel: r2rmarketingdigital -> shortsia -> Ambiente -> YTDLP_COOKIES_B64" -ForegroundColor Cyan
     Write-Host "Cole com CTRL+V, salve e execute Force Rebuild/Implantar." -ForegroundColor White
     Write-Host "Nao apague nem altere nenhuma outra variavel." -ForegroundColor Yellow
-    Write-Host "`nDepois valide:" -ForegroundColor Cyan
-    Write-Host "https://shorts.r2rmarketingdigital.com.br/api/health" -ForegroundColor White
-    Write-Host "Esperado: youtube_download_mode = cookies" -ForegroundColor White
 
     if ($selected -eq $TempCookies) {
         Remove-Item -LiteralPath $TempCookies -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "`nIMPORTANTE: o codigo da area de transferencia equivale a uma sessao autenticada. Nao envie em chat, GitHub ou print." -ForegroundColor Red
+    Write-Host "`nIMPORTANTE: nao envie o codigo Base64 em chat, GitHub ou print." -ForegroundColor Red
     [void](Read-Host "Pressione ENTER para fechar")
     exit 0
 } catch {
