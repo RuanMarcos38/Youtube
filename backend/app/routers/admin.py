@@ -11,6 +11,7 @@ from ..database import get_db
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User, YouTubeConnection
 from ..services.billing import ensure_plan, jobs_used
 from ..services.downloader import validate_download_session
+from ..services.kiwify_api import KiwifyApiError, register_webhook
 from ..services.runtime_download_auth import (
     clear_cookie_override,
     clear_proxy_override,
@@ -41,9 +42,28 @@ class CredentialDelivered(BaseModel):
     delivered: bool = True
 
 
+class KiwifyConnectRequest(BaseModel):
+    client_id: str = Field(min_length=5, max_length=200)
+    client_secret: str = Field(min_length=8, max_length=500)
+    account_id: str = Field(min_length=3, max_length=200)
+    products: str = Field(default="all", min_length=1, max_length=500)
+
+
 def _month_start() -> datetime:
     now = datetime.now(timezone.utc)
     return datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+
+def _kiwify_token(db: Session) -> str:
+    row = db.get(SystemSetting, "kiwify_webhook_token")
+    if row and row.value.strip():
+        return row.value.strip()
+    return settings.kiwify_webhook_token.strip()
+
+
+def _kiwify_webhook_url(db: Session) -> str:
+    token = _kiwify_token(db)
+    return f"{settings.frontend_url.rstrip('/')}/api/billing/kiwify-webhook?token={token}" if token else ""
 
 
 @router.get("/dashboard")
@@ -53,15 +73,16 @@ def dashboard(_: User = Depends(require_superadmin), db: Session = Depends(get_d
         .filter(TenantPlan.billing_status.in_(["active", "paid", "trial"]), TenantPlan.plan_code != "admin")
         .all()
     )
+    paid_event_filter = PaymentEvent.event_type.in_(["order_approved", "compra_aprovada", "subscription_renewed"])
     monthly_revenue = (
         db.query(func.coalesce(func.sum(PaymentEvent.amount_cents), 0))
-        .filter(PaymentEvent.order_status == "paid", PaymentEvent.created_at >= _month_start())
+        .filter(paid_event_filter, PaymentEvent.created_at >= _month_start())
         .scalar()
         or 0
     )
     total_revenue = (
         db.query(func.coalesce(func.sum(PaymentEvent.amount_cents), 0))
-        .filter(PaymentEvent.order_status == "paid")
+        .filter(paid_event_filter)
         .scalar()
         or 0
     )
@@ -201,8 +222,9 @@ def test_download_auth(_: User = Depends(require_superadmin)):
         message = str(result.get("error") or "A sessão de download foi recusada.")
         if result.get("bot_blocked"):
             message = (
-                "O YouTube ainda está recusando a sessão nesta VPS. "
-                "Renove os cookies pelo Firefox e, se persistir, configure um proxy residencial/estático. "
+                "O YouTube ainda está recusando esta saída da VPS. "
+                "O teste já tentou cookies e fallbacks públicos sem cookies. "
+                "Renove a sessão e, se persistir, configure um proxy residencial/estático. "
                 f"Detalhe: {message}"
             )
         raise HTTPException(status_code=503, detail=message)
@@ -211,11 +233,8 @@ def test_download_auth(_: User = Depends(require_superadmin)):
 
 @router.get("/kiwify")
 def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
-    row = db.get(SystemSetting, "kiwify_webhook_token")
-    token = row.value.strip() if row else ""
-    webhook_url = f"{settings.frontend_url.rstrip('/')}/api/billing/kiwify-webhook?token={token}" if token else ""
     return {
-        "webhook_url": webhook_url,
+        "webhook_url": _kiwify_webhook_url(db),
         "checkout_url": settings.kiwify_checkout_url,
         "upgrade_url": settings.kiwify_upgrade_url,
         "events": [
@@ -227,3 +246,26 @@ def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends
             "subscription_renewed",
         ],
     }
+
+
+@router.post("/kiwify/register")
+def register_kiwify_webhook(
+    payload: KiwifyConnectRequest,
+    _: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    token = _kiwify_token(db)
+    webhook_url = _kiwify_webhook_url(db)
+    if not token or not webhook_url:
+        raise HTTPException(status_code=503, detail="Token interno do webhook Kiwify ainda não foi inicializado.")
+    try:
+        return register_webhook(
+            client_id=payload.client_id,
+            client_secret=payload.client_secret,
+            account_id=payload.account_id,
+            webhook_url=webhook_url,
+            webhook_token=token,
+            products=payload.products,
+        )
+    except KiwifyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
