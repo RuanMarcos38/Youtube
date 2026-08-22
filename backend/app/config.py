@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
 
+    database_url: str = ""
     sqlite_path: str = "data/app.db"
     data_dir: str = "data"
 
@@ -73,6 +74,17 @@ class Settings(BaseSettings):
     def sqlite_file(self) -> Path:
         path = Path(self.sqlite_path)
         return path if path.is_absolute() else self.backend_dir / path
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        value = self.database_url.strip()
+        if value:
+            if value.startswith("postgres://"):
+                return "postgresql+psycopg://" + value[len("postgres://"):]
+            if value.startswith("postgresql://") and "+psycopg" not in value:
+                return "postgresql+psycopg://" + value[len("postgresql://"):]
+            return value
+        return f"sqlite:///{self.sqlite_file.as_posix()}"
 
     @property
     def oauth_secrets_path(self) -> Path:
