@@ -3,8 +3,10 @@ from __future__ import annotations
 import httpx
 
 
-OAUTH_URL = "https://public-api.kiwify.com/v1/oauth/token"
-WEBHOOKS_URL = "https://public-api.kiwify.com/v1/webhooks"
+API_BASE = "https://public-api.kiwify.com/v1"
+OAUTH_URL = f"{API_BASE}/oauth/token"
+WEBHOOKS_URL = f"{API_BASE}/webhooks"
+PRODUCTS_URL = f"{API_BASE}/products"
 DEFAULT_TRIGGERS = [
     "compra_aprovada",
     "compra_reembolsada",
@@ -32,6 +34,54 @@ def _safe_error(response: httpx.Response, fallback: str) -> str:
     return fallback
 
 
+def _resolve_checkout_products(
+    client: httpx.Client,
+    headers: dict,
+    *,
+    base_checkout_code: str,
+    upgrade_checkout_code: str,
+) -> dict[str, str]:
+    """Best-effort mapping from Kiwify checkout-link IDs to product IDs."""
+    wanted = {base_checkout_code.strip(), upgrade_checkout_code.strip()} - {""}
+    found = {"base_product_id": "", "upgrade_product_id": ""}
+    if not wanted:
+        return found
+
+    listing = client.get(PRODUCTS_URL, headers=headers, params={"page_size": "100", "page_number": "1"})
+    if not listing.is_success:
+        return found
+    payload = listing.json()
+    rows = payload.get("data", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        return found
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        product_id = str(row.get("id") or "").strip()
+        if not product_id:
+            continue
+        detail = client.get(f"{PRODUCTS_URL}/{product_id}", headers=headers)
+        if not detail.is_success:
+            continue
+        data = detail.json()
+        links = data.get("links", []) if isinstance(data, dict) else []
+        if not isinstance(links, list):
+            continue
+        link_ids = {
+            str(item.get("id") or "").strip()
+            for item in links
+            if isinstance(item, dict) and item.get("id")
+        }
+        if base_checkout_code and base_checkout_code in link_ids:
+            found["base_product_id"] = product_id
+        if upgrade_checkout_code and upgrade_checkout_code in link_ids:
+            found["upgrade_product_id"] = product_id
+        if all(found.values()):
+            break
+    return found
+
+
 def register_webhook(
     *,
     client_id: str,
@@ -40,8 +90,10 @@ def register_webhook(
     webhook_url: str,
     webhook_token: str,
     products: str = "all",
+    base_checkout_code: str = "",
+    upgrade_checkout_code: str = "",
 ) -> dict:
-    """Create or update the ShortsFlow webhook without persisting Kiwify API credentials."""
+    """Create/update the ShortsFlow webhook without persisting Kiwify API credentials."""
     try:
         with httpx.Client(timeout=30.0) as client:
             oauth = client.post(
@@ -62,6 +114,12 @@ def register_webhook(
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+            product_map = _resolve_checkout_products(
+                client,
+                headers,
+                base_checkout_code=base_checkout_code,
+                upgrade_checkout_code=upgrade_checkout_code,
+            )
             body = {
                 "name": "ShortsFlow SaaS",
                 "url": webhook_url,
@@ -100,6 +158,7 @@ def register_webhook(
                 "webhook_id": str(payload.get("id") or existing_id),
                 "webhook_url": webhook_url,
                 "triggers": DEFAULT_TRIGGERS,
+                **product_map,
             }
     except httpx.RequestError as exc:
         raise KiwifyApiError(f"Falha de comunicação com a API da Kiwify: {exc}") from exc
