@@ -81,7 +81,7 @@ jobs:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
           EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
-          curl -fsS --max-time 60 -X POST \
+          curl -fsS --max-time 600 -X POST \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
