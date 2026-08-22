@@ -2,7 +2,7 @@ import secrets
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import SystemSetting, Tenant, TenantPlan, User
+from ..models import ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 
 
 ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v3"
@@ -18,6 +18,23 @@ def _ensure_kiwify_webhook_token(db) -> None:
         row.secret = True
     else:
         db.add(SystemSetting(key="kiwify_webhook_token", value=value, secret=True))
+    db.commit()
+
+
+def _scrub_delivered_credentials(db) -> None:
+    """Remove obsolete plaintext bootstrap passwords without changing user passwords."""
+    rows = (
+        db.query(ProvisionedCredential)
+        .filter(
+            ProvisionedCredential.delivered.is_(True),
+            ProvisionedCredential.temporary_password != "",
+        )
+        .all()
+    )
+    if not rows:
+        return
+    for row in rows:
+        row.temporary_password = ""
     db.commit()
 
 
@@ -42,6 +59,7 @@ def ensure_superadmin() -> None:
         # bootstrap. Kiwify remains operable even when no admin credential is
         # injected at startup.
         _ensure_kiwify_webhook_token(db)
+        _scrub_delivered_credentials(db)
 
         email = settings.admin_bootstrap_email.strip().lower()
         password_hash = settings.admin_bootstrap_password_hash.strip()
