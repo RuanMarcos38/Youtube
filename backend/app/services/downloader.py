@@ -1,12 +1,7 @@
-import json
 from pathlib import Path
-from urllib.parse import urljoin
-from urllib.request import Request, urlopen
 
 from yt_dlp import YoutubeDL
 from ..config import settings
-
-VISITOR_DATA_FILE = settings.data_path / "youtube_visitor_data.txt"
 
 
 class DownloadError(RuntimeError):
@@ -23,54 +18,28 @@ def _base_options(output_dir: Path) -> dict:
         "no_warnings": False,
         "overwrites": True,
         "restrictfilenames": True,
+        "source_address": "0.0.0.0",
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
     }
     if settings.ytdlp_cookie_file:
         options["cookiefile"] = settings.ytdlp_cookie_file
     return options
 
 
-def _provider_visitor_data() -> str | None:
+def _pot_provider_args(player_client: str = "mweb") -> dict | None:
     if not settings.ytdlp_pot_provider_url:
         return None
-    if VISITOR_DATA_FILE.exists():
-        cached = VISITOR_DATA_FILE.read_text(encoding="utf-8").strip()
-        if cached:
-            return cached
-
-    request = Request(
-        urljoin(settings.ytdlp_pot_provider_url.rstrip("/") + "/", "get_pot"),
-        data=b"{}",
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-
-    content_binding = str(payload.get("contentBinding") or "").strip()
-    if content_binding:
-        VISITOR_DATA_FILE.write_text(content_binding, encoding="utf-8")
-        return content_binding
-    return None
-
-
-def _pot_provider_args() -> dict | None:
-    if not settings.ytdlp_pot_provider_url:
-        return None
-    youtube_args = {
-        "player_client": ["mweb"],
-        "player_skip": ["webpage", "configs"],
-    }
-    try:
-        visitor_data = _provider_visitor_data()
-    except Exception:
-        visitor_data = None
-    if visitor_data:
-        youtube_args["visitor_data"] = [visitor_data]
     return {
         "extractor_args": {
-            "youtube": youtube_args,
-            "youtubetab": {"skip": ["webpage"]},
-            "youtubepot-bgutilhttp": {"base_url": [settings.ytdlp_pot_provider_url]},
+            "youtube": {
+                "player_client": [player_client],
+                "fetch_pot": ["always"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": [settings.ytdlp_pot_provider_url],
+            },
         }
     }
 
@@ -94,31 +63,60 @@ def _download_with_options(url: str, output_dir: Path, options: dict) -> Path | 
     return _find_downloaded_file(output_dir, info)
 
 
+def _compact_error(message: str) -> str:
+    text = " ".join(str(message).split())
+    if len(text) > 500:
+        return text[:497] + "..."
+    return text
+
+
 def download_video(url: str, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Keep each YouTube client isolated. Mixing clients in one extraction can
+    # produce a PO token for one client and a media URL belonging to another.
     option_variants = [
-        _pot_provider_args(),
-        {"extractor_args": {"youtube": {"player_client": ["web_embedded"], "player_skip": ["webpage", "configs"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["tv", "web_safari"]}}},
+        _pot_provider_args("mweb"),
+        _pot_provider_args("web_safari"),
+        {
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web_embedded"],
+                }
+            }
+        },
         {},
     ]
+
     errors: list[str] = []
-    try:
-        for variant in option_variants:
-            if variant is None:
-                continue
-            options = _base_options(output_dir)
-            options.update(variant)
-            try:
-                video_path = _download_with_options(url, output_dir, options)
-                if video_path:
-                    return video_path
-            except Exception as exc:
-                errors.append(str(exc))
-    except Exception as exc:
-        raise DownloadError(f"yt-dlp failed: {exc}") from exc
+    for variant in option_variants:
+        if variant is None:
+            continue
+        options = _base_options(output_dir)
+        options.update(variant)
+        try:
+            video_path = _download_with_options(url, output_dir, options)
+            if video_path:
+                return video_path
+        except Exception as exc:
+            error = _compact_error(str(exc))
+            if error and error not in errors:
+                errors.append(error)
 
     if errors:
-        raise DownloadError(f"yt-dlp failed after {len(errors)} attempts: {' | '.join(errors)}")
+        bot_blocked = any(
+            "Sign in to confirm you're not a bot" in error
+            or "Sign in to confirm you’re not a bot" in error
+            for error in errors
+        )
+        suffix = (
+            " The VPS IP is still being challenged by YouTube even after a fresh PO Token. "
+            "If this persists, configure an authorized YouTube cookie file or a clean egress proxy."
+            if bot_blocked
+            else ""
+        )
+        raise DownloadError(
+            f"yt-dlp failed after {len(errors)} strategies: {' | '.join(errors)}{suffix}"
+        )
 
     raise DownloadError("yt-dlp finished without producing a video file")
