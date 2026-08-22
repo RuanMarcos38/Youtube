@@ -234,10 +234,12 @@ def auto_edit(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
     try:
-        queued = queue_auto_edit(user.id, project_id, payload.preset, _now())
-        queued["edit_options"] = _normalize_edit_options(payload)
-        if queued["edit_options"]["music_mode"] == "custom" and not queued.get("custom_music_filename"):
+        current = read_project(user.id, project_id)
+        edit_options = _normalize_edit_options(payload)
+        if edit_options["music_mode"] == "custom" and not current.get("custom_music_filename"):
             raise HTTPException(status_code=409, detail="Selecione e envie uma música antes de iniciar a edição com música própria.")
+        queued = queue_auto_edit(user.id, project_id, payload.preset, _now())
+        queued["edit_options"] = edit_options
         save_project(user.id, project_id, queued)
         return queued
     except FileNotFoundError as exc:
