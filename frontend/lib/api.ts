@@ -2,6 +2,35 @@ import type { Clip, Job, TrendingVideo } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+function apiErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const entry = item as { msg?: unknown; loc?: unknown };
+        const msg = typeof entry.msg === "string" ? entry.msg : "";
+        const loc = Array.isArray(entry.loc)
+          ? entry.loc.filter((part) => part !== "body").map(String).join(".")
+          : "";
+        if (!msg) return null;
+        return loc ? `${loc}: ${msg}` : msg;
+      })
+      .filter((value): value is string => Boolean(value));
+    if (messages.length) return messages.join(" | ");
+  }
+
+  try {
+    return JSON.stringify(detail ?? body);
+  } catch {
+    return fallback;
+  }
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -12,10 +41,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
+    const fallback = `${response.status} ${response.statusText}`;
+    let message = fallback;
     try {
-      const body = await response.json();
-      message = body.detail || message;
+      const body: unknown = await response.json();
+      message = apiErrorMessage(body, fallback);
     } catch {}
     throw new Error(message);
   }
