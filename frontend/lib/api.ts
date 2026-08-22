@@ -7,6 +7,7 @@ import type {
   Job,
   KiwifyAdminSettings,
   ProvisionedCredential,
+  PublicConfig,
   TeamUser,
   TrendingVideo,
   UserProfile,
@@ -76,6 +77,7 @@ export const listTeam = () => api<TeamUser[]>("/api/auth/team");
 export const createTeamUser = (name: string, email: string, password: string, role = "member") =>
   api<TeamUser>("/api/auth/team", { method: "POST", body: JSON.stringify({ name, email, password, role }) });
 
+export const publicConfig = () => api<PublicConfig>("/api/billing/public");
 export const billingMe = () => api<BillingStatus>("/api/billing/me");
 
 export const adminMetrics = () => api<AdminMetrics>("/api/admin/dashboard");
@@ -84,6 +86,9 @@ export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/p
 export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
 export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string; strategy?: string }>("/api/admin/download-auth/test", { method: "POST" });
 export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
+export const adminSystemConfig = () => api<PublicConfig>("/api/admin/system-config");
+export const adminUpdateSystemConfig = (payload: PublicConfig) =>
+  api<PublicConfig>("/api/admin/system-config", { method: "PUT", body: JSON.stringify(payload) });
 export const adminRegisterKiwify = (payload: { client_id: string; client_secret: string; account_id: string; products?: string }) =>
   api<{ ok: boolean; action: string; webhook_id: string; webhook_url: string; triggers: string[] }>("/api/admin/kiwify/register", {
     method: "POST",
