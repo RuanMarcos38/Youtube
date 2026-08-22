@@ -8,6 +8,7 @@ from ..auth import hash_password, normalize_email
 from ..config import settings
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 from .email_service import send_access_credentials
+from .system_config import get_base_plan_job_limit
 
 
 ACTIVE_BILLING = {"active", "paid", "trial"}
@@ -23,7 +24,7 @@ def ensure_plan(db: Session, tenant_id: int) -> TenantPlan:
         tenant_id=tenant_id,
         plan_code="starter",
         billing_status=status,
-        monthly_job_limit=max(1, settings.base_plan_job_limit),
+        monthly_job_limit=get_base_plan_job_limit(db),
         unlimited=False,
     )
     db.add(plan)
@@ -211,7 +212,7 @@ def apply_kiwify_webhook(db: Session, payload: dict) -> dict:
             plan.unlimited = True
         elif not plan.unlimited:
             plan.plan_code = "starter"
-            plan.monthly_job_limit = max(1, settings.base_plan_job_limit)
+            plan.monthly_job_limit = get_base_plan_job_limit(db)
         db.commit()
 
         if temporary_password:
