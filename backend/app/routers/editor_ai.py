@@ -43,7 +43,13 @@ class TimelineUpdateRequest(BaseModel):
 
 
 @router.get("/presets")
-def presets(user: User = Depends(get_current_user)):
+def presets():
+    """Return static editor presets without requiring a DB/auth round-trip.
+
+    Presets contain no user data and are needed while the editor UI boots. Keeping
+    this endpoint independent prevents a temporary session/database issue from
+    breaking the entire editor with a generic HTTP 500 before upload starts.
+    """
     return [
         {
             "id": key,
