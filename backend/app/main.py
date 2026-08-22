@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
-from .routers import admin, auth, billing, clips, diagnostics, jobs, media, system, videos, youtube_auth
+from .routers import admin, auth, billing, clips, diagnostics, editor_ai, jobs, media, system, videos, youtube_auth
 from .services.bootstrap import ensure_superadmin
 from .services.database_bootstrap import initialize_database
 
@@ -15,7 +15,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="2.3.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -32,10 +32,11 @@ app.include_router(diagnostics.router, prefix=settings.api_prefix)
 app.include_router(videos.router, prefix=settings.api_prefix)
 app.include_router(jobs.router, prefix=settings.api_prefix)
 app.include_router(clips.router, prefix=settings.api_prefix)
+app.include_router(editor_ai.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
 app.include_router(youtube_auth.router, prefix=settings.api_prefix)
 
 
 @app.get("/")
 def root():
-    return {"message": settings.app_name, "version": "2.3.1", "docs": "/docs"}
+    return {"message": settings.app_name, "version": "2.4.0", "docs": "/docs"}
