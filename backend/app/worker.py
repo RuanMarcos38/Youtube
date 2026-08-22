@@ -3,8 +3,9 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from .config import settings
-from .database import Base, SessionLocal, engine
+from .database import SessionLocal
 from .models import Clip, Job
+from .services.database_bootstrap import initialize_database
 from .services.pipeline import run_pipeline
 from .services.upload_task import run_upload
 
@@ -45,8 +46,6 @@ def _claim_next_job_id() -> int | None:
         job = db.query(Job).filter(Job.status == "queued").order_by(Job.id.asc()).first()
         if not job:
             return None
-        # Reuse an existing frontend status while claiming, so the UI shows
-        # "Preparando" instead of an unknown internal status.
         job.status = "checking_ffmpeg"
         job.progress = max(1, job.progress or 0)
         job.error = None
@@ -92,17 +91,14 @@ def _collect_finished_jobs(active: dict[Future, int]) -> None:
 
 
 def main() -> None:
-    Base.metadata.create_all(bind=engine)
     settings.data_path.mkdir(parents=True, exist_ok=True)
+    initialize_database()
     _recover_interrupted()
 
     concurrency = max(1, min(int(settings.worker_concurrency), 4))
     active_jobs: dict[Future, int] = {}
     active_upload: Future | None = None
 
-    # The dispatcher stays alive while heavy pipeline work runs in background
-    # threads. This keeps /api/health alive and prevents a single long download
-    # from freezing every subsequent video in the queue.
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool, ThreadPoolExecutor(
         max_workers=1,
         thread_name_prefix="shortsflow-upload",
