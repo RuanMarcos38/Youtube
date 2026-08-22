@@ -2,6 +2,7 @@ import base64
 import binascii
 import hashlib
 import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from .runtime_download_auth import cookie_override_file, effective_proxy_url
 COOKIE_RUNTIME_FILE = Path("/tmp/shortsflow-youtube-cookies.txt")
 YTDLP_CACHE_DIR = Path("/tmp/shortsflow-yt-dlp-cache")
 ProgressHook = Callable[[dict], None]
+TEST_VIDEO_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 
 class DownloadError(RuntimeError):
@@ -182,6 +184,38 @@ def _compact_error(message: str) -> str:
     return text
 
 
+def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
+    """Validate that the current VPS egress can access YouTube before a real job is queued."""
+    with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
+        output_dir = Path(tmp)
+        options = _base_options(output_dir)
+        options.update({
+            "skip_download": True,
+            "simulate": True,
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+        })
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+            return {
+                "ok": True,
+                "video_id": (info or {}).get("id"),
+                "title": (info or {}).get("title"),
+                "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
+            }
+        except Exception as exc:
+            message = _compact_error(str(exc))
+            bot_blocked = "Sign in to confirm" in message or "not a bot" in message.lower()
+            return {
+                "ok": False,
+                "error": message,
+                "bot_blocked": bot_blocked,
+                "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
+            }
+
+
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +273,7 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
             if not download_access_configured():
                 raise DownloadError(
                     "O YouTube bloqueou a sessão da VPS na etapa de download. "
-                    "Configure uma sessão autorizada ou uma saída de proxy no painel administrador."
+                    "Configure YTDLP_COOKIES_B64 com uma sessão autorizada ou uma saída de proxy no painel administrador."
                 )
             raise DownloadError(
                 "O YouTube recusou a sessão de download da VPS. "
