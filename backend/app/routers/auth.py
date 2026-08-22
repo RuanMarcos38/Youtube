@@ -6,11 +6,13 @@ from ..config import settings
 from ..database import get_db
 from ..models import Tenant, User, YouTubeConnection
 from ..schemas import LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
+from ..services.billing import plan_payload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_payload(user: User) -> dict:
+def _user_payload(user: User, db: Session) -> dict:
+    plan = plan_payload(db, user.tenant_id)
     return {
         "id": user.id,
         "tenant_id": user.tenant_id,
@@ -18,8 +20,14 @@ def _user_payload(user: User) -> dict:
         "display_name": user.display_name,
         "role": user.role,
         "active": user.active,
-        "billing_status": user.tenant.billing_status if user.tenant else "pending",
+        "billing_status": plan["billing_status"],
         "checkout_url": settings.kiwify_checkout_url,
+        "upgrade_url": settings.kiwify_upgrade_url,
+        "plan_code": plan["plan_code"],
+        "monthly_job_limit": plan["monthly_job_limit"],
+        "unlimited": plan["unlimited"],
+        "jobs_used": plan["jobs_used"],
+        "jobs_remaining": plan["jobs_remaining"],
     }
 
 
@@ -65,7 +73,7 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
     token, _ = create_session(db, user)
     _set_session_cookie(response, token)
-    return _user_payload(user)
+    return _user_payload(user, db)
 
 
 @router.post("/login", response_model=UserOut)
@@ -80,7 +88,7 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     token, _ = create_session(db, user)
     _set_session_cookie(response, token)
     db.refresh(user, attribute_names=["tenant"])
-    return _user_payload(user)
+    return _user_payload(user, db)
 
 
 @router.post("/logout", status_code=204)
@@ -91,8 +99,8 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return _user_payload(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _user_payload(user, db)
 
 
 @router.get("/team", response_model=list[TeamUserOut])
