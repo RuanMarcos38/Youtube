@@ -135,5 +135,5 @@ export const listClips = () => api<Clip[]>("/api/clips");
 export const approveClip = (id: number) => api<Clip>(`/api/clips/${id}/approve`, { method: "POST" });
 export const uploadClip = (id: number, privacyStatus: string) =>
   api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
-export const youtubeStatus = () => api<{ connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
+export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");
