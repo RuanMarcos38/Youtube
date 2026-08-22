@@ -1,0 +1,73 @@
+name: EasyPanel Runtime Diagnostics
+
+on:
+  workflow_run:
+    workflows: ["Deploy EasyPanel"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read ShortsFlow runtime logs from EasyPanel
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          set -euo pipefail
+          if [ -z "$EASYPANEL_API_KEY" ]; then
+            echo "EASYPANEL_API_KEY is unavailable."
+            exit 1
+          fi
+          node <<'JS'
+          const base = process.env.EASYPANEL_URL.replace(/^http/, 'ws').replace(/\/$/, '');
+          const url = new URL(base + '/ws/serviceLogs');
+          url.searchParams.set('token', process.env.EASYPANEL_API_KEY);
+          url.searchParams.set('service', 'r2rmarketingdigital_shortsia');
+          url.searchParams.set('compose', 'false');
+
+          const ws = new WebSocket(url.toString());
+          let buffer = '';
+          let settled = false;
+          let idle;
+          const finish = (code = 0) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(idle);
+            try { ws.close(); } catch {}
+            const lines = buffer.replace(/\r/g, '').split('\n').filter(Boolean);
+            const needles = ['traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database', 'uvicorn', 'backend', 'supervisor', 'exited', 'fatal', 'no such column', 'locked'];
+            const interesting = lines.filter(line => needles.some(word => line.toLowerCase().includes(word)));
+            console.log('--- FILTERED SHORTSFLOW RUNTIME DIAGNOSTICS ---');
+            console.log((interesting.length ? interesting : lines.slice(-200)).slice(-250).join('\n'));
+            process.exit(code);
+          };
+
+          const hard = setTimeout(() => finish(buffer ? 0 : 1), 10000);
+          ws.addEventListener('message', event => {
+            let text = String(event.data ?? '');
+            try {
+              const parsed = JSON.parse(text);
+              if (typeof parsed?.output === 'string') text = parsed.output;
+            } catch {}
+            buffer += text;
+            clearTimeout(idle);
+            idle = setTimeout(() => { clearTimeout(hard); finish(0); }, 1200);
+          });
+          ws.addEventListener('error', () => {
+            clearTimeout(hard);
+            console.error('Failed to read EasyPanel runtime logs through the serviceLogs channel.');
+            finish(1);
+          });
+          ws.addEventListener('close', () => {
+            clearTimeout(hard);
+            finish(buffer ? 0 : 1);
+          });
+          JS
