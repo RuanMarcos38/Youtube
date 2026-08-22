@@ -1,0 +1,85 @@
+name: Live Production Smoke Temp
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/health -o /tmp/health.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/health.json'))
+          c=d.get('checks') or {}
+          checks={
+            'status': d.get('status')=='ok',
+            'configuration_complete': d.get('configuration_complete') is True,
+            'openai': c.get('openai_configured') is True,
+            'youtube_api': c.get('youtube_api_configured') is True,
+            'google_oauth': c.get('google_oauth_configured') is True,
+            'youtube_download_ready': c.get('youtube_download_ready') is True,
+            'worker_alive': c.get('worker_alive') is True,
+            'ffmpeg': c.get('ffmpeg_available') is True,
+            'ffprobe': c.get('ffprobe_available') is True,
+          }
+          print(json.dumps(checks, ensure_ascii=False, indent=2))
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('FAILED: '+', '.join(bad))
+          PY
+
+      - name: Public SaaS configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/system/public -o /tmp/public.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/public.json'))
+          required=['brand_name','marketing_headline','login_title','checkout_url','base_plan_job_limit']
+          bad=[k for k in required if d.get(k) in ('',None)]
+          print({k:d.get(k) for k in required})
+          if bad: raise SystemExit('Missing: '+', '.join(bad))
+          PY
+
+      - name: Login API must be healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"live-smoke-test@example.com","password":"definitely-invalid"}' \
+            https://shorts.r2rmarketingdigital.com.br/api/auth/login)
+          echo "HTTP=$code"
+          cat /tmp/login.json || true
+          test "$code" = "401"
+
+      - name: Frontend and legal pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in \
+            https://shorts.r2rmarketingdigital.com.br/ \
+            https://shorts.r2rmarketingdigital.com.br/privacidade \
+            https://shorts.r2rmarketingdigital.com.br/termos \
+            https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
+          do
+            echo "Checking $url"
+            curl -fsS -L --max-time 20 -o /dev/null "$url"
+          done
+
+      - name: TLS and redirect sanity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSI --max-time 20 https://shorts.r2rmarketingdigital.com.br/ | tee /tmp/headers.txt
+          grep -Eiq '^HTTP/.* 200|^HTTP/.* 30[1278]' /tmp/headers.txt
