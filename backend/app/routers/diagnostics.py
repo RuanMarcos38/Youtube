@@ -18,9 +18,30 @@ def run_diagnostics(
 ):
     """Run production checks and apply only safe, reversible repairs.
 
-    This endpoint deliberately does not mutate Google OAuth publication status,
-    invent proxy credentials, rotate secrets or requeue jobs automatically.
-    External account verification and IP-reputation failures are reported with
-    the exact remediation required.
+    The diagnostic must always return a structured result to the assistant UI.
+    Long YouTube validation is performed asynchronously by the worker and only
+    its cached probe is read here, preventing proxy timeouts and generic 500s.
     """
-    return run_self_test(db, auto_fix=auto_fix)
+    try:
+        return run_self_test(db, auto_fix=auto_fix)
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "auto_fix": auto_fix,
+            "fixes_applied": [],
+            "checks": [
+                {
+                    "name": "Diagnóstico interno",
+                    "ok": False,
+                    "required": True,
+                    "detail": f"O diagnóstico capturou uma exceção sem derrubar o painel: {exc}",
+                    "recommendation": "Revisar os logs do serviço shortsia. Nenhuma credencial foi alterada.",
+                }
+            ],
+            "download": {"ok": False, "mode": "unknown", "attempts": 0, "error": "Probe indisponível nesta execução."},
+            "summary": "O assistente encontrou uma inconsistência interna, mas o endpoint permaneceu operacional.",
+        }

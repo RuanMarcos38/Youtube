@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -20,6 +21,21 @@ except Exception:  # pragma: no cover - safe runtime fallback
     cv2 = None
 
 
+DEFAULT_EDIT_OPTIONS: dict[str, Any] = {
+    "captions_enabled": True,
+    "caption_style": "auto",
+    "music_mode": "auto",
+    "music_mood": "auto",
+    "music_volume": 0.18,
+    "edit_intensity": "high",
+    "auto_reframe": True,
+    "hook_variants": True,
+}
+
+MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+MAX_MUSIC_BYTES = 50 * 1024 * 1024
+
+
 class CreativeFinishPlan(BaseModel):
     mood: str = "energetic"
     hook_variants: list[str] = Field(default_factory=list, max_length=3)
@@ -27,10 +43,10 @@ class CreativeFinishPlan(BaseModel):
 
 
 MOOD_AUDIO = {
-    "energetic": {"bed_hz": 116.0, "pulse_hz": 232.0, "accent_hz": 520.0},
-    "confident": {"bed_hz": 98.0, "pulse_hz": 196.0, "accent_hz": 440.0},
-    "elegant": {"bed_hz": 82.4, "pulse_hz": 164.8, "accent_hz": 392.0},
-    "natural": {"bed_hz": 73.4, "pulse_hz": 146.8, "accent_hz": 349.2},
+    "energetic": {"bed_hz": 116.0, "pulse_hz": 232.0, "accent_hz": 520.0, "bpm": 120.0},
+    "confident": {"bed_hz": 98.0, "pulse_hz": 196.0, "accent_hz": 440.0, "bpm": 108.0},
+    "elegant": {"bed_hz": 82.4, "pulse_hz": 164.8, "accent_hz": 392.0, "bpm": 92.0},
+    "natural": {"bed_hz": 73.4, "pulse_hz": 146.8, "accent_hz": 349.2, "bpm": 100.0},
 }
 
 
@@ -47,6 +63,27 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 def _safe_text(value: str, limit: int = 76) -> str:
     cleaned = re.sub(r"\s+", " ", value or "").strip()
     return cleaned[:limit].rstrip(" ,.;:-")
+
+
+def _normalized_options(project: dict[str, Any]) -> dict[str, Any]:
+    options = dict(DEFAULT_EDIT_OPTIONS)
+    options.update(project.get("edit_options") or {})
+    if options.get("caption_style") not in {"auto", "impact", "ugc", "cinematic"}:
+        options["caption_style"] = "auto"
+    if options.get("music_mode") not in {"auto", "none", "custom"}:
+        options["music_mode"] = "auto"
+    if options.get("music_mood") not in {"auto", *MOOD_AUDIO.keys()}:
+        options["music_mood"] = "auto"
+    if options.get("edit_intensity") not in {"balanced", "high", "maximum"}:
+        options["edit_intensity"] = "high"
+    try:
+        options["music_volume"] = max(0.0, min(0.45, float(options.get("music_volume", 0.18))))
+    except (TypeError, ValueError):
+        options["music_volume"] = 0.18
+    options["captions_enabled"] = bool(options.get("captions_enabled", True))
+    options["auto_reframe"] = bool(options.get("auto_reframe", True))
+    options["hook_variants"] = bool(options.get("hook_variants", True))
+    return options
 
 
 def _load_transcript(root: Path) -> list[dict[str, Any]]:
@@ -71,7 +108,7 @@ def _fallback_hooks(project: dict[str, Any], timeline: dict[str, Any]) -> list[s
     candidates = [
         first_line or f"Olha isso antes de escolher {source}",
         f"O detalhe que muda tudo em {source}",
-        f"Veja por que isso chama atenção em segundos",
+        "Veja por que isso chama atenção em segundos",
     ]
     result: list[str] = []
     for item in candidates:
@@ -81,11 +118,9 @@ def _fallback_hooks(project: dict[str, Any], timeline: dict[str, Any]) -> list[s
     return result[:3]
 
 
-def _creative_finish_plan(
-    project: dict[str, Any], transcript: list[dict[str, Any]], timeline: dict[str, Any]
-) -> CreativeFinishPlan:
+def _creative_finish_plan(project: dict[str, Any], transcript: list[dict[str, Any]], timeline: dict[str, Any]) -> CreativeFinishPlan:
     fallback = CreativeFinishPlan(
-        mood="energetic" if str(project.get("preset")) in {"tiktok_shop_sales", "fast_retention"} else "natural",
+        mood="energetic" if str(project.get("preset")) in {"tiktok_shop_sales", "fast_retention"} else "elegant" if str(project.get("preset")) == "cinematic_product" else "natural",
         hook_variants=_fallback_hooks(project, timeline),
         broll_concepts=list((project.get("analysis") or {}).get("keywords") or [])[:4],
     )
@@ -102,16 +137,13 @@ def _creative_finish_plan(
 
     client = OpenAI(api_key=settings.openai_api_key)
     system = (
-        "Você é diretor criativo sênior de anúncios verticais para TikTok Shop, Reels e YouTube Shorts. "
-        "Crie exatamente 3 ganchos curtos para os primeiros 3 segundos, sem inventar preço, prova, benefício ou promessa. "
+        "Você é diretor criativo e editor sênior de anúncios verticais de alta retenção para TikTok Shop, Reels e YouTube Shorts. "
+        "Crie exatamente 3 ganchos curtos para os primeiros 3 segundos sem inventar preço, prova, benefício ou promessa. "
         "Cada gancho deve ser fiel ao conteúdo, diferente dos demais e ter no máximo 64 caracteres. "
         "Escolha um mood entre energetic, confident, elegant ou natural. "
-        "Liste também até 6 conceitos curtos de B-roll que possam ser ilustrados usando apenas o próprio material do usuário."
+        "Liste até 6 conceitos curtos de B-roll que possam ser ilustrados usando somente o próprio material do usuário."
     )
-    user = (
-        f"Preset: {project.get('preset')}\nArquivo: {project.get('original_filename')}\n\n"
-        f"TRANSCRIÇÃO:\n{transcript_text}"
-    )
+    user = f"Preset: {project.get('preset')}\nArquivo: {project.get('original_filename')}\n\nTRANSCRIÇÃO:\n{transcript_text}"
     try:
         response = client.responses.parse(
             model=settings.openai_text_model,
@@ -122,11 +154,7 @@ def _creative_finish_plan(
         mood = parsed.mood if parsed.mood in MOOD_AUDIO else fallback.mood
         hooks = [_safe_text(value, 64) for value in parsed.hook_variants if _safe_text(value, 64)]
         concepts = [_safe_text(value, 48) for value in parsed.broll_concepts if _safe_text(value, 48)]
-        return CreativeFinishPlan(
-            mood=mood,
-            hook_variants=(hooks + fallback.hook_variants)[:3],
-            broll_concepts=concepts[:6] or fallback.broll_concepts,
-        )
+        return CreativeFinishPlan(mood=mood, hook_variants=(hooks + fallback.hook_variants)[:3], broll_concepts=concepts[:6] or fallback.broll_concepts)
     except Exception:
         return fallback
 
@@ -157,8 +185,7 @@ def _dominant_face_center(source: Path, seconds: float) -> float | None:
         if not ok or frame is None:
             return None
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
-        cascade = cv2.CascadeClassifier(cascade_path)
+        cascade = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
         faces = cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(48, 48))
         if len(faces) == 0:
             return None
@@ -171,7 +198,9 @@ def _dominant_face_center(source: Path, seconds: float) -> float | None:
         capture.release()
 
 
-def _auto_reframe_centers(source: Path, video_items: list[dict[str, Any]]) -> list[float]:
+def _auto_reframe_centers(source: Path, video_items: list[dict[str, Any]], enabled: bool = True) -> list[float]:
+    if not enabled:
+        return [0.5 for _ in video_items]
     centers: list[float] = []
     last = 0.5
     for item in video_items:
@@ -209,18 +238,16 @@ def _build_broll_items(timeline: dict[str, Any], concepts: list[str]) -> list[di
         if any(not (end <= a or start >= b) for a, b in used):
             continue
         used.append((start, end))
-        items.append(
-            {
-                "id": f"broll-{index}",
-                "timeline_in": round(start, 3),
-                "timeline_out": round(end, 3),
-                "concept": concept,
-                "source_type": "source_derived",
-                "effect": "contextual_punch_in",
-                "rights": "user_confirmed_source",
-                "enabled": True,
-            }
-        )
+        items.append({
+            "id": f"broll-{index}",
+            "timeline_in": round(start, 3),
+            "timeline_out": round(end, 3),
+            "concept": concept,
+            "source_type": "source_derived",
+            "effect": "contextual_punch_in",
+            "rights": "user_confirmed_source",
+            "enabled": True,
+        })
     return items
 
 
@@ -235,29 +262,121 @@ def _clip_has_broll(item: dict[str, Any], broll_items: list[dict[str, Any]]) -> 
     )
 
 
+def _micro_captions(captions: list[dict[str, Any]], style: str = "impact") -> list[dict[str, Any]]:
+    max_words = 3 if style == "impact" else 4 if style == "ugc" else 5
+    output: list[dict[str, Any]] = []
+    for item in captions:
+        text = re.sub(r"\s+", " ", str(item.get("text") or "")).strip()
+        if not text:
+            continue
+        words = text.split()
+        start = float(item.get("start", 0.0))
+        end = max(start + 0.12, float(item.get("end", start + 0.12)))
+        chunks = [words[index:index + max_words] for index in range(0, len(words), max_words)]
+        if not chunks:
+            continue
+        total_weight = sum(max(1, len(chunk)) for chunk in chunks)
+        cursor = start
+        source_highlights = {str(value).lower() for value in item.get("highlighted_words") or []}
+        for index, chunk in enumerate(chunks):
+            weight = max(1, len(chunk))
+            chunk_end = end if index == len(chunks) - 1 else min(end, cursor + (end - start) * weight / total_weight)
+            if chunk_end <= cursor + 0.08:
+                chunk_end = min(end, cursor + 0.16)
+            clean_words = [re.sub(r"[^\wÀ-ÿ'-]", "", word).lower() for word in chunk]
+            highlighted = [word for word in clean_words if word in source_highlights]
+            if not highlighted:
+                candidates = [word for word in clean_words if len(word) >= 5]
+                highlighted = candidates[:1]
+            output.append({
+                "start": round(cursor, 3),
+                "end": round(max(cursor + 0.08, chunk_end), 3),
+                "text": " ".join(chunk),
+                "highlighted_words": highlighted[:2],
+            })
+            cursor = chunk_end
+    return output
+
+
+def _ass_time(seconds: float) -> str:
+    centiseconds = max(0, int(round(seconds * 100)))
+    hours, rem = divmod(centiseconds, 360000)
+    minutes, rem = divmod(rem, 6000)
+    secs, cs = divmod(rem, 100)
+    return f"{hours}:{minutes:02}:{secs:02}.{cs:02}"
+
+
+def _ass_escape(text: str) -> str:
+    return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
+
+
+def _write_pro_ass(captions: list[dict[str, Any]], output_path: Path, style: str, enabled: bool = True) -> Path:
+    styles = {
+        "impact": {"size": 88, "accent": "&H0000FFB8", "margin": 250, "outline": 6, "shadow": 1},
+        "ugc": {"size": 78, "accent": "&H0000D7FF", "margin": 245, "outline": 5, "shadow": 1},
+        "cinematic": {"size": 66, "accent": "&H00E9E9E9", "margin": 225, "outline": 4, "shadow": 1},
+    }
+    cfg = styles.get(style, styles["impact"])
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Pro,Arial,{cfg['size']},&H00FFFFFF,{cfg['accent']},&H00101010,&H78000000,-1,0,0,0,100,100,0,0,1,{cfg['outline']},{cfg['shadow']},2,90,90,{cfg['margin']},1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+"""
+    lines = [header]
+    if enabled:
+        for caption in captions:
+            raw = str(caption.get("text") or "").strip()
+            if not raw:
+                continue
+            text = _ass_escape(raw.upper() if style == "impact" else raw)
+            for word in caption.get("highlighted_words") or []:
+                pattern = re.compile(re.escape(str(word)), re.IGNORECASE)
+                text = pattern.sub(lambda match: rf"{{\c{cfg['accent']}}}" + match.group(0).upper() + r"{\c&HFFFFFF&}", text, count=1)
+            animation = r"{\fad(55,70)\fscx110\fscy110\t(0,115,\fscx100\fscy100)}" if style != "cinematic" else r"{\fad(120,140)}"
+            lines.append(f"Dialogue: 0,{_ass_time(float(caption['start']))},{_ass_time(float(caption['end']))},Pro,,0,0,0,,{animation}{text}\n")
+    output_path.write_text("".join(lines), encoding="utf-8")
+    return output_path
+
+
 def _escape_filter_path(path: Path) -> str:
     return path.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
 
 
 def _has_audio(source: Path) -> bool:
     try:
-        result = _run(
-            [
-                settings.ffprobe_binary,
-                "-v",
-                "error",
-                "-select_streams",
-                "a",
-                "-show_entries",
-                "stream=index",
-                "-of",
-                "csv=p=0",
-                str(source),
-            ]
-        )
+        result = _run([
+            settings.ffprobe_binary, "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "csv=p=0", str(source),
+        ])
         return bool((result.stdout or "").strip())
     except Exception:
         return False
+
+
+def _grade_filter(preset: str) -> str:
+    if preset == "cinematic_product":
+        return "hqdn3d=1.1:1.1:5:5,eq=contrast=1.07:saturation=1.03:gamma=0.99,unsharp=5:5:0.28:5:5:0"
+    if preset == "ugc_sales":
+        return "hqdn3d=0.9:0.9:4:4,eq=contrast=1.03:saturation=1.04:brightness=0.005,unsharp=5:5:0.22:5:5:0"
+    return "hqdn3d=1.0:1.0:5:5,eq=contrast=1.055:saturation=1.08:brightness=0.004,unsharp=5:5:0.34:5:5:0"
+
+
+def _zoom_for_clip(index: int, intensity: str, has_broll: bool) -> float:
+    base_zoom = {"balanced": 1.018, "high": 1.035, "maximum": 1.055}.get(intensity, 1.035)
+    if index % 2 == 0:
+        base_zoom += 0.012
+    if has_broll:
+        base_zoom += 0.065
+    return min(1.14, base_zoom)
 
 
 def _render_reframed(
@@ -267,6 +386,9 @@ def _render_reframed(
     centers: list[float],
     ass_path: Path,
     broll_items: list[dict[str, Any]],
+    *,
+    preset: str,
+    intensity: str,
 ) -> None:
     if not video_items:
         raise RuntimeError("Timeline sem clipes para reenquadrar.")
@@ -282,70 +404,37 @@ def _render_reframed(
         duration = max(0.08, end - start)
         total_duration += duration
         center = centers[index] if index < len(centers) else 0.5
+        zoom = _zoom_for_clip(index, intensity, _clip_has_broll(item, broll_items))
+        crop_w = max(900, int(round(1080 / zoom)))
+        crop_h = max(1600, int(round(1920 / zoom)))
         x_expr = f"max(0,min(in_w-1080,in_w*{center:.4f}-540))"
-        extra = ",crop=972:1728:54:96,scale=1080:1920:flags=lanczos" if _clip_has_broll(item, broll_items) else ""
         chains.append(
             f"[0:v]trim=start={start:.3f}:duration={duration:.3f},setpts=PTS-STARTPTS,"
-            f"scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
-            f"crop=1080:1920:x='{x_expr}':y='(in_h-1920)/2'{extra},"
-            f"hqdn3d=1.2:1.2:6:6,eq=contrast=1.03:saturation=1.04[v{index}]"
+            "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop=1080:1920:x='{x_expr}':y='(in_h-1920)/2',"
+            f"crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,scale=1080:1920:flags=lanczos,"
+            f"{_grade_filter(preset)}[v{index}]"
         )
         audio_start = start if has_audio else 0.0
         chains.append(
             f"[{audio_label}]atrim=start={audio_start:.3f}:duration={duration:.3f},asetpts=PTS-STARTPTS,"
-            f"highpass=f=80,alimiter=limit=0.95[a{index}]"
+            "highpass=f=75,afftdn=nf=-28,acompressor=threshold=0.125:ratio=3:attack=20:release=220:makeup=1.4,alimiter=limit=0.95"
+            f"[a{index}]"
         )
         concat_inputs.append(f"[v{index}][a{index}]")
 
     chains.append("".join(concat_inputs) + f"concat=n={len(video_items)}:v=1:a=1[vcat][acat]")
     chains.append(f"[vcat]subtitles='{_escape_filter_path(ass_path)}'[vout]")
-    chains.append("[acat]loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
+    chains.append("[acat]loudnorm=I=-14:TP=-1.5:LRA=9[aout]")
 
     command = [settings.ffmpeg_binary, "-y", "-i", str(source)]
     if not has_audio:
-        command.extend(
-            [
-                "-f",
-                "lavfi",
-                "-t",
-                f"{total_duration:.3f}",
-                "-i",
-                "anullsrc=channel_layout=stereo:sample_rate=48000",
-            ]
-        )
-    command.extend(
-        [
-            "-filter_complex",
-            ";".join(chains),
-            "-map",
-            "[vout]",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "20",
-            "-profile:v",
-            "high",
-            "-level",
-            "4.1",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "30",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-ar",
-            "48000",
-            "-movflags",
-            "+faststart",
-            str(output),
-        ]
-    )
+        command.extend(["-f", "lavfi", "-t", f"{total_duration:.3f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
+    command.extend([
+        "-filter_complex", ";".join(chains), "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-level", "4.1",
+        "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(output),
+    ])
     _run(command)
 
 
@@ -353,23 +442,30 @@ def _write_original_soundtrack(path: Path, duration: float, cut_times: list[floa
     sample_rate = 48000
     params = MOOD_AUDIO.get(mood, MOOD_AUDIO["energetic"])
     total_samples = max(1, int(duration * sample_rate))
-    accents = [max(0, int(value * sample_rate)) for value in cut_times[:120]]
+    accents = sorted(max(0, int(value * sample_rate)) for value in cut_times[:160])
+    beat_period = 60.0 / float(params["bpm"])
     path.parent.mkdir(parents=True, exist_ok=True)
+    accent_index = 0
+    last_accent = -10 * sample_rate
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(sample_rate)
         block = bytearray()
         for n in range(total_samples):
+            while accent_index < len(accents) and accents[accent_index] <= n:
+                last_accent = accents[accent_index]
+                accent_index += 1
             t = n / sample_rate
-            beat = 0.55 + 0.45 * max(0.0, math.sin(2.0 * math.pi * 2.0 * t))
-            value = 0.015 * beat * math.sin(2.0 * math.pi * params["bed_hz"] * t)
-            value += 0.007 * math.sin(2.0 * math.pi * params["pulse_hz"] * t)
-            for accent in accents:
-                delta = n - accent
-                if 0 <= delta < int(0.11 * sample_rate):
-                    env = 1.0 - delta / float(0.11 * sample_rate)
-                    value += 0.045 * env * math.sin(2.0 * math.pi * params["accent_hz"] * (delta / sample_rate))
+            phase = (t % beat_period) / beat_period
+            beat_env = math.exp(-phase * 5.0)
+            value = 0.012 * math.sin(2.0 * math.pi * params["bed_hz"] * t)
+            value += 0.006 * math.sin(2.0 * math.pi * params["bed_hz"] * 1.5 * t)
+            value += 0.010 * beat_env * math.sin(2.0 * math.pi * params["pulse_hz"] * t)
+            delta = n - last_accent
+            if 0 <= delta < int(0.12 * sample_rate):
+                env = 1.0 - delta / float(0.12 * sample_rate)
+                value += 0.050 * env * math.sin(2.0 * math.pi * params["accent_hz"] * (delta / sample_rate))
             pcm = max(-32767, min(32767, int(value * 32767)))
             block.extend(int(pcm).to_bytes(2, byteorder="little", signed=True))
             if len(block) >= 32768:
@@ -380,38 +476,23 @@ def _write_original_soundtrack(path: Path, duration: float, cut_times: list[floa
     return path
 
 
-def _mix_sound_design(video: Path, soundtrack: Path, output: Path) -> None:
-    _run(
-        [
-            settings.ffmpeg_binary,
-            "-y",
-            "-i",
-            str(video),
-            "-i",
-            str(soundtrack),
-            "-filter_complex",
-            "[0:a]volume=1.0[a0];[1:a]volume=0.35[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:TP=-1.5:LRA=11[aout]",
-            "-map",
-            "0:v:0",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-ar",
-            "48000",
-            "-movflags",
-            "+faststart",
-            str(output),
-        ]
-    )
+def _mix_sound_design(video: Path, soundtrack: Path, output: Path, volume: float, *, loop_music: bool = False) -> None:
+    command = [settings.ffmpeg_binary, "-y", "-i", str(video)]
+    if loop_music:
+        command.extend(["-stream_loop", "-1"])
+    command.extend(["-i", str(soundtrack)])
+    command.extend([
+        "-filter_complex",
+        f"[0:a]volume=1.0[voice];[1:a]volume={volume:.3f},highpass=f=45,lowpass=f=15000[music];"
+        "[music][voice]sidechaincompress=threshold=0.055:ratio=6:attack=18:release=320[ducked];"
+        "[voice][ducked]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=9[aout]",
+        "-map", "0:v:0", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(output),
+    ])
+    _run(command)
 
 
 def _hook_ass(text: str, path: Path) -> Path:
-    safe = text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", " ")
+    safe = _ass_escape(text.replace("\n", " "))
     content = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -432,45 +513,13 @@ Dialogue: 0,0:00:00.00,0:00:03.00,Hook,,0,0,0,,{{\\fad(80,120)\\fscx108\\fscy108
 
 def _render_hook_variant(preview: Path, output: Path, ass_path: Path, index: int) -> None:
     frequency = [620, 470, 760][index % 3]
-    visual = (
-        f"[0:v]subtitles='{_escape_filter_path(ass_path)}',"
-        "scale=1080:1920:flags=lanczos[vout]"
-    )
-    _run(
-        [
-            settings.ffmpeg_binary,
-            "-y",
-            "-i",
-            str(preview),
-            "-f",
-            "lavfi",
-            "-i",
-            f"sine=frequency={frequency}:sample_rate=48000:duration=0.18",
-            "-filter_complex",
-            visual + ";[1:a]volume=0.10,adelay=40|40[sfx];[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=0.2[aout]",
-            "-map",
-            "[vout]",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "20",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "30",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(output),
-        ]
-    )
+    visual = f"[0:v]subtitles='{_escape_filter_path(ass_path)}',scale=1080:1920:flags=lanczos[vout]"
+    _run([
+        settings.ffmpeg_binary, "-y", "-i", str(preview), "-f", "lavfi", "-i", f"sine=frequency={frequency}:sample_rate=48000:duration=0.18",
+        "-filter_complex", visual + ";[1:a]volume=0.08,adelay=40|40[sfx];[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=0.2[aout]",
+        "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p", "-r", "30",
+        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output),
+    ])
 
 
 def _append_or_replace_track(timeline: dict[str, Any], track: dict[str, Any]) -> None:
@@ -480,123 +529,157 @@ def _append_or_replace_track(timeline: dict[str, Any], track: dict[str, Any]) ->
     timeline["tracks"] = tracks
 
 
+def _ensure_audio_source(user_id: int, project_id: str) -> None:
+    project = base.read_project(user_id, project_id)
+    root = base.project_dir(user_id, project_id)
+    source = root / str(project.get("source_filename") or "")
+    if not source.is_file() or _has_audio(source):
+        return
+    augmented = root / "source-with-silence.mp4"
+    _run([
+        settings.ffmpeg_binary, "-y", "-i", str(source), "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(augmented),
+    ])
+    project["source_filename"] = augmented.name
+    base.save_project(user_id, project_id, project)
+
+
 def enhance_editor_project(user_id: int, project_id: str) -> None:
     root = base.project_dir(user_id, project_id)
     project = base.read_project(user_id, project_id)
     timeline = dict(project.get("timeline") or {})
     source = root / str(project.get("source_filename") or "")
-    ass_path = root / "captions.ass"
-    if not source.is_file() or not ass_path.is_file() or not timeline:
+    if not source.is_file() or not timeline:
         return
 
-    base._set_project_state(user_id, project_id, status="rendering", progress=84)
+    options = _normalized_options(project)
+    preset = str(project.get("preset") or "tiktok_shop_sales")
+    preset_caption_style = str(base.PRESETS.get(preset, base.PRESETS["tiktok_shop_sales"])["caption_style"])
+    caption_style = preset_caption_style if options["caption_style"] == "auto" else str(options["caption_style"])
+
+    base._set_project_state(user_id, project_id, status="rendering", progress=82)
     transcript = _load_transcript(root)
     creative = _creative_finish_plan(project, transcript, timeline)
+    mood = creative.mood if options["music_mood"] == "auto" else str(options["music_mood"])
     video_items = _timeline_video_items(timeline)
     broll_items = _build_broll_items(timeline, creative.broll_concepts)
-    centers = _auto_reframe_centers(source, video_items)
+    centers = _auto_reframe_centers(source, video_items, bool(options["auto_reframe"]))
+
+    micro = _micro_captions(_timeline_caption_items(timeline), caption_style)
+    ass_path = _write_pro_ass(micro, root / "captions-pro.ass", caption_style, bool(options["captions_enabled"]))
+    _append_or_replace_track(timeline, {"id": "captions", "type": "captions", "locked": False, "items": micro if options["captions_enabled"] else []})
 
     reframed = root / "preview-reframed.mp4"
-    _render_reframed(source, reframed, video_items, centers, ass_path, broll_items)
+    _render_reframed(
+        source, reframed, video_items, centers, ass_path, broll_items,
+        preset=preset, intensity=str(options["edit_intensity"]),
+    )
 
     duration = float(timeline.get("duration") or 0.0)
     cut_times = [float(item.get("timeline_in", 0.0)) for item in video_items[1:]]
-    soundtrack = _write_original_soundtrack(root / "sound-design.wav", duration, cut_times, creative.mood)
     final_preview = root / "preview.mp4"
-    _mix_sound_design(reframed, soundtrack, final_preview)
+    music_source = "none"
+    if options["music_mode"] == "none" or float(options["music_volume"]) <= 0:
+        shutil.copy2(reframed, final_preview)
+    else:
+        custom_name = str(project.get("custom_music_filename") or "")
+        custom_music = root / custom_name if custom_name else None
+        if options["music_mode"] == "custom" and custom_music and custom_music.is_file():
+            soundtrack = custom_music
+            music_source = "user_upload"
+            loop_music = True
+        else:
+            soundtrack = _write_original_soundtrack(root / "sound-design.wav", duration, cut_times, mood)
+            music_source = "procedurally_generated_original"
+            loop_music = False
+        _mix_sound_design(reframed, soundtrack, final_preview, float(options["music_volume"]), loop_music=loop_music)
 
     hooks: list[dict[str, Any]] = []
-    for index, hook in enumerate(creative.hook_variants[:3]):
-        label = chr(ord("A") + index)
-        hook_ass = _hook_ass(hook, root / f"hook-{label.lower()}.ass")
-        hook_output = root / f"hook-variant-{label.lower()}.mp4"
-        _render_hook_variant(final_preview, hook_output, hook_ass, index)
-        hooks.append(
-            {
+    if options["hook_variants"]:
+        for index, hook in enumerate(creative.hook_variants[:3]):
+            label = chr(ord("A") + index)
+            hook_ass = _hook_ass(hook, root / f"hook-{label.lower()}.ass")
+            hook_output = root / f"hook-variant-{label.lower()}.mp4"
+            _render_hook_variant(final_preview, hook_output, hook_ass, index)
+            hooks.append({
                 "variant": label,
                 "text": hook,
                 "duration_seconds": 3,
                 "media_url": f"/api/media/editor-projects/{project_id}/{hook_output.name}",
-            }
-        )
+            })
 
-    _append_or_replace_track(
-        timeline,
-        {
-            "id": "broll-contextual",
-            "type": "broll",
-            "locked": False,
-            "items": broll_items,
-        },
-    )
-    _append_or_replace_track(
-        timeline,
-        {
-            "id": "sound-design",
-            "type": "audio_fx",
-            "locked": False,
-            "items": [
-                {
-                    "id": "generated-bed",
-                    "source": "sound-design.wav",
-                    "timeline_in": 0,
-                    "timeline_out": round(duration, 3),
-                    "mood": creative.mood,
-                    "rights": "procedurally_generated_original",
-                    "enabled": True,
-                }
-            ],
-        },
-    )
-    _append_or_replace_track(
-        timeline,
-        {
-            "id": "hook-variants",
-            "type": "variations",
-            "locked": False,
-            "items": hooks,
-        },
-    )
+    _append_or_replace_track(timeline, {"id": "broll-contextual", "type": "broll", "locked": False, "items": broll_items})
+    _append_or_replace_track(timeline, {
+        "id": "sound-design", "type": "audio_fx", "locked": False,
+        "items": [{
+            "id": "music-bed", "source": music_source, "timeline_in": 0, "timeline_out": round(duration, 3),
+            "mood": mood, "volume": float(options["music_volume"]), "rights": "user_supplied_or_generated_original", "enabled": options["music_mode"] != "none",
+        }],
+    })
+    _append_or_replace_track(timeline, {"id": "hook-variants", "type": "variations", "locked": False, "items": hooks})
+    _append_or_replace_track(timeline, {
+        "id": "professional-finish", "type": "effects", "locked": True,
+        "items": [
+            {"type": "face_reframe", "enabled": options["auto_reframe"], "mode": "shot_tracking"},
+            {"type": "punch_in", "enabled": True, "intensity": options["edit_intensity"]},
+            {"type": "color_grade", "enabled": True, "preset": preset},
+            {"type": "voice_cleanup", "enabled": True, "filters": ["denoise", "compressor", "limiter", "loudnorm"]},
+            {"type": "caption_animation", "enabled": options["captions_enabled"], "style": caption_style},
+            {"type": "beat_sync", "enabled": options["music_mode"] != "none", "cut_sync_points": len(cut_times)},
+        ],
+    })
     (root / "timeline.json").write_text(json.dumps(timeline, ensure_ascii=False, indent=2), encoding="utf-8")
 
     analysis = dict(project.get("analysis") or {})
     analysis["auto_reframe"] = {
-        "enabled": True,
-        "mode": "shot_face_tracking" if cv2 is not None else "safe_center_fallback",
+        "enabled": bool(options["auto_reframe"]),
+        "mode": "shot_face_tracking" if cv2 is not None and options["auto_reframe"] else "safe_center_fallback",
         "tracked_shots": sum(1 for center in centers if abs(center - 0.5) > 0.015),
         "total_shots": len(centers),
         "aspect_ratio": "9:16",
     }
     analysis["sound_design"] = {
-        "enabled": True,
-        "mood": creative.mood,
-        "music_source": "procedurally_generated_original",
+        "enabled": options["music_mode"] != "none",
+        "mood": mood,
+        "music_source": music_source,
+        "music_volume": float(options["music_volume"]),
         "cut_sync_points": len(cut_times),
         "voice_target_lufs": -14,
+        "ducking": True,
+    }
+    analysis["captions"] = {
+        "enabled": bool(options["captions_enabled"]),
+        "style": caption_style,
+        "micro_segments": len(micro),
+        "animated": True,
+        "safe_zone": True,
+    }
+    analysis["professional_finish"] = {
+        "enabled": True,
+        "edit_intensity": options["edit_intensity"],
+        "beat_sync": options["music_mode"] != "none",
+        "voice_cleanup": True,
+        "dynamic_punch_in": True,
+        "color_grade": preset,
+        "reference_workflow": "short_form_auto_edit",
     }
     analysis["broll"] = {
-        "enabled": True,
-        "strategy": "contextual_source_derived",
-        "items": len(broll_items),
-        "concepts": creative.broll_concepts,
-        "rights": "user_confirmed_source_only",
+        "enabled": True, "strategy": "contextual_source_derived", "items": len(broll_items),
+        "concepts": creative.broll_concepts, "rights": "user_confirmed_source_only",
     }
     analysis["hook_variations"] = hooks
     analysis["social_formats"] = {
-        "tiktok_shop": "1080x1920 9:16",
-        "instagram_reels": "1080x1920 9:16",
-        "youtube_shorts": "1080x1920 9:16",
+        "tiktok_shop": "1080x1920 9:16 H.264/AAC",
+        "instagram_reels": "1080x1920 9:16 H.264/AAC",
+        "youtube_shorts": "1080x1920 9:16 H.264/AAC",
     }
+    notes = list(analysis.get("notes") or [])
+    notes.append("Acabamento profissional aplicado: micro-legendas, punch-ins, reenquadramento, grade, voz tratada e mixagem com ducking.")
+    analysis["notes"] = notes
 
     base._set_project_state(
-        user_id,
-        project_id,
-        status="ready",
-        progress=100,
-        timeline=timeline,
-        analysis=analysis,
-        preview_url=f"/api/media/editor-projects/{project_id}/preview.mp4",
-        hook_variants=hooks,
+        user_id, project_id, status="ready", progress=100, timeline=timeline, analysis=analysis,
+        preview_url=f"/api/media/editor-projects/{project_id}/preview.mp4", hook_variants=hooks,
     )
 
 
@@ -604,23 +687,19 @@ def run_claimed_editor_task(user_id: int, project_id: str, mode: str) -> None:
     if mode == "export":
         base.export_editor_project(user_id, project_id)
         return
+    _ensure_audio_source(user_id, project_id)
     base.process_editor_project(user_id, project_id)
     project = base.read_project(user_id, project_id)
     if project.get("status") == "ready":
         try:
             enhance_editor_project(user_id, project_id)
         except Exception as exc:
-            # Preserve the already-rendered base edit as usable fallback and expose the finishing failure.
             current = base.read_project(user_id, project_id)
             analysis = dict(current.get("analysis") or {})
             notes = list(analysis.get("notes") or [])
             notes.append(f"Acabamento avançado indisponível; preview base preservado: {exc}")
             analysis["notes"] = notes
             base._set_project_state(
-                user_id,
-                project_id,
-                status="ready",
-                progress=100,
-                analysis=analysis,
+                user_id, project_id, status="ready", progress=100, analysis=analysis,
                 preview_url=f"/api/media/editor-projects/{project_id}/preview.mp4",
             )
