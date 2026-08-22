@@ -1,4 +1,16 @@
-import type { Clip, Job, TeamUser, TrendingVideo, UserProfile } from "./types";
+import type {
+  AdminMetrics,
+  AdminUser,
+  BillingStatus,
+  Clip,
+  DownloadAuthStatus,
+  Job,
+  KiwifyAdminSettings,
+  ProvisionedCredential,
+  TeamUser,
+  TrendingVideo,
+  UserProfile,
+} from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -52,6 +64,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const authMe = () => api<UserProfile>("/api/auth/me");
 export const authLogin = (email: string, password: string) =>
   api<UserProfile>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+export const authActivate = (email: string, orderCode: string, password: string) =>
+  api<UserProfile>("/api/auth/activate", { method: "POST", body: JSON.stringify({ email, order_code: orderCode, password }) });
 export const authRegister = (name: string, email: string, password: string, companyName?: string) =>
   api<UserProfile>("/api/auth/register", {
     method: "POST",
@@ -61,6 +75,30 @@ export const authLogout = () => api<void>("/api/auth/logout", { method: "POST" }
 export const listTeam = () => api<TeamUser[]>("/api/auth/team");
 export const createTeamUser = (name: string, email: string, password: string, role = "member") =>
   api<TeamUser>("/api/auth/team", { method: "POST", body: JSON.stringify({ name, email, password, role }) });
+
+export const billingMe = () => api<BillingStatus>("/api/billing/me");
+
+export const adminMetrics = () => api<AdminMetrics>("/api/admin/dashboard");
+export const adminUsers = () => api<AdminUser[]>("/api/admin/users");
+export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/provisioned-credentials");
+export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
+export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string }>("/api/admin/download-auth/test", { method: "POST" });
+export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
+export const adminUpdatePlan = (
+  userId: number,
+  payload: { plan_code?: string; billing_status?: string; monthly_job_limit?: number; unlimited?: boolean },
+) => api<{ ok: boolean }>(`/api/admin/users/${userId}/plan`, { method: "PATCH", body: JSON.stringify(payload) });
+export const adminMarkCredentialDelivered = (id: number) =>
+  api<{ ok: boolean }>(`/api/admin/provisioned-credentials/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ delivered: true }),
+  });
+export const adminUpdateDownloadAuth = (payload: {
+  cookies_b64?: string;
+  proxy_url?: string;
+  clear_cookies?: boolean;
+  clear_proxy?: boolean;
+}) => api<DownloadAuthStatus>("/api/admin/download-auth", { method: "PUT", body: JSON.stringify(payload) });
 
 export async function getTrending(keyword: string, region = "BR", days = 14): Promise<TrendingVideo[]> {
   const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "12" });

@@ -1,16 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..auth import create_session, delete_session, get_current_user, hash_password, normalize_email, require_owner, verify_password
 from ..config import settings
 from ..database import get_db
-from ..models import Tenant, User, YouTubeConnection
-from ..schemas import LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
+from ..models import PaymentEvent, ProvisionedCredential, Tenant, User, YouTubeConnection
+from ..schemas import ActivationRequest, LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
+from ..services.billing import ensure_plan, plan_payload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_payload(user: User) -> dict:
+def _user_payload(user: User, db: Session) -> dict:
+    plan = plan_payload(db, user.tenant_id)
     return {
         "id": user.id,
         "tenant_id": user.tenant_id,
@@ -18,8 +21,14 @@ def _user_payload(user: User) -> dict:
         "display_name": user.display_name,
         "role": user.role,
         "active": user.active,
-        "billing_status": user.tenant.billing_status if user.tenant else "pending",
+        "billing_status": plan["billing_status"],
         "checkout_url": settings.kiwify_checkout_url,
+        "upgrade_url": settings.kiwify_upgrade_url,
+        "plan_code": plan["plan_code"],
+        "monthly_job_limit": plan["monthly_job_limit"],
+        "unlimited": plan["unlimited"],
+        "jobs_used": plan["jobs_used"],
+        "jobs_remaining": plan["jobs_remaining"],
     }
 
 
@@ -65,7 +74,7 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
     token, _ = create_session(db, user)
     _set_session_cookie(response, token)
-    return _user_payload(user)
+    return _user_payload(user, db)
 
 
 @router.post("/login", response_model=UserOut)
@@ -80,7 +89,67 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     token, _ = create_session(db, user)
     _set_session_cookie(response, token)
     db.refresh(user, attribute_names=["tenant"])
-    return _user_payload(user)
+    return _user_payload(user, db)
+
+
+@router.post("/activate", response_model=UserOut)
+def activate_paid_access(payload: ActivationRequest, response: Response, db: Session = Depends(get_db)):
+    email = normalize_email(str(payload.email))
+    order_code = payload.order_code.strip()
+    event = (
+        db.query(PaymentEvent)
+        .filter(
+            PaymentEvent.customer_email == email,
+            PaymentEvent.order_status == "paid",
+            or_(PaymentEvent.order_id == order_code, PaymentEvent.order_ref == order_code),
+        )
+        .order_by(PaymentEvent.id.desc())
+        .first()
+    )
+    if not event:
+        raise HTTPException(
+            status_code=404,
+            detail="Pagamento aprovado não localizado. Use o mesmo e-mail da compra e o código do pedido informado pela Kiwify.",
+        )
+
+    credential = (
+        db.query(ProvisionedCredential)
+        .filter(
+            ProvisionedCredential.order_id == event.order_id,
+            ProvisionedCredential.delivered.is_(False),
+        )
+        .first()
+    )
+    if not credential:
+        raise HTTPException(
+            status_code=409,
+            detail="Este pedido já foi ativado. Entre com sua senha existente ou solicite suporte ao administrador.",
+        )
+
+    user = db.get(User, credential.user_id)
+    if not user or user.email != email:
+        raise HTTPException(status_code=404, detail="Conta do comprador não localizada.")
+
+    try:
+        user.password_hash = hash_password(payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    user.active = True
+
+    tenant = db.get(Tenant, user.tenant_id)
+    if tenant:
+        tenant.billing_status = "active"
+    plan = ensure_plan(db, user.tenant_id)
+    plan.billing_status = "active"
+
+    credential.delivered = True
+    credential.temporary_password = ""
+    db.commit()
+
+    token, _ = create_session(db, user)
+    _set_session_cookie(response, token)
+    db.refresh(user, attribute_names=["tenant"])
+    return _user_payload(user, db)
 
 
 @router.post("/logout", status_code=204)
@@ -91,8 +160,8 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return _user_payload(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _user_payload(user, db)
 
 
 @router.get("/team", response_model=list[TeamUserOut])

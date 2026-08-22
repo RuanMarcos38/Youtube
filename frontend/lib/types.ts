@@ -7,6 +7,12 @@ export type UserProfile = {
   active: boolean;
   billing_status: string;
   checkout_url: string;
+  upgrade_url: string;
+  plan_code: string;
+  monthly_job_limit: number;
+  unlimited: boolean;
+  jobs_used: number;
+  jobs_remaining?: number | null;
 };
 
 export type TeamUser = {
@@ -17,6 +23,69 @@ export type TeamUser = {
   active: boolean;
   youtube_connected: boolean;
   youtube_channel_title?: string | null;
+};
+
+export type BillingStatus = {
+  plan_code: string;
+  billing_status: string;
+  monthly_job_limit: number;
+  unlimited: boolean;
+  jobs_used: number;
+  jobs_remaining?: number | null;
+  subscription_value_cents: number;
+  checkout_url: string;
+  upgrade_url: string;
+};
+
+export type AdminMetrics = {
+  total_users: number;
+  active_subscribers: number;
+  monthly_revenue_cents: number;
+  total_revenue_cents: number;
+  jobs_this_month: number;
+  unlimited_subscribers: number;
+};
+
+export type AdminUser = {
+  id: number;
+  tenant_id: number;
+  workspace: string;
+  email: string;
+  display_name: string;
+  role: string;
+  active: boolean;
+  plan_code: string;
+  billing_status: string;
+  monthly_job_limit: number;
+  unlimited: boolean;
+  jobs_used: number;
+  subscription_value_cents: number;
+  youtube_connected: boolean;
+  youtube_channel_title?: string | null;
+  created_at: string;
+};
+
+export type ProvisionedCredential = {
+  id: number;
+  order_id: string;
+  email: string;
+  display_name: string;
+  temporary_password: string;
+  created_at: string;
+};
+
+export type DownloadAuthStatus = {
+  cookie_override: boolean;
+  cookie_environment: boolean;
+  proxy_override: boolean;
+  proxy_environment: boolean;
+};
+
+export type KiwifyAdminSettings = {
+  webhook_url: string;
+  checkout_url: string;
+  upgrade_url: string;
+  events: string[];
 };
 
 export type TrendingVideo = {
