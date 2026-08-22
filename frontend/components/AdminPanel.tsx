@@ -7,6 +7,7 @@ import {
   adminKiwifySettings,
   adminMarkCredentialDelivered,
   adminMetrics,
+  adminTestDownloadAuth,
   adminUpdateDownloadAuth,
   adminUpdatePlan,
   adminUsers,
@@ -27,6 +28,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [proxyUrl, setProxyUrl] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [testingDownload, setTestingDownload] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -64,9 +66,22 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       setDownloadAuth(status);
       setCookiesB64("");
       setProxyUrl("");
-      setMessage("Autenticação de download atualizada. Novos jobs usarão a nova sessão sem precisar de redeploy.");
+      setMessage("Autenticação atualizada. Clique em ‘Testar download’ para confirmar que o IP da VPS foi aceito pelo YouTube.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao atualizar a autenticação do YouTube.");
+    }
+  }
+
+  async function testDownload() {
+    setTestingDownload(true);
+    setMessage("");
+    try {
+      const result = await adminTestDownloadAuth();
+      setMessage(`Download autenticado validado com sucesso (${result.mode}). A VPS está apta a iniciar novos Shorts.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "A sessão ainda foi recusada pelo YouTube.");
+    } finally {
+      setTestingDownload(false);
     }
   }
 
@@ -99,7 +114,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
           {[
             ["Usuários", String(metrics.total_users)],
             ["Assinantes", String(metrics.active_subscribers)],
-            ["MRR / mês", money(metrics.monthly_revenue_cents)],
+            ["Receita no mês", money(metrics.monthly_revenue_cents)],
             ["Receita total", money(metrics.total_revenue_cents)],
             ["Jobs no mês", String(metrics.jobs_this_month)],
             ["Ilimitados", String(metrics.unlimited_subscribers)],
@@ -108,10 +123,10 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <form onSubmit={saveDownloadAuth} className="rounded-2xl bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3"><div><h3 className="font-black">Download YouTube</h3><p className="mt-1 text-xs text-[#6e7971]">Renove os cookies aqui quando o YouTube recusar a sessão da VPS.</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-black ${downloadAuth?.cookie_override || downloadAuth?.cookie_environment ? "bg-[#eaf8c8] text-[#4b6a00]" : "bg-red-50 text-red-700"}`}>{downloadAuth?.cookie_override ? "Cookie renovado" : downloadAuth?.cookie_environment ? "Cookie do servidor" : "Sem cookie"}</span></div>
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-black">Download YouTube</h3><p className="mt-1 text-xs text-[#6e7971]">Renove os cookies aqui quando o YouTube recusar a sessão da VPS. Se cookies novos forem recusados, use um proxy residencial/estático.</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-black ${downloadAuth?.cookie_override || downloadAuth?.cookie_environment ? "bg-[#eaf8c8] text-[#4b6a00]" : "bg-red-50 text-red-700"}`}>{downloadAuth?.cookie_override ? "Cookie renovado" : downloadAuth?.cookie_environment ? "Cookie do servidor" : "Sem cookie"}</span></div>
             <label className="mt-4 block text-xs font-black">YTDLP_COOKIES_B64<textarea value={cookiesB64} onChange={(e) => setCookiesB64(e.target.value)} rows={4} placeholder="Cole o Base64 gerado pelo Firefox. O valor não será exibido depois." className="mt-2 w-full rounded-xl border border-black/10 p-3 text-xs outline-none focus:border-[#91c51d]" /></label>
             <label className="mt-3 block text-xs font-black">Proxy residencial/estático (opcional)<input value={proxyUrl} onChange={(e) => setProxyUrl(e.target.value)} placeholder="http://usuario:senha@host:porta" className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 text-xs outline-none focus:border-[#91c51d]" /></label>
-            <button className="mt-4 rounded-xl bg-[#111815] px-4 py-3 text-xs font-black text-white">Atualizar autenticação</button>
+            <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-xl bg-[#111815] px-4 py-3 text-xs font-black text-white">Atualizar autenticação</button><button type="button" disabled={testingDownload} onClick={() => void testDownload()} className="rounded-xl bg-[#b8f238] px-4 py-3 text-xs font-black text-[#111815] disabled:opacity-50">{testingDownload ? "Testando..." : "Testar download"}</button></div>
           </form>
 
           <div className="rounded-2xl bg-white p-5 shadow-sm">
