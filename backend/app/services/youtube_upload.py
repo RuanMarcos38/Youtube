@@ -15,13 +15,14 @@ def upload_video(
     title: str,
     description: str,
     tags: list[str],
+    user_id: int,
     privacy_status: str = "private",
     max_retries: int = 5,
 ) -> str:
     if not file_path.exists():
         raise FileNotFoundError(file_path)
 
-    youtube = build("youtube", "v3", credentials=get_credentials(), cache_discovery=False)
+    youtube = build("youtube", "v3", credentials=get_credentials(user_id), cache_discovery=False)
     body = {
         "snippet": {
             "title": title[:100],
