@@ -64,7 +64,11 @@ def build_authorization_url(db: Session, user: User) -> str:
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",
+        # Always show Google's account picker before consent. This is required
+        # for the multi-tenant SaaS flow so each ShortsFlow profile can choose
+        # the exact Google/YouTube account that owns the channel it wants to use,
+        # instead of silently reusing the account already active in the browser.
+        prompt="select_account consent",
     )
     connection = _connection(db, user.id)
     connection.oauth_state = state
