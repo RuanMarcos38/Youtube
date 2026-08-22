@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     youtube_default_privacy: str = "private"
 
     ytdlp_cookie_file: str = ""
+    ytdlp_cookies_b64: str = ""
+    ytdlp_proxy_url: str = ""
     ytdlp_pot_provider_url: str = ""
+    ytdlp_node_path: str = "/usr/local/bin/node"
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
     worker_poll_seconds: float = 2.0
