@@ -22,11 +22,7 @@ def _ensure_kiwify_webhook_token(db) -> None:
 
 
 def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
-    """Reset the bootstrap admin password exactly once for this credential version.
-
-    This guarantees that the generated administrator credential works after the
-    deployment without forcing that password back on every future restart.
-    """
+    """Reset the bootstrap admin password exactly once for this credential version."""
     key = "admin_bootstrap_credential_version"
     row = db.get(SystemSetting, key)
     if row and row.value == ADMIN_CREDENTIAL_VERSION:
@@ -40,14 +36,18 @@ def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
 
 
 def ensure_superadmin() -> None:
-    email = settings.admin_bootstrap_email.strip().lower()
-    password_hash = settings.admin_bootstrap_password_hash.strip()
-    if not email or not password_hash:
-        return
-
     db = SessionLocal()
     try:
+        # Infrastructure bootstrap is independent from the optional administrator
+        # bootstrap. Kiwify remains operable even when no admin credential is
+        # injected at startup.
         _ensure_kiwify_webhook_token(db)
+
+        email = settings.admin_bootstrap_email.strip().lower()
+        password_hash = settings.admin_bootstrap_password_hash.strip()
+        if not email or not password_hash:
+            return
+
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.role = "superadmin"
@@ -95,11 +95,13 @@ def ensure_superadmin() -> None:
                 unlimited=True,
             )
         )
-        db.add(SystemSetting(
-            key="admin_bootstrap_credential_version",
-            value=ADMIN_CREDENTIAL_VERSION,
-            secret=False,
-        ))
+        db.add(
+            SystemSetting(
+                key="admin_bootstrap_credential_version",
+                value=ADMIN_CREDENTIAL_VERSION,
+                secret=False,
+            )
+        )
         db.commit()
     finally:
         db.close()
