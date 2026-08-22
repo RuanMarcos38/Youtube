@@ -10,3 +10,5 @@ def test_health():
         assert body['status'] in {'ok', 'degraded'}
         assert 'checks' in body
         assert 'oauth_redirect_uri' in body
+        assert 'youtube_download_ready' in body['checks']
+        assert body['youtube_download_mode'] in {'guest', 'cookies', 'proxy', 'cookies+proxy'}
