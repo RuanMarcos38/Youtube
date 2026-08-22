@@ -126,3 +126,62 @@ class Clip(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
+
+
+class TenantPlan(Base):
+    __tablename__ = "saas_tenant_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("saas_tenants.id"), unique=True, index=True)
+    plan_code: Mapped[str] = mapped_column(String(40), default="starter", index=True)
+    billing_status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    monthly_job_limit: Mapped[int] = mapped_column(Integer, default=10)
+    unlimited: Mapped[bool] = mapped_column(Boolean, default=False)
+    subscription_value_cents: Mapped[int] = mapped_column(Integer, default=0)
+    kiwify_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    kiwify_product_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    kiwify_customer_email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    current_period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PaymentEvent(Base):
+    __tablename__ = "saas_payment_events"
+    __table_args__ = (UniqueConstraint("order_id", "event_type", name="uq_saas_payment_order_event"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("saas_tenants.id"), nullable=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(100), index=True)
+    order_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    order_status: Mapped[str] = mapped_column(String(40), index=True)
+    payment_method: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    customer_name: Mapped[str] = mapped_column(String(200), default="")
+    customer_email: Mapped[str] = mapped_column(String(320), default="", index=True)
+    product_id: Mapped[str] = mapped_column(String(120), default="", index=True)
+    product_name: Mapped[str] = mapped_column(String(250), default="")
+    amount_cents: Mapped[int] = mapped_column(Integer, default=0)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ProvisionedCredential(Base):
+    __tablename__ = "saas_provisioned_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("saas_tenants.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("saas_users.id"), index=True)
+    order_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    temporary_password: Mapped[str] = mapped_column(String(200))
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SystemSetting(Base):
+    __tablename__ = "saas_system_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    secret: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
