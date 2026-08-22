@@ -2,6 +2,8 @@ import base64
 import binascii
 import hashlib
 import os
+import shutil
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -36,7 +38,10 @@ def download_proxy_configured() -> bool:
 
 
 def download_access_configured() -> bool:
-    return download_auth_configured() or download_proxy_configured()
+    # PO-token + public clients can work without cookies/proxy. Keep this true
+    # when the embedded provider is configured so health does not incorrectly
+    # report an otherwise healthy installation as incomplete.
+    return bool(download_auth_configured() or download_proxy_configured() or settings.ytdlp_pot_provider_url.strip())
 
 
 def _download_auth_configured() -> bool:
@@ -100,6 +105,40 @@ def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
     return _copy_cookie_text(text, target)
 
 
+def _runtime_binary(name: str) -> str | None:
+    configured = shutil.which(name)
+    if configured:
+        return configured
+    # Python packages such as `deno` install the executable next to the active
+    # interpreter inside /opt/venv/bin. Supervisor does not always prepend that
+    # directory to PATH, so detect it explicitly.
+    candidate = Path(sys.executable).with_name(name)
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def js_runtime_status() -> dict[str, str | bool]:
+    node_path = settings.ytdlp_node_path.strip() or _runtime_binary("node") or ""
+    deno_path = _runtime_binary("deno") or ""
+    return {
+        "node": bool(node_path),
+        "node_path": node_path,
+        "deno": bool(deno_path),
+        "deno_path": deno_path,
+    }
+
+
+def _js_runtimes() -> dict:
+    status = js_runtime_status()
+    runtimes: dict = {}
+    if status["deno"]:
+        runtimes["deno"] = {"path": str(status["deno_path"])}
+    if status["node"]:
+        runtimes["node"] = {"path": str(status["node_path"])}
+    return runtimes
+
+
 def _base_options(
     output_dir: Path,
     progress_hook: ProgressHook | None = None,
@@ -117,16 +156,14 @@ def _base_options(
         "overwrites": True,
         "restrictfilenames": True,
         "source_address": "0.0.0.0",
-        "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
-        "extractor_retries": 3,
-        "file_access_retries": 1,
-        "concurrent_fragment_downloads": 4,
+        "socket_timeout": 35,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 4,
+        "file_access_retries": 2,
+        "concurrent_fragment_downloads": 2,
         "cachedir": str(YTDLP_CACHE_DIR),
-        "js_runtimes": {
-            "node": {"path": settings.ytdlp_node_path or None},
-        },
+        "js_runtimes": _js_runtimes(),
     }
 
     if progress_hook is not None:
@@ -175,33 +212,47 @@ def _client_args(player_client: str) -> dict:
     }
 
 
-def _strategy_variants() -> list[tuple[str, dict, bool]]:
-    """Return download strategies in order.
+def _impersonated_client_args(player_client: str) -> dict:
+    variant = _client_args(player_client)
+    variant["impersonate"] = "chrome"
+    return variant
 
-    Rejected account cookies can make every authenticated player client return
-    LOGIN_REQUIRED. For public videos, retrying without those cookies can still
-    work (especially with PO-token/client rotation). This also prevents one
-    stale browser session from taking the whole SaaS offline.
+
+def _strategy_variants() -> list[tuple[str, dict, bool]]:
+    """Return resilient YouTube download strategies in priority order.
+
+    YouTube currently applies separate session-authentication, JS challenge,
+    PO-token and IP-reputation gates. A strategy that works for one video/IP can
+    fail on another, so ShortsFlow rotates official yt-dlp player clients and
+    also retries without browser cookies. This prevents a stale or IP-bound
+    cookie from taking every tenant offline.
     """
     strategies: list[tuple[str, dict, bool]] = []
 
     if download_auth_configured():
         authenticated = [
-            ("auth:default", {}),
-            ("auth:web_safari+pot", _pot_provider_args("web_safari")),
             ("auth:mweb+pot", _pot_provider_args("mweb")),
+            ("auth:web_safari+pot", _pot_provider_args("web_safari")),
+            ("auth:tv_embedded", _client_args("tv_embedded")),
             ("auth:web_embedded", _client_args("web_embedded")),
+            ("auth:default", {}),
         ]
         for name, variant in authenticated:
             if variant is not None:
                 strategies.append((name, variant, True))
 
+    # Prefer the current yt-dlp recommendation first (mweb + PO token), then
+    # rotate through clients whose GVS path has different PO-token requirements.
     guest = [
-        ("guest:android_vr", _client_args("android_vr")),
-        ("guest:tv_downgraded", _client_args("tv_downgraded")),
-        ("guest:web_embedded", _client_args("web_embedded")),
         ("guest:mweb+pot", _pot_provider_args("mweb")),
         ("guest:web_safari+pot", _pot_provider_args("web_safari")),
+        ("guest:web_safari", _client_args("web_safari")),
+        ("guest:tv", _client_args("tv")),
+        ("guest:android_vr", _client_args("android_vr")),
+        ("guest:ios", _client_args("ios")),
+        ("guest:web_embedded", _client_args("web_embedded")),
+        ("guest:chrome+mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb"), "impersonate": "chrome"}),
+        ("guest:chrome:web_safari", _impersonated_client_args("web_safari")),
         ("guest:default", {}),
     ]
     for name, variant in guest:
@@ -237,12 +288,25 @@ def _compact_error(message: str) -> str:
     return text
 
 
+def _is_bot_block(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "sign in to confirm" in lowered
+        or "not a bot" in lowered
+        or "login_required" in lowered
+        or "http error 403" in lowered
+        or "forbidden" in lowered
+    )
+
+
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
     """Validate the current VPS egress using the same fallback chain as real jobs."""
     errors: list[str] = []
+    attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
         output_dir = Path(tmp)
         for strategy, variant, include_cookies in _strategy_variants():
+            attempted.append(strategy)
             options = _base_options(output_dir, include_cookies=include_cookies)
             options.update({
                 "skip_download": True,
@@ -261,6 +325,9 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                     "title": (info or {}).get("title"),
                     "mode": "cookies+proxy" if include_cookies and download_proxy_configured() else "cookies" if include_cookies else "proxy" if download_proxy_configured() else "guest-fallback",
                     "strategy": strategy,
+                    "attempts": len(attempted),
+                    "js_runtimes": js_runtime_status(),
+                    "pot_provider": bool(settings.ytdlp_pot_provider_url),
                 }
             except Exception as exc:
                 message = _compact_error(str(exc))
@@ -268,13 +335,16 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                     errors.append(message)
 
     message = errors[-1] if errors else "Sessão de download indisponível."
-    bot_blocked = any("Sign in to confirm" in item or "not a bot" in item.lower() for item in errors)
+    bot_blocked = any(_is_bot_block(item) for item in errors)
     return {
         "ok": False,
         "error": message,
         "bot_blocked": bot_blocked,
         "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
-        "attempts": len(_strategy_variants()),
+        "attempts": len(attempted),
+        "strategies": attempted,
+        "js_runtimes": js_runtime_status(),
+        "pot_provider": bool(settings.ytdlp_pot_provider_url),
     }
 
 
@@ -299,23 +369,19 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
                     errors.append(tagged)
 
     if errors:
-        bot_blocked = any(
-            "Sign in to confirm you're not a bot" in error
-            or "Sign in to confirm you’re not a bot" in error
-            or "not a bot" in error.lower()
-            for error in errors
-        )
+        bot_blocked = any(_is_bot_block(error) for error in errors)
         if bot_blocked:
-            if not download_access_configured():
+            if not download_proxy_configured():
                 raise DownloadError(
-                    "O YouTube bloqueou a saída da VPS e os fallbacks públicos/PO Token também foram recusados. "
-                    "Configure YTDLP_COOKIES_B64 com uma sessão autorizada ou YTDLP_PROXY_URL no painel Administrador > Download YouTube."
+                    "O YouTube recusou todas as estratégias automáticas desta VPS, inclusive PO Token, clientes alternativos, "
+                    "Deno/Node e tentativas sem cookies. Isso indica bloqueio/reputação do IP de saída do datacenter. "
+                    "Para tornar o download estável em produção, configure no Administrador > Download YouTube um proxy "
+                    "residencial/estático com IP persistente. Os cookies são opcionais quando o vídeo público funciona sem login, "
+                    "mas se forem usados devem ser renovados através do mesmo IP do proxy."
                 )
             raise DownloadError(
-                "O YouTube recusou os cookies e também os fallbacks públicos desta VPS. "
-                "Isso normalmente acontece quando os cookies foram obtidos em outro IP e o datacenter foi desafiado. "
-                "Renove a sessão e teste pelo painel Administrador > Download YouTube; se a recusa persistir, "
-                "use um proxy residencial/estático para manter o mesmo IP da sessão."
+                "O YouTube recusou o IP/proxy atual mesmo após a cadeia completa de fallbacks. "
+                "Valide a reputação/saída do proxy no Administrador > Download YouTube e mantenha cookies e proxy no mesmo IP."
             )
 
         raise DownloadError(
