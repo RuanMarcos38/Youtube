@@ -169,7 +169,6 @@ jobs:
             -H "Accept: application/json" \
             --data-urlencode "projectName=r2rmarketingdigital" \
             --data-urlencode "serviceName=shortsia" \
-            --data-urlencode "limit=250" \
             "$EASYPANEL_URL/api/queryServiceLogs" > /tmp/service-logs.json || true
           echo "Filtered runtime errors:"
           python3 - <<'PY'
