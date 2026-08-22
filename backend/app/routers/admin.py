@@ -66,6 +66,15 @@ def _kiwify_webhook_url(db: Session) -> str:
     return f"{settings.frontend_url.rstrip('/')}/api/billing/kiwify-webhook?token={token}" if token else ""
 
 
+def _set_system_setting(db: Session, key: str, value: str, *, secret: bool = False) -> None:
+    row = db.get(SystemSetting, key)
+    if row:
+        row.value = value
+        row.secret = secret
+    else:
+        db.add(SystemSetting(key=key, value=value, secret=secret))
+
+
 @router.get("/dashboard")
 def dashboard(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
     active_plans = (
@@ -233,6 +242,8 @@ def test_download_auth(_: User = Depends(require_superadmin)):
 
 @router.get("/kiwify")
 def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
+    base_product = db.get(SystemSetting, "kiwify_base_product_id")
+    upgrade_product = db.get(SystemSetting, "kiwify_upgrade_product_id")
     return {
         "webhook_url": _kiwify_webhook_url(db),
         "checkout_url": settings.kiwify_checkout_url,
@@ -245,6 +256,8 @@ def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends
             "subscription_late",
             "subscription_renewed",
         ],
+        "base_product_mapped": bool(base_product and base_product.value.strip()),
+        "upgrade_product_mapped": bool(upgrade_product and upgrade_product.value.strip()),
     }
 
 
@@ -259,13 +272,24 @@ def register_kiwify_webhook(
     if not token or not webhook_url:
         raise HTTPException(status_code=503, detail="Token interno do webhook Kiwify ainda não foi inicializado.")
     try:
-        return register_webhook(
+        result = register_webhook(
             client_id=payload.client_id,
             client_secret=payload.client_secret,
             account_id=payload.account_id,
             webhook_url=webhook_url,
             webhook_token=token,
             products=payload.products,
+            base_checkout_code=settings.kiwify_base_checkout_code,
+            upgrade_checkout_code=settings.kiwify_upgrade_checkout_code,
         )
     except KiwifyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    base_product_id = str(result.get("base_product_id") or "").strip()
+    upgrade_product_id = str(result.get("upgrade_product_id") or "").strip()
+    if base_product_id:
+        _set_system_setting(db, "kiwify_base_product_id", base_product_id)
+    if upgrade_product_id:
+        _set_system_setting(db, "kiwify_upgrade_product_id", upgrade_product_id)
+    db.commit()
+    return result
