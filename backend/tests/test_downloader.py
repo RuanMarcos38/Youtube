@@ -49,6 +49,20 @@ def test_base_options_enable_node_ejs_runtime_and_proxy(tmp_path, monkeypatch):
 
     assert options["js_runtimes"] == {"node": {"path": "/usr/local/bin/node"}}
     assert options["proxy"] == "http://proxy.internal:8080"
+    assert options["concurrent_fragment_downloads"] == 4
+
+
+def test_base_options_register_safe_progress_hook(tmp_path, monkeypatch):
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_proxy_url", "")
+    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+    events = []
+
+    options = downloader._base_options(tmp_path, progress_hook=events.append)
+    options["progress_hooks"][0]({"status": "downloading", "downloaded_bytes": 10})
+
+    assert events == [{"status": "downloading", "downloaded_bytes": 10}]
 
 
 def test_base64_cookie_is_materialized_outside_public_data_dir(tmp_path, monkeypatch):
@@ -67,6 +81,18 @@ def test_base64_cookie_is_materialized_outside_public_data_dir(tmp_path, monkeyp
     assert resolved == str(runtime_cookie)
     assert runtime_cookie.read_text(encoding="utf-8").startswith("# Netscape HTTP Cookie File")
     assert runtime_cookie.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_cookie_file_is_unique_per_job(tmp_path, monkeypatch):
+    runtime_cookie = tmp_path / "youtube-cookies.txt"
+    monkeypatch.setattr(downloader, "COOKIE_RUNTIME_FILE", runtime_cookie)
+
+    first = downloader._runtime_cookie_file(tmp_path / "jobs" / "13")
+    second = downloader._runtime_cookie_file(tmp_path / "jobs" / "14")
+
+    assert first != second
+    assert first.parent == runtime_cookie.parent
+    assert second.parent == runtime_cookie.parent
 
 
 def test_invalid_base64_cookie_is_rejected(monkeypatch):
