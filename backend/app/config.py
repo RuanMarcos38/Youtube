@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2.0
     worker_concurrency: int = 2
 
+    auth_cookie_name: str = "shortsflow_session"
+    auth_session_hours: int = 168
+    kiwify_checkout_url: str = "https://pay.kiwify.com.br/tBv68U5"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
