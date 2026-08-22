@@ -1,0 +1,113 @@
+name: Production Watchdog
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Inspect production health
+        id: health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))
+          checks = data.get('checks') or {}
+          safe = {
+              'status': data.get('status'),
+              'version': data.get('version'),
+              'configuration_complete': data.get('configuration_complete'),
+              'worker_alive': checks.get('worker_alive'),
+              'ffmpeg_available': checks.get('ffmpeg_available'),
+              'ffprobe_available': checks.get('ffprobe_available'),
+              'js_runtime': checks.get('ytdlp_js_runtime_available'),
+              'ejs': checks.get('ytdlp_ejs_available'),
+              'download_probe': checks.get('youtube_download_probe_ok'),
+              'oauth_configured': checks.get('google_oauth_configured'),
+          }
+          print(json.dumps(safe, ensure_ascii=False))
+          core_failed = any(value is not True for value in [
+              checks.get('worker_alive'),
+              checks.get('ffmpeg_available'),
+              checks.get('ffprobe_available'),
+              checks.get('ytdlp_js_runtime_available'),
+              checks.get('ytdlp_ejs_available'),
+          ])
+          Path('/tmp/core-failed').write_text('1' if core_failed else '0')
+          Path('/tmp/download-failed').write_text('1' if checks.get('youtube_download_probe_ok') is False else '0')
+          PY
+          echo "core_failed=$(cat /tmp/core-failed)" >> "$GITHUB_OUTPUT"
+          echo "download_failed=$(cat /tmp/download-failed)" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-redeploy only when internal runtime is unhealthy
+        if: steps.health.outputs.core_failed == '1'
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          set -euo pipefail
+          test -n "$EASYPANEL_API_KEY"
+          curl -fsS --max-time 60 -X POST \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "$EASYPANEL_URL/api/deployAppService" \
+            -d '{"projectName":"r2rmarketingdigital","serviceName":"shortsia","forceRebuild":true}' > /dev/null
+          echo "Safe EasyPanel rebuild requested for r2rmarketingdigital/shortsia only."
+          for i in $(seq 1 30); do
+            sleep 10
+            if curl -fsS --max-time 15 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/recheck.json; then
+              if python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/recheck.json').read_text())
+          c = data.get('checks') or {}
+          ok = all(c.get(k) is True for k in (
+              'worker_alive',
+              'ffmpeg_available',
+              'ffprobe_available',
+              'ytdlp_js_runtime_available',
+              'ytdlp_ejs_available',
+          ))
+          raise SystemExit(0 if ok else 1)
+          PY
+              then
+                echo "Runtime recovered after automatic rebuild."
+                exit 0
+              fi
+            fi
+          done
+          echo "Runtime did not recover after one safe rebuild."
+          exit 1
+
+      - name: Surface external YouTube network/session block
+        if: steps.health.outputs.download_failed == '1'
+        shell: bash
+        run: |
+          echo "Real YouTube download probe is blocked."
+          echo "The watchdog will not loop deployments or rotate credentials because IP/cookie reputation is external state."
+          echo "Use Administrador > Download YouTube to renew the authorized session or configure a stable authorized proxy."
+          exit 1
+
+      - name: Validate frontend and authentication contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 20 -o /dev/null https://shorts.r2rmarketingdigital.com.br/
+          code=$(curl -sS --max-time 20 -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"watchdog-invalid@example.com","password":"invalid-watchdog-password"}' \
+            https://shorts.r2rmarketingdigital.com.br/api/auth/login)
+          test "$code" = "401"
