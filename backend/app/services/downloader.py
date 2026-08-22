@@ -1,6 +1,8 @@
 import base64
 import binascii
+import hashlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -9,6 +11,7 @@ from ..config import settings
 
 COOKIE_RUNTIME_FILE = Path("/tmp/shortsflow-youtube-cookies.txt")
 YTDLP_CACHE_DIR = Path("/tmp/shortsflow-yt-dlp-cache")
+ProgressHook = Callable[[dict], None]
 
 
 class DownloadError(RuntimeError):
@@ -36,7 +39,14 @@ def _download_auth_configured() -> bool:
     return download_auth_configured()
 
 
-def _resolve_cookie_file() -> str | None:
+def _runtime_cookie_file(output_dir: Path | None = None) -> Path:
+    if output_dir is None:
+        return COOKIE_RUNTIME_FILE
+    digest = hashlib.sha256(str(output_dir.resolve()).encode("utf-8")).hexdigest()[:12]
+    return COOKIE_RUNTIME_FILE.with_name(f"{COOKIE_RUNTIME_FILE.stem}-{digest}{COOKIE_RUNTIME_FILE.suffix}")
+
+
+def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
     configured_file = settings.ytdlp_cookie_file.strip()
     if configured_file:
         path = Path(configured_file)
@@ -61,18 +71,17 @@ def _resolve_cookie_file() -> str | None:
     except UnicodeDecodeError as exc:
         raise DownloadError("YTDLP_COOKIES_B64 precisa representar um arquivo cookies.txt UTF-8.") from exc
 
-    # yt-dlp expects the Netscape cookies.txt format. Keep the materialized
-    # secret outside DATA_DIR because DATA_DIR is publicly mounted at /media.
     first_line = text.splitlines()[0] if text else ""
     if "Cookie File" not in first_line and "\t" not in text:
         raise DownloadError("O cookie informado não parece estar no formato Netscape cookies.txt.")
 
-    COOKIE_RUNTIME_FILE.write_text(text + "\n", encoding="utf-8")
-    os.chmod(COOKIE_RUNTIME_FILE, 0o600)
-    return str(COOKIE_RUNTIME_FILE)
+    target = runtime_file or COOKIE_RUNTIME_FILE
+    target.write_text(text + "\n", encoding="utf-8")
+    os.chmod(target, 0o600)
+    return str(target)
 
 
-def _base_options(output_dir: Path) -> dict:
+def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -> dict:
     YTDLP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     options: dict = {
         "outtmpl": str(output_dir / "source.%(ext)s"),
@@ -85,17 +94,28 @@ def _base_options(output_dir: Path) -> dict:
         "restrictfilenames": True,
         "source_address": "0.0.0.0",
         "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
+        "retries": 2,
+        "fragment_retries": 2,
+        "extractor_retries": 2,
+        "file_access_retries": 1,
+        "concurrent_fragment_downloads": 4,
         "cachedir": str(YTDLP_CACHE_DIR),
-        # Node 22 is already part of the runtime image. yt-dlp only enables
-        # Deno by default, so Node must be explicitly enabled for EJS.
         "js_runtimes": {
             "node": {"path": settings.ytdlp_node_path or None},
         },
     }
 
-    cookie_file = _resolve_cookie_file()
+    if progress_hook is not None:
+        def safe_progress_hook(event: dict) -> None:
+            try:
+                progress_hook(event)
+            except Exception:
+                # UI progress reporting must never abort the media download.
+                pass
+
+        options["progress_hooks"] = [safe_progress_hook]
+
+    cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
     if cookie_file:
         options["cookiefile"] = cookie_file
     if download_proxy_configured():
@@ -145,23 +165,37 @@ def _compact_error(message: str) -> str:
     return text
 
 
-def download_video(url: str, output_dir: Path) -> Path:
+def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Keep each YouTube client isolated. Mixing clients in one extraction can
-    # produce a PO token for one client and a media URL belonging to another.
-    option_variants = [
-        _pot_provider_args("mweb"),
-        _pot_provider_args("web_safari"),
-        {
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["web_embedded"],
+    # With authenticated cookies, try the normal YouTube client first. This is
+    # faster and avoids waiting on PO-token fallbacks when they are unnecessary.
+    if download_auth_configured():
+        option_variants = [
+            {},
+            _pot_provider_args("web_safari"),
+            _pot_provider_args("mweb"),
+            {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["web_embedded"],
+                    }
                 }
-            }
-        },
-        {},
-    ]
+            },
+        ]
+    else:
+        option_variants = [
+            _pot_provider_args("mweb"),
+            _pot_provider_args("web_safari"),
+            {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["web_embedded"],
+                    }
+                }
+            },
+            {},
+        ]
 
     errors: list[str] = []
     attempts = 0
@@ -169,7 +203,7 @@ def download_video(url: str, output_dir: Path) -> Path:
         if variant is None:
             continue
         attempts += 1
-        options = _base_options(output_dir)
+        options = _base_options(output_dir, progress_hook=progress_hook)
         options.update(variant)
         try:
             video_path = _download_with_options(url, output_dir, options)
