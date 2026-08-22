@@ -53,6 +53,37 @@ YOUTUBE_DEFAULT_PRIVACY=private
 WORKER_POLL_SECONDS=2
 ```
 
+### Autenticação do download do YouTube na VPS
+
+O botão **YouTube conectado** confirma o OAuth usado para a API/upload, mas esse OAuth não substitui a sessão necessária ao `yt-dlp` quando o IP da VPS recebe o desafio **Sign in to confirm you're not a bot**.
+
+Para esse cenário, o backend aceita de forma opcional:
+
+```env
+YTDLP_COOKIES_B64=
+YTDLP_PROXY_URL=
+```
+
+No Windows, versões atuais do Chrome podem impedir `yt-dlp --cookies-from-browser chrome` com `Failed to decrypt with DPAPI` por causa do App-Bound Encryption do Chromium. Não desative a proteção do Chrome para contornar isso.
+
+Use o utilitário da raiz do repositório:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CONFIGURAR-YOUTUBE-AUTH.ps1
+```
+
+O utilitário:
+
+- prefere Firefox quando houver uma sessão local disponível;
+- não tenta quebrar/desativar a proteção DPAPI/App-Bound do Chrome;
+- permite selecionar um `cookies.txt` Netscape exportado somente do `youtube.com`;
+- valida o arquivo e copia o valor de `YTDLP_COOKIES_B64` para a área de transferência sem exibi-lo no terminal;
+- não altera senhas, OAuth, domínio, banco ou outros projetos.
+
+Depois de colar **somente** o valor em `YTDLP_COOKIES_B64`, salve o ambiente do serviço `r2rmarketingdigital/shortsia` e faça um novo deploy/Force Rebuild. Em `/api/health`, `youtube_download_mode` deve aparecer como `cookies` ou `cookies+proxy`.
+
+Trate `cookies.txt` e o Base64 como credenciais: não envie em chat, issue, commit, print ou log.
+
 ## Persistência
 
 Em **Storage/Volumes**, adicione armazenamento persistente montado em:
