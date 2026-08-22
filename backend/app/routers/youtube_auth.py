@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -25,13 +27,31 @@ def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(ge
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _frontend_redirect(status_value: str, reason: str = "") -> RedirectResponse:
+    query = {"youtube": status_value}
+    if reason:
+        query["reason"] = reason[:120]
+    return RedirectResponse(url=f"{settings.frontend_url}/?{urlencode(query)}")
+
+
 @router.get("/oauth/callback")
-def oauth_callback(code: str = Query(...), state: str = Query(...), db: Session = Depends(get_db)):
+def oauth_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _frontend_redirect("error", error)
+    if not code or not state:
+        return _frontend_redirect("error", "oauth_callback_incompleto")
     try:
         complete_oauth(db, code, state)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"OAuth failed: {exc}") from exc
-    return RedirectResponse(url=f"{settings.frontend_url}/?youtube=connected")
+    except Exception:
+        # Provider/token internals must not be exposed to the browser. The user can
+        # retry the account picker and diagnostics retain the server-side context.
+        return _frontend_redirect("error", "oauth_nao_concluido")
+    return _frontend_redirect("connected")
 
 
 @router.post("/oauth/disconnect", status_code=204)

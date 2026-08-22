@@ -2,7 +2,7 @@ import secrets
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import SystemSetting, Tenant, TenantPlan, User
+from ..models import ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 
 
 ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v3"
@@ -21,12 +21,25 @@ def _ensure_kiwify_webhook_token(db) -> None:
     db.commit()
 
 
-def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
-    """Reset the bootstrap admin password exactly once for this credential version.
+def _scrub_delivered_credentials(db) -> None:
+    """Remove obsolete plaintext bootstrap passwords without changing user passwords."""
+    rows = (
+        db.query(ProvisionedCredential)
+        .filter(
+            ProvisionedCredential.delivered.is_(True),
+            ProvisionedCredential.temporary_password != "",
+        )
+        .all()
+    )
+    if not rows:
+        return
+    for row in rows:
+        row.temporary_password = ""
+    db.commit()
 
-    This guarantees that the generated administrator credential works after the
-    deployment without forcing that password back on every future restart.
-    """
+
+def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
+    """Reset the bootstrap admin password exactly once for this credential version."""
     key = "admin_bootstrap_credential_version"
     row = db.get(SystemSetting, key)
     if row and row.value == ADMIN_CREDENTIAL_VERSION:
@@ -40,14 +53,19 @@ def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
 
 
 def ensure_superadmin() -> None:
-    email = settings.admin_bootstrap_email.strip().lower()
-    password_hash = settings.admin_bootstrap_password_hash.strip()
-    if not email or not password_hash:
-        return
-
     db = SessionLocal()
     try:
+        # Infrastructure bootstrap is independent from the optional administrator
+        # bootstrap. Kiwify remains operable even when no admin credential is
+        # injected at startup.
         _ensure_kiwify_webhook_token(db)
+        _scrub_delivered_credentials(db)
+
+        email = settings.admin_bootstrap_email.strip().lower()
+        password_hash = settings.admin_bootstrap_password_hash.strip()
+        if not email or not password_hash:
+            return
+
         user = db.query(User).filter(User.email == email).first()
         if user:
             user.role = "superadmin"
@@ -95,11 +113,13 @@ def ensure_superadmin() -> None:
                 unlimited=True,
             )
         )
-        db.add(SystemSetting(
-            key="admin_bootstrap_credential_version",
-            value=ADMIN_CREDENTIAL_VERSION,
-            secret=False,
-        ))
+        db.add(
+            SystemSetting(
+                key="admin_bootstrap_credential_version",
+                value=ADMIN_CREDENTIAL_VERSION,
+                secret=False,
+            )
+        )
         db.commit()
     finally:
         db.close()

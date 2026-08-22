@@ -107,8 +107,10 @@ class Settings(BaseSettings):
     base_plan_job_limit: int = 10
     billing_require_active: bool = True
 
-    admin_bootstrap_email: str = "admin@r2rmarketingdigital.com.br"
-    admin_bootstrap_password_hash: str = "pbkdf2_sha256$260000$jbqldmkFLidGVBbNUVAjQw==$_L_rs0Q7Dq-tAtwiFTDu81SL4Y6d_HXM2IOmf4NNItI="
+    # Production bootstrap credentials must come from runtime secrets only.
+    # Empty defaults ensure a repository clone cannot inherit administrator access.
+    admin_bootstrap_email: str = ""
+    admin_bootstrap_password_hash: str = ""
 
     smtp_host: str = ""
     smtp_port: int = 587

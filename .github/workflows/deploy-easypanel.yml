@@ -32,39 +32,37 @@ jobs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
             -d "{\"state\":\"pending\",\"context\":\"deploy/easypanel\",\"description\":\"Deploying shortsia to EasyPanel\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
 
-      - name: Check required secret
+      - name: Validate EasyPanel credentials
         shell: bash
         env:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
         run: |
-          if [ -z "$EASYPANEL_API_KEY" ]; then
-            echo "EASYPANEL_API_KEY secret is not configured."
-            exit 1
-          fi
+          set -euo pipefail
+          test -n "$EASYPANEL_API_KEY"
 
-      - name: Verify EasyPanel API and target app
+      - name: Verify exact EasyPanel target
         shell: bash
         env:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
           EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
+          set -euo pipefail
           curl -fsS --max-time 30 --get \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
             --data-urlencode "projectName=r2rmarketingdigital" \
             --data-urlencode "serviceName=shortsia" \
-            "$EASYPANEL_URL/api/inspectAppService" \
-            > /tmp/easypanel-app.json
+            "$EASYPANEL_URL/api/inspectAppService" > /tmp/easypanel-app.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           data = json.loads(Path('/tmp/easypanel-app.json').read_text(encoding='utf-8'))
           if data is None:
-              raise SystemExit('Target EasyPanel app was not found')
-          print('EasyPanel API authenticated; target app shortsia exists.')
+              raise SystemExit('Target EasyPanel app r2rmarketingdigital/shortsia was not found')
+          print('EasyPanel authenticated; exact ShortsFlow service located.')
           PY
 
-      - name: Ensure custom domain
+      - name: Ensure custom domain only
         shell: bash
         env:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
@@ -75,144 +73,13 @@ jobs:
           EASYPANEL_DOMAIN_PORT: '3000'
         run: python3 deploy/ensure_easypanel_domain.py
 
-      - name: Repair ShortsFlow runtime database binding and admin bootstrap
+      - name: Deploy target app without mutating environment
         shell: bash
         env:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
           EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
           set -euo pipefail
-          umask 077
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          from urllib.parse import urlsplit
-
-          data = json.loads(Path('/tmp/easypanel-app.json').read_text(encoding='utf-8'))
-
-          def find_env(node):
-              if isinstance(node, dict):
-                  for key in ('env', 'environment'):
-                      value = node.get(key)
-                      if isinstance(value, str) and ('DATABASE_URL=' in value or 'APP_NAME=' in value or 'ADMIN_BOOTSTRAP_EMAIL=' in value):
-                          return value
-                  for value in node.values():
-                      found = find_env(value)
-                      if found is not None:
-                          return found
-              elif isinstance(node, list):
-                  for value in node:
-                      found = find_env(value)
-                      if found is not None:
-                          return found
-              return None
-
-          def find_dotenv_path(node):
-              if isinstance(node, dict):
-                  value = node.get('dotEnvPath')
-                  if isinstance(value, str) and value.strip():
-                      return value.strip()
-                  for value in node.values():
-                      found = find_dotenv_path(value)
-                      if found:
-                          return found
-              elif isinstance(node, list):
-                  for value in node:
-                      found = find_dotenv_path(value)
-                      if found:
-                          return found
-              return None
-
-          env_text = find_env(data)
-          if env_text is None:
-              raise SystemExit('ShortsFlow environment was not found; refusing to modify unrelated configuration.')
-
-          admin_email = 'admin@r2rmarketingdigital.com.br'
-          admin_hash = 'pbkdf2_sha256$260000$jbqldmkFLidGVBbNUVAjQw==$_L_rs0Q7Dq-tAtwiFTDu81SL4Y6d_HXM2IOmf4NNItI='
-          bad_host = 'aws-0-us-west-2.pooler.supabase.com'
-          bad_user = 'prisma_zenite.iqrnytsgwaiegddfxfjs'
-
-          output = []
-          changed = False
-          found_admin_email = False
-          found_admin_hash = False
-          removed_bad_database = False
-
-          for line in env_text.splitlines():
-              if line.startswith('DATABASE_URL='):
-                  raw = line.split('=', 1)[1].strip().strip('"').strip("'")
-                  try:
-                      parts = urlsplit(raw)
-                      username = parts.username or ''
-                      hostname = parts.hostname or ''
-                  except Exception:
-                      username = ''
-                      hostname = ''
-                  if username == bad_user and hostname == bad_host:
-                      removed_bad_database = True
-                      changed = True
-                      continue
-                  output.append(line)
-              elif line.startswith('ADMIN_BOOTSTRAP_EMAIL='):
-                  found_admin_email = True
-                  desired = 'ADMIN_BOOTSTRAP_EMAIL=' + admin_email
-                  output.append(desired)
-                  changed = changed or line != desired
-              elif line.startswith('ADMIN_BOOTSTRAP_PASSWORD_HASH='):
-                  found_admin_hash = True
-                  desired = 'ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash
-                  output.append(desired)
-                  changed = changed or line != desired
-              else:
-                  output.append(line)
-
-          if not found_admin_email:
-              output.append('ADMIN_BOOTSTRAP_EMAIL=' + admin_email)
-              changed = True
-          if not found_admin_hash:
-              output.append('ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash)
-              changed = True
-
-          if removed_bad_database:
-              print('Removed the invalid external database binding from ShortsFlow only.')
-              print('The app will use its isolated SQLite runtime at /app/data/app.db.')
-          else:
-              print('No known-invalid ShortsFlow database binding was found.')
-
-          if not changed:
-              Path('/tmp/shortsflow-env-unchanged').write_text('1', encoding='utf-8')
-              raise SystemExit(0)
-
-          payload = {
-              'projectName': 'r2rmarketingdigital',
-              'serviceName': 'shortsia',
-              'env': '\n'.join(output).rstrip() + '\n',
-          }
-          dot_env_path = find_dotenv_path(data)
-          if dot_env_path:
-              payload['dotEnvPath'] = dot_env_path
-          Path('/tmp/update-shortsflow-env.json').write_text(json.dumps(payload), encoding='utf-8')
-          print('ShortsFlow environment repair payload prepared without exposing secrets.')
-          PY
-
-          if [ -f /tmp/update-shortsflow-env.json ]; then
-            curl -fsS --max-time 30 -X POST \
-              -H "Authorization: Bearer $EASYPANEL_API_KEY" \
-              -H "Accept: application/json" \
-              -H "Content-Type: application/json" \
-              "$EASYPANEL_URL/api/updateAppEnv" \
-              --data-binary @/tmp/update-shortsflow-env.json > /dev/null
-            rm -f /tmp/update-shortsflow-env.json
-            echo "ShortsFlow environment repaired in EasyPanel."
-          fi
-          rm -f /tmp/easypanel-app.json /tmp/shortsflow-env-unchanged
-
-      - name: Deploy target app
-        shell: bash
-        env:
-          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
-          EASYPANEL_URL: https://ke4n49.easypanel.host
-        run: |
           curl -fsS --max-time 600 -X POST \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
@@ -220,40 +87,42 @@ jobs:
             "$EASYPANEL_URL/api/deployAppService" \
             -d '{"projectName":"r2rmarketingdigital","serviceName":"shortsia","forceRebuild":true}' \
             > /tmp/easypanel-deploy.json
-          echo "EasyPanel accepted the shortsia deployment request."
+          echo "EasyPanel accepted the ShortsFlow deployment request. Existing environment/secrets were preserved."
 
-      - name: Wait for new backend version
+      - name: Wait for healthy backend
         shell: bash
         run: |
-          for i in $(seq 1 24); do
-            if curl -fsS --max-time 10 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json; then
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            if curl -fsS --max-time 12 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json; then
               if python3 - <<'PY'
           import json
           from pathlib import Path
           data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))
-          checks = data.get('checks') or {}
-          backend_ready = (
-              data.get('status') == 'ok'
-              and checks.get('worker_alive') is True
-              and checks.get('ffmpeg_available') is True
-              and checks.get('ffprobe_available') is True
+          c = data.get('checks') or {}
+          # Real YouTube download may be independently degraded by IP/session
+          # reputation. Deployment readiness is based on internal runtime.
+          ok = (
+              c.get('worker_alive') is True
+              and c.get('ffmpeg_available') is True
+              and c.get('ffprobe_available') is True
+              and c.get('ytdlp_js_runtime_available') is True
+              and c.get('ytdlp_ejs_available') is True
           )
-          raise SystemExit(0 if backend_ready else 1)
+          raise SystemExit(0 if ok else 1)
           PY
               then
-                echo "New backend version is active and core runtime is healthy."
+                echo "Backend and worker are healthy."
                 exit 0
               fi
-              echo "Endpoint is reachable but core runtime is not ready yet. Attempt $i/24"
-            else
-              echo "Waiting for public healthcheck... attempt $i/24"
             fi
+            echo "Waiting for ShortsFlow runtime... attempt $i/36"
             sleep 10
           done
-          echo "New backend version did not become healthy in time."
+          echo "ShortsFlow runtime did not become healthy in time."
           exit 1
 
-      - name: Verify login API
+      - name: Verify authentication contract
         shell: bash
         run: |
           set -euo pipefail
@@ -261,13 +130,27 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"email":"smoke-test-do-not-create@example.com","password":"invalid-smoke-password"}' \
             https://shorts.r2rmarketingdigital.com.br/api/auth/login)
-          if [ "$code" != "401" ]; then
-            echo "Login route returned HTTP $code; expected 401 for invalid credentials."
-            exit 1
-          fi
-          echo "Login route is operational and no longer returns HTTP 500."
+          test "$code" = "401"
+          for path in /api/youtube/oauth/status /api/youtube/oauth/start; do
+            code=$(curl -sS --max-time 20 -o /tmp/oauth.json -w '%{http_code}' "https://shorts.r2rmarketingdigital.com.br${path}")
+            test "$code" = "401"
+          done
+          echo "Login and protected OAuth routes are responding correctly."
 
-      - name: Diagnose EasyPanel backend failure
+      - name: Verify frontend and legal pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in \
+            https://shorts.r2rmarketingdigital.com.br/ \
+            https://shorts.r2rmarketingdigital.com.br/privacidade \
+            https://shorts.r2rmarketingdigital.com.br/termos \
+            https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
+          do
+            curl -fsS -L --max-time 20 -o /dev/null "$url"
+          done
+
+      - name: Diagnose exact service on failure
         if: ${{ failure() }}
         continue-on-error: true
         shell: bash
@@ -275,36 +158,12 @@ jobs:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
           EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
-          echo "Collecting filtered diagnostics for r2rmarketingdigital/shortsia only."
           curl -sS --max-time 30 --get \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
             --data-urlencode "projectName=r2rmarketingdigital" \
             --data-urlencode "serviceName=shortsia" \
-            "$EASYPANEL_URL/api/getServiceError" > /tmp/service-error.json || true
-          echo "EasyPanel service error:"
-          cat /tmp/service-error.json 2>/dev/null | head -c 12000 || true
-          echo
-
-          curl -sS --max-time 30 --get \
-            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
-            -H "Accept: application/json" \
-            --data-urlencode "projectName=r2rmarketingdigital" \
-            --data-urlencode "serviceName=shortsia" \
-            "$EASYPANEL_URL/api/queryServiceLogs" > /tmp/service-logs.json || true
-          echo "Filtered runtime errors:"
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path('/tmp/service-logs.json').read_text(encoding='utf-8', errors='replace') if Path('/tmp/service-logs.json').exists() else ''
-          needles = ('traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database', 'uvicorn', 'backend', 'exited', 'fatal')
-          lines = [line for line in text.splitlines() if any(word in line.lower() for word in needles)]
-          print('\n'.join(lines[-160:])[:20000])
-          PY
-
-      - name: Check frontend
-        shell: bash
-        run: |
-          curl -fsSI --max-time 15 https://shorts.r2rmarketingdigital.com.br/
+            "$EASYPANEL_URL/api/getServiceError" | head -c 12000 || true
 
       - name: Report deployment success
         if: ${{ success() }}
@@ -317,7 +176,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"success\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deploy, backend and login route passed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+            -d "{\"state\":\"success\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deploy and runtime checks passed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
 
       - name: Report deployment failure
         if: ${{ failure() || cancelled() }}
@@ -330,4 +189,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"failure\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deployment, backend or login validation failed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+            -d "{\"state\":\"failure\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deployment or runtime validation failed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
