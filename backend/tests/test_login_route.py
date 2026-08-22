@@ -8,7 +8,7 @@ def test_invalid_login_returns_401_not_500():
         response = client.post(
             "/api/auth/login",
             json={
-                "email": "smoke-test-do-not-create@invalid.local",
+                "email": "shortsflow-smoke-test-9f4d7c@example.com",
                 "password": "invalid-smoke-password",
             },
         )
