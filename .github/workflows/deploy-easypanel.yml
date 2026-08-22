@@ -42,25 +42,27 @@ jobs:
             exit 1
           fi
 
-      - name: Install EasyPanel CLI
-        shell: bash
-        run: |
-          curl -fsSL https://get.easypanel.io/cli | sh
-          easypanel version
-
-      - name: Connect EasyPanel server
+      - name: Verify EasyPanel API and target app
         shell: bash
         env:
           EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
-          printf '%s' "$EASYPANEL_API_KEY" | easypanel server add production https://ke4n49.easypanel.host --api-key-stdin
-          easypanel server check production
-          easypanel server refresh production
-
-      - name: Inspect target app
-        shell: bash
-        run: |
-          easypanel --server production app inspect r2rmarketingdigital/shortsia --format json
+          curl -fsS --max-time 30 --get \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            --data-urlencode "projectName=r2rmarketingdigital" \
+            --data-urlencode "serviceName=shortsia" \
+            "$EASYPANEL_URL/api/inspectAppService" \
+            > /tmp/easypanel-app.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/easypanel-app.json').read_text(encoding='utf-8'))
+          if data is None:
+              raise SystemExit('Target EasyPanel app was not found')
+          print('EasyPanel API authenticated; target app shortsia exists.')
+          PY
 
       - name: Ensure custom domain
         shell: bash
@@ -75,8 +77,18 @@ jobs:
 
       - name: Deploy target app
         shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
         run: |
-          easypanel --server production app deploy r2rmarketingdigital/shortsia --format json
+          curl -fsS --max-time 60 -X POST \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "$EASYPANEL_URL/api/deployAppService" \
+            -d '{"projectName":"r2rmarketingdigital","serviceName":"shortsia","forceRebuild":false}' \
+            > /tmp/easypanel-deploy.json
+          echo "EasyPanel accepted the shortsia deployment request."
 
       - name: Wait for application
         shell: bash
