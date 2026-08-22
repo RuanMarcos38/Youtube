@@ -1,0 +1,114 @@
+name: Apply Senior Production Sweep
+
+on:
+  push:
+    branches:
+      - audit/senior-production-sweep-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[senior-sweep-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/senior-production-sweep-20260822
+          fetch-depth: 0
+
+      - name: Apply audited fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Expected block not found in {path}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # 1) Never ship a reusable administrator credential in source code.
+          replace_once(
+              'backend/app/config.py',
+              '    admin_bootstrap_email: str = "admin@r2rmarketingdigital.com.br"\n    admin_bootstrap_password_hash: str = "pbkdf2_sha256$260000$jbqldmkFLidGVBbNUVAjQw==$_L_rs0Q7Dq-tAtwiFTDu81SL4Y6d_HXM2IOmf4NNItI="',
+              '    # Production administrator bootstrap credentials must come only from\n    # the runtime environment/secrets. Empty defaults prevent a repository clone\n    # from inheriting a production-capable administrator credential.\n    admin_bootstrap_email: str = ""\n    admin_bootstrap_password_hash: str = ""',
+          )
+
+          # 2) Kiwify webhook bootstrap must not depend on administrator credentials.
+          p = Path('backend/app/services/bootstrap.py')
+          text = p.read_text(encoding='utf-8')
+          marker = 'def ensure_superadmin() -> None:\n'
+          if marker not in text:
+              raise SystemExit('ensure_superadmin marker not found')
+          prefix = text.split(marker, 1)[0]
+          replacement = '''def ensure_superadmin() -> None:\n    db = SessionLocal()\n    try:\n        # The webhook token is infrastructure state and must exist even when the\n        # optional superadmin bootstrap credential is intentionally disabled.\n        _ensure_kiwify_webhook_token(db)\n\n        email = settings.admin_bootstrap_email.strip().lower()\n        password_hash = settings.admin_bootstrap_password_hash.strip()\n        if not email or not password_hash:\n            return\n\n        user = db.query(User).filter(User.email == email).first()\n        if user:\n            user.role = "superadmin"\n            user.active = True\n            _apply_admin_credential_once(db, user, password_hash)\n            plan = db.query(TenantPlan).filter(TenantPlan.tenant_id == user.tenant_id).first()\n            if not plan:\n                plan = TenantPlan(\n                    tenant_id=user.tenant_id,\n                    plan_code="admin",\n                    billing_status="active",\n                    monthly_job_limit=999999,\n                    unlimited=True,\n                )\n                db.add(plan)\n            else:\n                plan.plan_code = "admin"\n                plan.billing_status = "active"\n                plan.unlimited = True\n            tenant = db.get(Tenant, user.tenant_id)\n            if tenant:\n                tenant.billing_status = "active"\n            db.commit()\n            return\n\n        tenant = Tenant(name="ShortsFlow Administração", billing_status="active")\n        db.add(tenant)\n        db.flush()\n        user = User(\n            tenant_id=tenant.id,\n            email=email,\n            password_hash=password_hash,\n            display_name="Administrador ShortsFlow",\n            role="superadmin",\n            active=True,\n        )\n        db.add(user)\n        db.flush()\n        db.add(\n            TenantPlan(\n                tenant_id=tenant.id,\n                plan_code="admin",\n                billing_status="active",\n                monthly_job_limit=999999,\n                unlimited=True,\n            )\n        )\n        db.add(SystemSetting(\n            key="admin_bootstrap_credential_version",\n            value=ADMIN_CREDENTIAL_VERSION,\n            secret=False,\n        ))\n        db.commit()\n    finally:\n        db.close()\n'''
+          p.write_text(prefix + replacement, encoding='utf-8')
+
+          # 3) OAuth callback: handle user denial/provider errors without a raw 422/stack detail.
+          Path('backend/app/routers/youtube_auth.py').write_text('''from urllib.parse import urlencode\n\nfrom fastapi import APIRouter, Depends, HTTPException, Query\nfrom fastapi.responses import RedirectResponse\nfrom sqlalchemy.orm import Session\n\nfrom ..auth import get_current_user\nfrom ..config import settings\nfrom ..database import get_db\nfrom ..models import User\nfrom ..schemas import OAuthStartResponse, OAuthStatusResponse\nfrom ..services.youtube_oauth import build_authorization_url, complete_oauth, disconnect, get_connection_status\n\nrouter = APIRouter(prefix="/youtube", tags=["youtube"])\n\n\n@router.get("/oauth/status", response_model=OAuthStatusResponse)\ndef oauth_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):\n    return get_connection_status(db, user.id)\n\n\n@router.get("/oauth/start", response_model=OAuthStartResponse)\ndef oauth_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):\n    try:\n        return {"authorization_url": build_authorization_url(db, user)}\n    except RuntimeError as exc:\n        raise HTTPException(status_code=503, detail=str(exc)) from exc\n\n\ndef _oauth_frontend_redirect(status_value: str, reason: str = "") -> RedirectResponse:\n    query = {"youtube": status_value}\n    if reason:\n        query["reason"] = reason[:120]\n    return RedirectResponse(url=f"{settings.frontend_url}/?{urlencode(query)}")\n\n\n@router.get("/oauth/callback")\ndef oauth_callback(\n    code: str | None = Query(default=None),\n    state: str | None = Query(default=None),\n    error: str | None = Query(default=None),\n    db: Session = Depends(get_db),\n):\n    if error:\n        return _oauth_frontend_redirect("error", error)\n    if not code or not state:\n        return _oauth_frontend_redirect("error", "oauth_callback_incompleto")\n    try:\n        complete_oauth(db, code, state)\n    except Exception:\n        # Do not expose provider/token internals to the browser. The user receives\n        # a stable error state and can retry the account picker.\n        return _oauth_frontend_redirect("error", "oauth_nao_concluido")\n    return _oauth_frontend_redirect("connected")\n\n\n@router.post("/oauth/disconnect", status_code=204)\ndef oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):\n    disconnect(db, user.id)\n''', encoding='utf-8')
+
+          # 4) Revoke Google token best-effort before deleting local connection.
+          p = Path('backend/app/services/youtube_oauth.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'import json\n',
+              'import json\nfrom urllib.parse import urlencode\nfrom urllib.request import Request as UrlRequest, urlopen\n',
+              1,
+          )
+          old_disconnect = '''def disconnect(db: Session, user_id: int) -> None:\n    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()\n    if connection:\n        db.delete(connection)\n        db.commit()\n'''
+          new_disconnect = '''def _revoke_google_token(connection: YouTubeConnection) -> None:\n    if not connection.token_json:\n        return\n    try:\n        info = json.loads(connection.token_json)\n        token = str(info.get("refresh_token") or info.get("token") or "").strip()\n        if not token:\n            return\n        request = UrlRequest(\n            "https://oauth2.googleapis.com/revoke",\n            data=urlencode({"token": token}).encode("utf-8"),\n            headers={"Content-Type": "application/x-www-form-urlencoded"},\n            method="POST",\n        )\n        with urlopen(request, timeout=4):\n            pass\n    except Exception:\n        # Local disconnect must still complete if Google's revoke endpoint is\n        # temporarily unavailable. No token value is ever logged.\n        pass\n\n\ndef disconnect(db: Session, user_id: int) -> None:\n    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()\n    if connection:\n        _revoke_google_token(connection)\n        db.delete(connection)\n        db.commit()\n'''
+          if old_disconnect not in text:
+              raise SystemExit('disconnect block not found')
+          p.write_text(text.replace(old_disconnect, new_disconnect, 1), encoding='utf-8')
+
+          # 5) Stop deploys from re-injecting a repository-known admin credential.
+          p = Path('.github/workflows/deploy-easypanel.yml')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              '''        env:\n          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}\n          EASYPANEL_URL: https://ke4n49.easypanel.host\n        run: |\n          set -euo pipefail\n          umask 077\n          python3 - <<'PY'\n          import json\n''',
+              '''        env:\n          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}\n          EASYPANEL_URL: https://ke4n49.easypanel.host\n          SHORTSFLOW_ADMIN_BOOTSTRAP_EMAIL: ${{ secrets.SHORTSFLOW_ADMIN_BOOTSTRAP_EMAIL }}\n          SHORTSFLOW_ADMIN_BOOTSTRAP_PASSWORD_HASH: ${{ secrets.SHORTSFLOW_ADMIN_BOOTSTRAP_PASSWORD_HASH }}\n        run: |\n          set -euo pipefail\n          umask 077\n          python3 - <<'PY'\n          import json\n          import os\n''',
+              1,
+          )
+          text = text.replace(
+              '''          admin_email = 'admin@r2rmarketingdigital.com.br'\n          admin_hash = 'pbkdf2_sha256$260000$jbqldmkFLidGVBbNUVAjQw==$_L_rs0Q7Dq-tAtwiFTDu81SL4Y6d_HXM2IOmf4NNItI='\n''',
+              '''          # Preserve the EasyPanel values already configured. Secrets are\n          # optional fallbacks only for a brand-new environment.\n          admin_email = os.environ.get('SHORTSFLOW_ADMIN_BOOTSTRAP_EMAIL', '').strip()\n          admin_hash = os.environ.get('SHORTSFLOW_ADMIN_BOOTSTRAP_PASSWORD_HASH', '').strip()\n''',
+              1,
+          )
+          text = text.replace(
+              '''              elif line.startswith('ADMIN_BOOTSTRAP_EMAIL='):\n                  found_admin_email = True\n                  desired = 'ADMIN_BOOTSTRAP_EMAIL=' + admin_email\n                  output.append(desired)\n                  changed = changed or line != desired\n              elif line.startswith('ADMIN_BOOTSTRAP_PASSWORD_HASH='):\n                  found_admin_hash = True\n                  desired = 'ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash\n                  output.append(desired)\n                  changed = changed or line != desired\n''',
+              '''              elif line.startswith('ADMIN_BOOTSTRAP_EMAIL='):\n                  found_admin_email = True\n                  desired = ('ADMIN_BOOTSTRAP_EMAIL=' + admin_email) if admin_email else line\n                  output.append(desired)\n                  changed = changed or line != desired\n              elif line.startswith('ADMIN_BOOTSTRAP_PASSWORD_HASH='):\n                  found_admin_hash = True\n                  desired = ('ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash) if admin_hash else line\n                  output.append(desired)\n                  changed = changed or line != desired\n''',
+              1,
+          )
+          text = text.replace(
+              '''          if not found_admin_email:\n              output.append('ADMIN_BOOTSTRAP_EMAIL=' + admin_email)\n              changed = True\n          if not found_admin_hash:\n              output.append('ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash)\n              changed = True\n''',
+              '''          if not found_admin_email and admin_email:\n              output.append('ADMIN_BOOTSTRAP_EMAIL=' + admin_email)\n              changed = True\n          if not found_admin_hash and admin_hash:\n              output.append('ADMIN_BOOTSTRAP_PASSWORD_HASH=' + admin_hash)\n              changed = True\n''',
+              1,
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # 6) OAuth callback regression tests and secure defaults.
+          Path('backend/tests/test_oauth_callback.py').write_text('''from fastapi.testclient import TestClient\n\nfrom app.main import app\n\n\ndef test_oauth_provider_error_redirects_to_frontend():\n    with TestClient(app) as client:\n        response = client.get(\n            "/api/youtube/oauth/callback?error=access_denied&state=test-state",\n            follow_redirects=False,\n        )\n        assert response.status_code in {302, 307}\n        location = response.headers["location"]\n        assert "youtube=error" in location\n        assert "reason=access_denied" in location\n\n\ndef test_oauth_incomplete_callback_redirects_instead_of_422():\n    with TestClient(app) as client:\n        response = client.get("/api/youtube/oauth/callback", follow_redirects=False)\n        assert response.status_code in {302, 307}\n        assert "youtube=error" in response.headers["location"]\n''', encoding='utf-8')
+
+          Path('backend/tests/test_security_defaults.py').write_text('''from app.config import Settings\n\n\ndef test_admin_bootstrap_has_no_repository_credential_default():\n    settings = Settings(_env_file=None)\n    assert settings.admin_bootstrap_email == ""\n    assert settings.admin_bootstrap_password_hash == ""\n''', encoding='utf-8')
+
+          # 7) Hourly production watchdog with safe self-healing for runtime only.
+          Path('.github/workflows/production-watchdog.yml').write_text('''name: Production Watchdog\n\non:\n  schedule:\n    - cron: "17 * * * *"\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\njobs:\n  watch:\n    runs-on: ubuntu-latest\n    timeout-minutes: 12\n    steps:\n      - name: Inspect production health\n        id: health\n        shell: bash\n        run: |\n          set -euo pipefail\n          curl -fsS --max-time 30 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json\n          python3 - <<'PY'\n          import json\n          from pathlib import Path\n          data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))\n          checks = data.get('checks') or {}\n          safe = {\n              'status': data.get('status'),\n              'version': data.get('version'),\n              'configuration_complete': data.get('configuration_complete'),\n              'worker_alive': checks.get('worker_alive'),\n              'ffmpeg_available': checks.get('ffmpeg_available'),\n              'ffprobe_available': checks.get('ffprobe_available'),\n              'js_runtime': checks.get('ytdlp_js_runtime_available'),\n              'ejs': checks.get('ytdlp_ejs_available'),\n              'download_probe': checks.get('youtube_download_probe_ok'),\n              'oauth_configured': checks.get('google_oauth_configured'),\n          }\n          print(json.dumps(safe, ensure_ascii=False))\n          core_failed = any(value is not True for value in [\n              checks.get('worker_alive'),\n              checks.get('ffmpeg_available'),\n              checks.get('ffprobe_available'),\n              checks.get('ytdlp_js_runtime_available'),\n              checks.get('ytdlp_ejs_available'),\n          ])\n          Path('/tmp/core-failed').write_text('1' if core_failed else '0')\n          Path('/tmp/download-failed').write_text('1' if checks.get('youtube_download_probe_ok') is False else '0')\n          PY\n          echo "core_failed=$(cat /tmp/core-failed)" >> "$GITHUB_OUTPUT"\n          echo "download_failed=$(cat /tmp/download-failed)" >> "$GITHUB_OUTPUT"\n\n      - name: Auto-redeploy ShortsFlow when internal runtime is unhealthy\n        if: steps.health.outputs.core_failed == '1'\n        shell: bash\n        env:\n          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}\n          EASYPANEL_URL: https://ke4n49.easypanel.host\n        run: |\n          set -euo pipefail\n          test -n "$EASYPANEL_API_KEY"\n          curl -fsS --max-time 60 -X POST \\\n            -H "Authorization: Bearer $EASYPANEL_API_KEY" \\\n            -H "Accept: application/json" \\\n            -H "Content-Type: application/json" \\\n            "$EASYPANEL_URL/api/deployAppService" \\\n            -d '{"projectName":"r2rmarketingdigital","serviceName":"shortsia","forceRebuild":true}' > /dev/null\n          echo "Safe EasyPanel rebuild requested for shortsia only."\n          for i in $(seq 1 30); do\n            sleep 10\n            if curl -fsS --max-time 15 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/recheck.json; then\n              if python3 - <<'PY'\n          import json\n          from pathlib import Path\n          data=json.loads(Path('/tmp/recheck.json').read_text())\n          c=data.get('checks') or {}\n          ok = all(c.get(k) is True for k in ('worker_alive','ffmpeg_available','ffprobe_available','ytdlp_js_runtime_available','ytdlp_ejs_available'))\n          raise SystemExit(0 if ok else 1)\n          PY\n              then\n                echo "Runtime recovered after automatic rebuild."\n                exit 0\n              fi\n            fi\n          done\n          echo "Runtime did not recover after one safe rebuild."\n          exit 1\n\n      - name: Surface YouTube network/session block without destructive repair\n        if: steps.health.outputs.download_failed == '1'\n        shell: bash\n        run: |\n          echo "YouTube real-download probe is blocked. Code/config/runtime are monitored; changing OAuth or rebuilding repeatedly will not repair IP/cookie reputation."\n          echo "Use the administrator Download YouTube diagnostics to renew cookies or configure a stable authorized proxy when required."\n          exit 1\n\n      - name: Validate frontend and API contract\n        shell: bash\n        run: |\n          set -euo pipefail\n          curl -fsS -L --max-time 20 -o /dev/null https://shorts.r2rmarketingdigital.com.br/\n          code=$(curl -sS --max-time 20 -o /tmp/login.json -w '%{http_code}' \\\n            -H 'Content-Type: application/json' \\\n            -d '{"email":"watchdog-invalid@example.com","password":"invalid-watchdog-password"}' \\\n            https://shorts.r2rmarketingdigital.com.br/api/auth/login)\n          test "$code" = "401"\n''', encoding='utf-8')
+
+          # Remove this one-shot workflow from the final branch.
+          Path('.github/workflows/senior-sweep-apply.yml').unlink(missing_ok=True)
+          PY
+
+      - name: Commit audited changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ShortsFlow Senior Sweep"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden production configuration and OAuth [senior-sweep-applied]"
+          git push origin HEAD:audit/senior-production-sweep-20260822
