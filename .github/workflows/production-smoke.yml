@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/system/public > /tmp/public.json
+          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/billing/public > /tmp/public.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -72,6 +72,30 @@ jobs:
           fi
           echo "Login route is responding correctly (401 for invalid credentials, not 500)."
 
-      - name: Validate frontend
+      - name: Validate OAuth routes are protected
         shell: bash
-        run: curl -fsSI --max-time 20 https://shorts.r2rmarketingdigital.com.br/
+        run: |
+          set -euo pipefail
+          for path in /api/youtube/oauth/status /api/youtube/oauth/start; do
+            code=$(curl -sS --max-time 20 -o /tmp/oauth.json -w '%{http_code}' "https://shorts.r2rmarketingdigital.com.br${path}")
+            if [ "$code" != "401" ]; then
+              echo "$path returned HTTP $code; expected 401 without a session."
+              cat /tmp/oauth.json || true
+              exit 1
+            fi
+          done
+          echo "OAuth routes are protected and responding correctly."
+
+      - name: Validate frontend and legal pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in \
+            https://shorts.r2rmarketingdigital.com.br/ \
+            https://shorts.r2rmarketingdigital.com.br/privacidade \
+            https://shorts.r2rmarketingdigital.com.br/termos \
+            https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
+          do
+            curl -fsS -L --max-time 20 -o /dev/null "$url"
+          done
+          echo "Frontend and legal pages are reachable."
