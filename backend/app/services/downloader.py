@@ -7,6 +7,7 @@ from pathlib import Path
 
 from yt_dlp import YoutubeDL
 from ..config import settings
+from .runtime_download_auth import cookie_override_file, effective_proxy_url
 
 
 COOKIE_RUNTIME_FILE = Path("/tmp/shortsflow-youtube-cookies.txt")
@@ -20,6 +21,8 @@ class DownloadError(RuntimeError):
 
 def download_auth_configured() -> bool:
     """Return True only when a usable cookie source is actually configured."""
+    if cookie_override_file() is not None:
+        return True
     if settings.ytdlp_cookies_b64.strip():
         return True
     configured_file = settings.ytdlp_cookie_file.strip()
@@ -27,7 +30,7 @@ def download_auth_configured() -> bool:
 
 
 def download_proxy_configured() -> bool:
-    return bool(settings.ytdlp_proxy_url.strip())
+    return bool(effective_proxy_url())
 
 
 def download_access_configured() -> bool:
@@ -35,7 +38,6 @@ def download_access_configured() -> bool:
 
 
 def _download_auth_configured() -> bool:
-    # Backwards-compatible internal alias used by older tests/callers.
     return download_auth_configured()
 
 
@@ -46,13 +48,31 @@ def _runtime_cookie_file(output_dir: Path | None = None) -> Path:
     return COOKIE_RUNTIME_FILE.with_name(f"{COOKIE_RUNTIME_FILE.stem}-{digest}{COOKIE_RUNTIME_FILE.suffix}")
 
 
+def _copy_cookie_text(text: str, target: Path) -> str:
+    target.write_text(text.rstrip() + "\n", encoding="utf-8")
+    os.chmod(target, 0o600)
+    return str(target)
+
+
 def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
+    target = runtime_file or COOKIE_RUNTIME_FILE
+
+    override = cookie_override_file()
+    if override is not None:
+        try:
+            return _copy_cookie_text(override.read_text(encoding="utf-8"), target)
+        except Exception as exc:
+            raise DownloadError("O cookie renovado pelo administrador não pôde ser lido.") from exc
+
     configured_file = settings.ytdlp_cookie_file.strip()
     if configured_file:
         path = Path(configured_file)
         if not path.is_file():
             raise DownloadError("YTDLP_COOKIE_FILE está configurado, mas o arquivo não existe no container.")
-        return str(path)
+        try:
+            return _copy_cookie_text(path.read_text(encoding="utf-8"), target)
+        except Exception as exc:
+            raise DownloadError("YTDLP_COOKIE_FILE existe, mas não pôde ser lido.") from exc
 
     encoded = "".join(settings.ytdlp_cookies_b64.split())
     if not encoded:
@@ -75,10 +95,7 @@ def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
     if "Cookie File" not in first_line and "\t" not in text:
         raise DownloadError("O cookie informado não parece estar no formato Netscape cookies.txt.")
 
-    target = runtime_file or COOKIE_RUNTIME_FILE
-    target.write_text(text + "\n", encoding="utf-8")
-    os.chmod(target, 0o600)
-    return str(target)
+    return _copy_cookie_text(text, target)
 
 
 def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -> dict:
@@ -94,9 +111,9 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -
         "restrictfilenames": True,
         "source_address": "0.0.0.0",
         "socket_timeout": 30,
-        "retries": 2,
-        "fragment_retries": 2,
-        "extractor_retries": 2,
+        "retries": 3,
+        "fragment_retries": 3,
+        "extractor_retries": 3,
         "file_access_retries": 1,
         "concurrent_fragment_downloads": 4,
         "cachedir": str(YTDLP_CACHE_DIR),
@@ -110,7 +127,6 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -
             try:
                 progress_hook(event)
             except Exception:
-                # UI progress reporting must never abort the media download.
                 pass
 
         options["progress_hooks"] = [safe_progress_hook]
@@ -118,8 +134,9 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None) -
     cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
     if cookie_file:
         options["cookiefile"] = cookie_file
-    if download_proxy_configured():
-        options["proxy"] = settings.ytdlp_proxy_url.strip()
+    proxy_url = effective_proxy_url()
+    if proxy_url:
+        options["proxy"] = proxy_url
     return options
 
 
@@ -168,8 +185,6 @@ def _compact_error(message: str) -> str:
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # With authenticated cookies, try the normal YouTube client first. This is
-    # faster and avoids waiting on PO-token fallbacks when they are unnecessary.
     if download_auth_configured():
         option_variants = [
             {},
@@ -224,14 +239,13 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
             if not download_access_configured():
                 raise DownloadError(
                     "O YouTube bloqueou a sessão da VPS na etapa de download. "
-                    "O PO Token e o runtime JavaScript não substituem a autenticação quando o IP do servidor recebe o desafio 'not a bot'. "
-                    "Configure no EasyPanel o segredo YTDLP_COOKIES_B64 com um cookies.txt autorizado em Base64, "
-                    "ou YTDLP_PROXY_URL com uma saída de rede autorizada. Nenhuma credencial existente precisa ser alterada."
+                    "Configure uma sessão autorizada ou uma saída de proxy no painel administrador."
                 )
             raise DownloadError(
-                "O YouTube ainda está rejeitando a sessão de download da VPS. "
-                "A autenticação/proxy está configurada, mas a sessão foi recusada ou expirou. "
-                "Renove o cookies.txt autorizado ou verifique a reputação/saída do proxy."
+                "O YouTube recusou a sessão de download da VPS. "
+                "Abra o painel Administrador > Download YouTube e renove os cookies do Firefox. "
+                "Se a sessão voltar a expirar rapidamente, configure um proxy residencial/estático no mesmo painel; "
+                "cookies obtidos em uma rede e usados por um IP de datacenter podem ser recusados pelo YouTube."
             )
 
         raise DownloadError(
