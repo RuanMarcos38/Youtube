@@ -15,8 +15,25 @@ class DownloadError(RuntimeError):
     pass
 
 
+def download_auth_configured() -> bool:
+    """Return True only when a usable cookie source is actually configured."""
+    if settings.ytdlp_cookies_b64.strip():
+        return True
+    configured_file = settings.ytdlp_cookie_file.strip()
+    return bool(configured_file and Path(configured_file).is_file())
+
+
+def download_proxy_configured() -> bool:
+    return bool(settings.ytdlp_proxy_url.strip())
+
+
+def download_access_configured() -> bool:
+    return download_auth_configured() or download_proxy_configured()
+
+
 def _download_auth_configured() -> bool:
-    return bool(settings.ytdlp_cookie_file.strip() or settings.ytdlp_cookies_b64.strip())
+    # Backwards-compatible internal alias used by older tests/callers.
+    return download_auth_configured()
 
 
 def _resolve_cookie_file() -> str | None:
@@ -81,7 +98,7 @@ def _base_options(output_dir: Path) -> dict:
     cookie_file = _resolve_cookie_file()
     if cookie_file:
         options["cookiefile"] = cookie_file
-    if settings.ytdlp_proxy_url.strip():
+    if download_proxy_configured():
         options["proxy"] = settings.ytdlp_proxy_url.strip()
     return options
 
@@ -170,7 +187,7 @@ def download_video(url: str, output_dir: Path) -> Path:
             for error in errors
         )
         if bot_blocked:
-            if not _download_auth_configured() and not settings.ytdlp_proxy_url.strip():
+            if not download_access_configured():
                 raise DownloadError(
                     "O YouTube bloqueou a sessão da VPS na etapa de download. "
                     "O PO Token e o runtime JavaScript não substituem a autenticação quando o IP do servidor recebe o desafio 'not a bot'. "
