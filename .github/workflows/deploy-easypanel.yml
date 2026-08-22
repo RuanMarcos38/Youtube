@@ -125,7 +125,6 @@ jobs:
           from pathlib import Path
           data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))
           checks = data.get('checks') or {}
-          # Presence of this field proves the new backend version is active.
           if 'youtube_download_ready' in checks and checks.get('youtube_download_ready') is False:
               raise SystemExit(0)
           raise SystemExit(1)
@@ -145,6 +144,41 @@ jobs:
           done
           echo "New backend version did not become healthy in time."
           exit 1
+
+      - name: Diagnose EasyPanel backend failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          echo "Collecting filtered diagnostics for r2rmarketingdigital/shortsia only."
+          curl -sS --max-time 30 --get \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            --data-urlencode "projectName=r2rmarketingdigital" \
+            --data-urlencode "serviceName=shortsia" \
+            "$EASYPANEL_URL/api/getServiceError" > /tmp/service-error.json || true
+          echo "EasyPanel service error:"
+          cat /tmp/service-error.json 2>/dev/null | head -c 12000 || true
+          echo
+
+          curl -sS --max-time 30 --get \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            --data-urlencode "projectName=r2rmarketingdigital" \
+            --data-urlencode "serviceName=shortsia" \
+            --data-urlencode "limit=250" \
+            "$EASYPANEL_URL/api/queryServiceLogs" > /tmp/service-logs.json || true
+          echo "Filtered runtime errors:"
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/service-logs.json').read_text(encoding='utf-8', errors='replace') if Path('/tmp/service-logs.json').exists() else ''
+          needles = ('traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database', 'uvicorn', 'backend', 'exited', 'fatal')
+          lines = [line for line in text.splitlines() if any(word in line.lower() for word in needles)]
+          print('\n'.join(lines[-160:])[:20000])
+          PY
 
       - name: Check frontend
         shell: bash
