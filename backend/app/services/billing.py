@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import hash_password, normalize_email
 from ..config import settings
-from ..models import Job, PaymentEvent, ProvisionedCredential, Tenant, TenantPlan, User
+from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 from .email_service import send_access_credentials
 
 
@@ -105,11 +105,24 @@ def _event_type(payload: dict) -> str:
     return str(payload.get("webhook_event_type") or payload.get("event_type") or payload.get("event") or "unknown").strip().lower()
 
 
-def _is_upgrade(payload: dict) -> bool:
+def _setting_value(db: Session, key: str) -> str:
+    row = db.get(SystemSetting, key)
+    return row.value.strip() if row and row.value else ""
+
+
+def _is_upgrade(db: Session, payload: dict) -> bool:
+    product = _product(payload)
+    product_id = str(product.get("product_id") or product.get("id") or "").strip()
+    mapped_upgrade_id = _setting_value(db, "kiwify_upgrade_product_id")
+    mapped_base_id = _setting_value(db, "kiwify_base_product_id")
+    if product_id and mapped_upgrade_id and product_id == mapped_upgrade_id:
+        return True
+    if product_id and mapped_base_id and product_id == mapped_base_id:
+        return False
+
     checkout = str(payload.get("checkout_link") or "").strip()
     if settings.kiwify_upgrade_checkout_code and settings.kiwify_upgrade_checkout_code in checkout:
         return True
-    product = _product(payload)
     name = str(product.get("product_name") or product.get("name") or "").lower()
     return "upgrade" in name or "ilimit" in name
 
@@ -187,7 +200,7 @@ def apply_kiwify_webhook(db: Session, payload: dict) -> dict:
             tenant.billing_status = "active"
 
         plan = ensure_plan(db, tenant_id)
-        upgrade = _is_upgrade(payload)
+        upgrade = _is_upgrade(db, payload)
         plan.billing_status = "active"
         plan.kiwify_order_id = order_id
         plan.kiwify_product_id = product_id or plan.kiwify_product_id
