@@ -1,17 +1,19 @@
 import json
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from sqlalchemy.orm import Session
+
 from ..config import settings
+from ..database import SessionLocal
+from ..models import User, YouTubeConnection
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
-TOKEN_FILE = settings.data_path / "youtube_token.json"
-STATE_FILE = settings.data_path / "youtube_oauth_state.txt"
-CHANNEL_FILE = settings.data_path / "youtube_channel.json"
 
 
 def _env_client_config() -> dict | None:
@@ -45,115 +47,115 @@ def _new_flow(state: str | None = None, code_verifier: str | None = None) -> Flo
         return Flow.from_client_config(config, **kwargs)
     if settings.oauth_secrets_path.exists():
         return Flow.from_client_secrets_file(str(settings.oauth_secrets_path), **kwargs)
-    raise RuntimeError(
-        "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET "
-        "or provide GOOGLE_OAUTH_CLIENT_SECRETS_FILE."
-    )
+    raise RuntimeError("Google OAuth não está configurado no servidor.")
 
 
-def _write_oauth_state(state: str, code_verifier: str | None) -> None:
-    STATE_FILE.write_text(
-        json.dumps({"state": state, "code_verifier": code_verifier}),
-        encoding="utf-8",
-    )
+def _connection(db: Session, user_id: int) -> YouTubeConnection:
+    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
+    if connection is None:
+        connection = YouTubeConnection(user_id=user_id)
+        db.add(connection)
+        db.flush()
+    return connection
 
 
-def _read_oauth_state() -> tuple[str, str | None]:
-    if not STATE_FILE.exists():
-        return "", None
-    raw = STATE_FILE.read_text(encoding="utf-8").strip()
-    if not raw:
-        return "", None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw, None
-    return str(payload.get("state") or ""), payload.get("code_verifier")
-
-
-def build_authorization_url() -> str:
+def build_authorization_url(db: Session, user: User) -> str:
     flow = _new_flow()
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
-    _write_oauth_state(state, flow.code_verifier)
+    connection = _connection(db, user.id)
+    connection.oauth_state = state
+    connection.code_verifier = flow.code_verifier
+    db.commit()
     return authorization_url
 
 
-def _write_channel_metadata(creds: Credentials) -> None:
+def _channel_metadata(creds: Credentials) -> tuple[str | None, str | None]:
     youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
     response = youtube.channels().list(part="snippet", mine=True, maxResults=1).execute()
     items = response.get("items", [])
     if not items:
-        CHANNEL_FILE.unlink(missing_ok=True)
-        return
+        return None, None
     item = items[0]
-    payload = {
-        "channel_id": item.get("id"),
-        "channel_title": item.get("snippet", {}).get("title"),
-    }
-    CHANNEL_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return item.get("id"), item.get("snippet", {}).get("title")
 
 
-def complete_oauth(code: str, state: str) -> None:
-    expected_state, code_verifier = _read_oauth_state()
-    if not expected_state or state != expected_state:
-        raise RuntimeError("Invalid OAuth state. Start the YouTube connection again.")
-    flow = _new_flow(state=state, code_verifier=code_verifier)
+def complete_oauth(db: Session, code: str, state: str) -> int:
+    connection = db.query(YouTubeConnection).filter(YouTubeConnection.oauth_state == state).first()
+    if not connection:
+        raise RuntimeError("Estado OAuth inválido. Inicie a conexão do YouTube novamente.")
+
+    flow = _new_flow(state=state, code_verifier=connection.code_verifier)
     flow.fetch_token(code=code)
     creds = flow.credentials
-    TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
-    _write_channel_metadata(creds)
-    STATE_FILE.unlink(missing_ok=True)
+    channel_id, channel_title = _channel_metadata(creds)
+
+    connection.token_json = creds.to_json()
+    connection.channel_id = channel_id
+    connection.channel_title = channel_title
+    connection.oauth_state = None
+    connection.code_verifier = None
+    db.commit()
+    return connection.user_id
 
 
-def get_credentials() -> Credentials:
-    if not TOKEN_FILE.exists():
-        raise RuntimeError("YouTube is not connected. Complete OAuth first.")
-    info = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+def _credentials_from_connection(connection: YouTubeConnection, db: Session) -> Credentials:
+    if not connection.token_json:
+        raise RuntimeError("YouTube não está conectado para este perfil.")
+    info = json.loads(connection.token_json)
     creds = Credentials.from_authorized_user_info(info, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+        connection.token_json = creds.to_json()
+        db.commit()
     if not creds.valid:
-        raise RuntimeError("YouTube credentials are invalid. Reconnect the channel.")
+        raise RuntimeError("As credenciais do YouTube deste perfil são inválidas. Reconecte o canal.")
     return creds
 
 
-def get_connection_status() -> dict:
+def get_credentials(user_id: int) -> Credentials:
+    db = SessionLocal()
+    try:
+        connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
+        if not connection:
+            raise RuntimeError("YouTube não está conectado para este perfil.")
+        return _credentials_from_connection(connection, db)
+    finally:
+        db.close()
+
+
+def get_connection_status(db: Session, user_id: int) -> dict:
     configured = oauth_configured()
+    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
     connected = False
-    channel_id = None
-    channel_title = None
-    if configured:
+    if configured and connection and connection.token_json:
         try:
-            get_credentials()
+            _credentials_from_connection(connection, db)
             connected = True
         except Exception:
             connected = False
-    if CHANNEL_FILE.exists():
-        try:
-            metadata = json.loads(CHANNEL_FILE.read_text(encoding="utf-8"))
-            channel_id = metadata.get("channel_id")
-            channel_title = metadata.get("channel_title")
-        except Exception:
-            pass
     return {
         "configured": configured,
         "connected": connected,
-        "channel_id": channel_id if connected else None,
-        "channel_title": channel_title if connected else None,
+        "channel_id": connection.channel_id if connected and connection else None,
+        "channel_title": connection.channel_title if connected and connection else None,
         "redirect_uri": settings.youtube_oauth_redirect_uri,
     }
 
 
-def is_connected() -> bool:
-    return bool(get_connection_status()["connected"])
+def is_connected(user_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        return bool(get_connection_status(db, user_id)["connected"])
+    finally:
+        db.close()
 
 
-def disconnect() -> None:
-    TOKEN_FILE.unlink(missing_ok=True)
-    STATE_FILE.unlink(missing_ok=True)
-    CHANNEL_FILE.unlink(missing_ok=True)
+def disconnect(db: Session, user_id: int) -> None:
+    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
+    if connection:
+        db.delete(connection)
+        db.commit()

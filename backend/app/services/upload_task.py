@@ -21,6 +21,7 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
             clip.title,
             f"{clip.description.rstrip()}\n\n{clip.copy_text.strip()}".strip(),
             tags,
+            user_id=clip.user_id,
             privacy_status=privacy_status,
         )
         clip.status = "uploaded"

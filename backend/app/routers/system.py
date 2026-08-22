@@ -7,12 +7,10 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter
 from ..config import settings
-from ..services.downloader import (
-    download_access_configured,
-    download_auth_configured,
-    download_proxy_configured,
-)
-from ..services.youtube_oauth import get_connection_status
+from ..database import SessionLocal
+from ..models import YouTubeConnection
+from ..services.downloader import download_access_configured, download_auth_configured, download_proxy_configured
+from ..services.youtube_oauth import oauth_configured
 
 router = APIRouter(tags=["system"])
 
@@ -52,21 +50,30 @@ def _ejs_available() -> bool:
     return importlib.util.find_spec("yt_dlp_ejs") is not None
 
 
+def _connected_profiles() -> int:
+    db = SessionLocal()
+    try:
+        return db.query(YouTubeConnection).filter(YouTubeConnection.token_json.isnot(None)).count()
+    except Exception:
+        return 0
+    finally:
+        db.close()
+
+
 @router.get("/health")
 def health():
-    youtube = get_connection_status()
+    connected_profiles = _connected_profiles()
     checks = {
         "openai_configured": bool(settings.openai_api_key),
         "youtube_api_configured": bool(settings.youtube_api_key),
-        "google_oauth_configured": youtube["configured"],
-        "youtube_channel_connected": youtube["connected"],
+        "google_oauth_configured": oauth_configured(),
+        "youtube_connected_profiles": connected_profiles,
         "ffmpeg_available": bool(shutil.which(settings.ffmpeg_binary)),
         "ffprobe_available": bool(shutil.which(settings.ffprobe_binary)),
         "worker_alive": _worker_alive(),
         "pot_provider_alive": _pot_provider_alive(),
         "ytdlp_js_runtime_available": _js_runtime_available(),
         "ytdlp_ejs_available": _ejs_available(),
-        # Informational only; values are never exposed.
         "youtube_download_auth_configured": download_auth_configured(),
         "youtube_download_proxy_configured": download_proxy_configured(),
         "youtube_download_ready": download_access_configured(),
@@ -86,7 +93,6 @@ def health():
         checks["openai_configured"],
         checks["youtube_api_configured"],
         checks["google_oauth_configured"],
-        checks["youtube_channel_connected"],
         checks["youtube_download_ready"],
         *required_runtime,
     ]
@@ -103,11 +109,8 @@ def health():
         "status": "ok" if all(required_runtime) else "degraded",
         "configuration_complete": all(required_configuration),
         "app": settings.app_name,
+        "version": "2.0.0",
         "checks": checks,
         "youtube_download_mode": auth_mode,
-        "youtube_channel": {
-            "id": youtube.get("channel_id"),
-            "title": youtube.get("channel_title"),
-        },
-        "oauth_redirect_uri": youtube["redirect_uri"],
+        "oauth_redirect_uri": settings.youtube_oauth_redirect_uri,
     }

@@ -1,5 +1,5 @@
-import Dashboard from "@/components/Dashboard";
+import SaasApp from "@/components/SaasApp";
 
 export default function Home() {
-  return <Dashboard />;
+  return <SaasApp />;
 }

@@ -1,5 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from ..auth import get_current_user
 from ..errors import YouTubeAuthError, YouTubeQuotaError
+from ..models import User
 from ..schemas import TrendingVideo
 from ..services.youtube_search import discover_videos
 
@@ -12,6 +15,7 @@ def trending_videos(
     region: str = Query(default="BR", min_length=2, max_length=2),
     max_results: int = Query(default=12, ge=1, le=25),
     days: int = Query(default=14, ge=1, le=90),
+    _user: User = Depends(get_current_user),
 ):
     try:
         return discover_videos(keyword=keyword, region=region, max_results=max_results, days=days)

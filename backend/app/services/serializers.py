@@ -11,9 +11,10 @@ def clip_to_dict(clip: Clip) -> dict:
         tags = []
 
     path = Path(clip.file_path)
+    user_root = settings.data_path / "users" / str(clip.user_id)
     try:
-        relative = path.resolve().relative_to(settings.data_path.resolve()).as_posix()
-        media_url = f"/media/{relative}"
+        relative = path.resolve().relative_to(user_root.resolve()).as_posix()
+        media_url = f"/api/media/{relative}"
     except ValueError:
         media_url = ""
 

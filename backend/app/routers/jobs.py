@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+
+from ..auth import get_current_user
 from ..config import settings
 from ..database import get_db
-from ..models import Job, SourceVideo
+from ..models import Job, SourceVideo, User
 from ..schemas import JobCreate, JobOut
 from ..services.downloader import download_access_configured
 from ..services.serializers import job_to_dict
@@ -11,27 +13,28 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def create_job(payload: JobCreate, db: Session = Depends(get_db)):
+def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not payload.rights_confirmed:
         raise HTTPException(
             status_code=400,
-            detail="Confirm that you own the source or have permission/license to download, edit and republish it.",
+            detail="Confirme que você possui direitos, licença ou autorização para reutilizar o conteúdo.",
         )
 
-    # The production VPS is challenged by YouTube when it runs as a guest.
-    # Reject before creating a doomed job instead of showing 100%/Falhou later.
     if settings.environment.strip().lower() == "production" and not download_access_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "O download do YouTube ainda não está autenticado no servidor. "
-                "Configure YTDLP_COOKIES_B64 ou YTDLP_PROXY_URL no serviço shortsia e faça o deploy."
-            ),
+            detail="O download do YouTube ainda não está autenticado no servidor.",
         )
 
-    source = db.query(SourceVideo).filter(SourceVideo.youtube_id == payload.video_id).first()
+    source = (
+        db.query(SourceVideo)
+        .filter(SourceVideo.user_id == user.id, SourceVideo.youtube_id == payload.video_id)
+        .first()
+    )
     if source is None:
         source = SourceVideo(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
             youtube_id=payload.video_id,
             title=payload.title,
             channel_title=payload.channel_title,
@@ -47,24 +50,32 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
         source.thumbnail_url = payload.thumbnail_url
         source.rights_confirmed = True
 
-    job = Job(source_video_id=source.id, requested_clips=payload.requested_clips, status="queued", progress=0)
+    job = Job(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        source_video_id=source.id,
+        requested_clips=payload.requested_clips,
+        status="queued",
+        progress=0,
+    )
     db.add(job)
     db.commit()
 
     job = (
         db.query(Job)
         .options(joinedload(Job.source_video), joinedload(Job.clips))
-        .filter(Job.id == job.id)
+        .filter(Job.id == job.id, Job.user_id == user.id)
         .first()
     )
     return job_to_dict(job)
 
 
 @router.get("", response_model=list[JobOut])
-def list_jobs(db: Session = Depends(get_db)):
+def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     jobs = (
         db.query(Job)
         .options(joinedload(Job.source_video), joinedload(Job.clips))
+        .filter(Job.user_id == user.id)
         .order_by(Job.id.desc())
         .limit(50)
         .all()
@@ -73,13 +84,13 @@ def list_jobs(db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}", response_model=JobOut)
-def get_job(job_id: int, db: Session = Depends(get_db)):
+def get_job(job_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     job = (
         db.query(Job)
         .options(joinedload(Job.source_video), joinedload(Job.clips))
-        .filter(Job.id == job_id)
+        .filter(Job.id == job_id, Job.user_id == user.id)
         .first()
     )
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail="Job não encontrado para este perfil.")
     return job_to_dict(job)

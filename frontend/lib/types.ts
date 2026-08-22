@@ -1,3 +1,24 @@
+export type UserProfile = {
+  id: number;
+  tenant_id: number;
+  email: string;
+  display_name: string;
+  role: string;
+  active: boolean;
+  billing_status: string;
+  checkout_url: string;
+};
+
+export type TeamUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  role: string;
+  active: boolean;
+  youtube_connected: boolean;
+  youtube_channel_title?: string | null;
+};
+
 export type TrendingVideo = {
   video_id: string;
   title: string;
