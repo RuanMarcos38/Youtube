@@ -8,12 +8,14 @@ from ..database import get_db
 from ..models import PaymentEvent, ProvisionedCredential, Tenant, User, YouTubeConnection
 from ..schemas import ActivationRequest, LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
 from ..services.billing import ensure_plan, plan_payload
+from ..services.system_config import get_public_config_safe
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _user_payload(user: User, db: Session) -> dict:
     plan = plan_payload(db, user.tenant_id)
+    public_config = get_public_config_safe(db)
     return {
         "id": user.id,
         "tenant_id": user.tenant_id,
@@ -22,8 +24,8 @@ def _user_payload(user: User, db: Session) -> dict:
         "role": user.role,
         "active": user.active,
         "billing_status": plan["billing_status"],
-        "checkout_url": settings.kiwify_checkout_url,
-        "upgrade_url": settings.kiwify_upgrade_url,
+        "checkout_url": public_config["checkout_url"],
+        "upgrade_url": public_config["upgrade_url"],
         "plan_code": plan["plan_code"],
         "monthly_job_limit": plan["monthly_job_limit"],
         "unlimited": plan["unlimited"],
