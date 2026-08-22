@@ -43,6 +43,12 @@ class UserOut(BaseModel):
     active: bool
     billing_status: str
     checkout_url: str
+    upgrade_url: str
+    plan_code: str
+    monthly_job_limit: int
+    unlimited: bool
+    jobs_used: int
+    jobs_remaining: int | None = None
 
 
 class TeamUserOut(BaseModel):
