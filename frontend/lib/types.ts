@@ -94,6 +94,30 @@ export type DownloadAuthStatus = {
   proxy_environment: boolean;
 };
 
+export type DiagnosticCheck = {
+  name: string;
+  ok: boolean;
+  required: boolean;
+  detail: string;
+  recommendation: string;
+};
+
+export type DiagnosticResult = {
+  ok: boolean;
+  auto_fix: boolean;
+  fixes_applied: string[];
+  checks: DiagnosticCheck[];
+  summary: string;
+  download?: {
+    ok: boolean;
+    mode?: string;
+    strategy?: string;
+    attempts?: number;
+    error?: string;
+    bot_blocked?: boolean;
+  };
+};
+
 export type KiwifyAdminSettings = {
   webhook_url: string;
   checkout_url: string;

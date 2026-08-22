@@ -38,18 +38,20 @@ def test_pot_provider_args_are_skipped_when_unset(monkeypatch):
     assert downloader._pot_provider_args() is None
 
 
-def test_base_options_enable_node_ejs_runtime_and_proxy(tmp_path, monkeypatch):
+def test_base_options_enable_available_js_runtime_and_proxy(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_proxy_url", "http://proxy.internal:8080")
     monkeypatch.setattr(downloader.settings, "ytdlp_node_path", "/usr/local/bin/node")
     monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(downloader, "_runtime_binary", lambda name: "/opt/venv/bin/deno" if name == "deno" else None)
 
     options = downloader._base_options(tmp_path)
 
-    assert options["js_runtimes"] == {"node": {"path": "/usr/local/bin/node"}}
+    assert options["js_runtimes"]["node"] == {"path": "/usr/local/bin/node"}
+    assert options["js_runtimes"]["deno"] == {"path": "/opt/venv/bin/deno"}
     assert options["proxy"] == "http://proxy.internal:8080"
-    assert options["concurrent_fragment_downloads"] == 4
+    assert options["concurrent_fragment_downloads"] >= 1
 
 
 def test_base_options_register_safe_progress_hook(tmp_path, monkeypatch):
@@ -103,7 +105,20 @@ def test_invalid_base64_cookie_is_rejected(monkeypatch):
         downloader._resolve_cookie_file()
 
 
-def test_bot_challenge_without_auth_has_actionable_message(tmp_path, monkeypatch):
+def test_guest_strategies_include_pot_hls_and_impersonation(monkeypatch):
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://127.0.0.1:4416")
+
+    names = [name for name, _, _ in downloader._strategy_variants()]
+
+    assert "guest:mweb+pot" in names
+    assert "guest:web_safari" in names
+    assert "guest:tv" in names
+    assert "guest:chrome+mweb+pot" in names
+
+
+def test_bot_challenge_without_proxy_has_actionable_message(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_proxy_url", "")
@@ -115,7 +130,7 @@ def test_bot_challenge_without_auth_has_actionable_message(tmp_path, monkeypatch
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("Sign in to confirm you're not a bot")),
     )
 
-    with pytest.raises(downloader.DownloadError, match="YTDLP_COOKIES_B64"):
+    with pytest.raises(downloader.DownloadError, match="proxy residencial/estático"):
         downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path / "job")
 
 

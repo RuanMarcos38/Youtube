@@ -3,6 +3,7 @@ import type {
   AdminUser,
   BillingStatus,
   Clip,
+  DiagnosticResult,
   DownloadAuthStatus,
   Job,
   KiwifyAdminSettings,
@@ -85,6 +86,7 @@ export const adminUsers = () => api<AdminUser[]>("/api/admin/users");
 export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/provisioned-credentials");
 export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
 export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string; strategy?: string }>("/api/admin/download-auth/test", { method: "POST" });
+export const adminRunDiagnostics = (autoFix = true) => api<DiagnosticResult>(`/api/admin/diagnostics/run?auto_fix=${autoFix ? "true" : "false"}`, { method: "POST" });
 export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
 export const adminSystemConfig = () => api<PublicConfig>("/api/admin/system-config");
 export const adminUpdateSystemConfig = (payload: PublicConfig) =>
@@ -135,5 +137,5 @@ export const listClips = () => api<Clip[]>("/api/clips");
 export const approveClip = (id: number) => api<Clip>(`/api/clips/${id}/approve`, { method: "POST" });
 export const uploadClip = (id: number, privacyStatus: string) =>
   api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
-export const youtubeStatus = () => api<{ connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
+export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");

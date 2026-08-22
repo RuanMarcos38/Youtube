@@ -1,7 +1,6 @@
 import importlib.util
 import shutil
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import urljoin
 from urllib.request import urlopen
 
@@ -9,7 +8,12 @@ from fastapi import APIRouter
 from ..config import settings
 from ..database import SessionLocal
 from ..models import YouTubeConnection
-from ..services.downloader import download_access_configured, download_auth_configured, download_proxy_configured
+from ..services.downloader import (
+    download_access_configured,
+    download_auth_configured,
+    download_proxy_configured,
+    js_runtime_status,
+)
 from ..services.youtube_oauth import oauth_configured
 
 router = APIRouter(tags=["system"])
@@ -39,13 +43,6 @@ def _pot_provider_alive() -> bool:
         return False
 
 
-def _js_runtime_available() -> bool:
-    configured = settings.ytdlp_node_path.strip()
-    if configured:
-        return Path(configured).is_file()
-    return bool(shutil.which("node"))
-
-
 def _ejs_available() -> bool:
     return importlib.util.find_spec("yt_dlp_ejs") is not None
 
@@ -63,6 +60,8 @@ def _connected_profiles() -> int:
 @router.get("/health")
 def health():
     connected_profiles = _connected_profiles()
+    runtimes = js_runtime_status()
+    js_runtime_available = bool(runtimes.get("node") or runtimes.get("deno"))
     checks = {
         "openai_configured": bool(settings.openai_api_key),
         "youtube_api_configured": bool(settings.youtube_api_key),
@@ -72,7 +71,9 @@ def health():
         "ffprobe_available": bool(shutil.which(settings.ffprobe_binary)),
         "worker_alive": _worker_alive(),
         "pot_provider_alive": _pot_provider_alive(),
-        "ytdlp_js_runtime_available": _js_runtime_available(),
+        "ytdlp_js_runtime_available": js_runtime_available,
+        "ytdlp_node_available": bool(runtimes.get("node")),
+        "ytdlp_deno_available": bool(runtimes.get("deno")),
         "ytdlp_ejs_available": _ejs_available(),
         "youtube_download_auth_configured": download_auth_configured(),
         "youtube_download_proxy_configured": download_proxy_configured(),
@@ -97,20 +98,21 @@ def health():
         *required_runtime,
     ]
 
-    auth_mode = "guest"
+    auth_mode = "guest+pot"
     if checks["youtube_download_auth_configured"] and checks["youtube_download_proxy_configured"]:
         auth_mode = "cookies+proxy"
     elif checks["youtube_download_auth_configured"]:
-        auth_mode = "cookies"
+        auth_mode = "cookies+fallbacks"
     elif checks["youtube_download_proxy_configured"]:
-        auth_mode = "proxy"
+        auth_mode = "proxy+fallbacks"
 
     return {
         "status": "ok" if all(required_runtime) else "degraded",
         "configuration_complete": all(required_configuration),
         "app": settings.app_name,
-        "version": "2.0.0",
+        "version": "2.3.0",
         "checks": checks,
         "youtube_download_mode": auth_mode,
+        "ytdlp_js_runtimes": {"node": bool(runtimes.get("node")), "deno": bool(runtimes.get("deno"))},
         "oauth_redirect_uri": settings.youtube_oauth_redirect_uri,
     }
