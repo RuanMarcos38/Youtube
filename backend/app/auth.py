@@ -103,6 +103,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 
 def require_owner(user: User = Depends(get_current_user)) -> User:
-    if user.role not in {"owner", "admin"}:
+    if user.role not in {"owner", "admin", "superadmin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas administradores podem gerenciar perfis.")
+    return user
+
+
+def require_superadmin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso restrito ao administrador geral.")
     return user
