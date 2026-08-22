@@ -46,6 +46,17 @@ jobs:
         run: |
           easypanel --server production app inspect r2rmarketingdigital/shortsia --format json
 
+      - name: Ensure custom domain
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+          EASYPANEL_PROJECT: r2rmarketingdigital
+          EASYPANEL_SERVICE: shortsia
+          EASYPANEL_DOMAIN: shorts.r2rmarketingdigital.com.br
+          EASYPANEL_DOMAIN_PORT: '3000'
+        run: python3 deploy/ensure_easypanel_domain.py
+
       - name: Deploy target app
         shell: bash
         run: |
