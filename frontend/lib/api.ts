@@ -64,6 +64,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const authMe = () => api<UserProfile>("/api/auth/me");
 export const authLogin = (email: string, password: string) =>
   api<UserProfile>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+export const authActivate = (email: string, orderCode: string, password: string) =>
+  api<UserProfile>("/api/auth/activate", { method: "POST", body: JSON.stringify({ email, order_code: orderCode, password }) });
 export const authRegister = (name: string, email: string, password: string, companyName?: string) =>
   api<UserProfile>("/api/auth/register", {
     method: "POST",
