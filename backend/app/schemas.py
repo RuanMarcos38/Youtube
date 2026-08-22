@@ -21,7 +21,7 @@ class JobCreate(BaseModel):
     channel_title: str = ""
     thumbnail_url: str = ""
     url: HttpUrl | None = None
-    requested_clips: int = Field(default=3, ge=1, le=8)
+    requested_clips: int = Field(default=3, ge=1, le=10)
     rights_confirmed: bool
 
 
