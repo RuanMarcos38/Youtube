@@ -80,6 +80,7 @@ export const adminMetrics = () => api<AdminMetrics>("/api/admin/dashboard");
 export const adminUsers = () => api<AdminUser[]>("/api/admin/users");
 export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/provisioned-credentials");
 export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
+export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string }>("/api/admin/download-auth/test", { method: "POST" });
 export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
 export const adminUpdatePlan = (
   userId: number,
