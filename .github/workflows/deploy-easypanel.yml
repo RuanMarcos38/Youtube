@@ -93,7 +93,7 @@ jobs:
       - name: Wait for new backend version
         shell: bash
         run: |
-          for i in $(seq 1 90); do
+          for i in $(seq 1 18); do
             if curl -fsS --max-time 10 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json; then
               if python3 - <<'PY'
           import json
@@ -135,10 +135,10 @@ jobs:
                 exit 1
               fi
 
-              echo "Endpoint is reachable but the new backend is not ready yet. Attempt $i/90"
+              echo "Endpoint is reachable but the new backend is not ready yet. Attempt $i/18"
               cat /tmp/health.json || true
             else
-              echo "Waiting for public healthcheck... attempt $i/90"
+              echo "Waiting for public healthcheck... attempt $i/18"
             fi
             sleep 10
           done
