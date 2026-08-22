@@ -103,7 +103,8 @@ jobs:
           ready = (
               data.get('status') == 'ok'
               and data.get('configuration_complete') is True
-              and data.get('youtube_download_mode') in {'guest', 'cookies', 'proxy', 'cookies+proxy'}
+              and data.get('youtube_download_mode') in {'cookies', 'proxy', 'cookies+proxy'}
+              and checks.get('youtube_download_ready') is True
               and checks.get('worker_alive') is True
               and checks.get('ffmpeg_available') is True
               and checks.get('ffprobe_available') is True
@@ -118,7 +119,24 @@ jobs:
                 cat /tmp/health.json
                 exit 0
               fi
-              echo "Endpoint is reachable but the new backend is not active yet. Attempt $i/90"
+
+              if python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/health.json').read_text(encoding='utf-8'))
+          checks = data.get('checks') or {}
+          # Presence of this field proves the new backend version is active.
+          if 'youtube_download_ready' in checks and checks.get('youtube_download_ready') is False:
+              raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+              then
+                echo "New backend is active, but YouTube download authentication is missing."
+                cat /tmp/health.json
+                exit 1
+              fi
+
+              echo "Endpoint is reachable but the new backend is not ready yet. Attempt $i/90"
               cat /tmp/health.json || true
             else
               echo "Waiting for public healthcheck... attempt $i/90"
@@ -144,7 +162,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"success\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deploy and yt-dlp runtime healthcheck passed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+            -d "{\"state\":\"success\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deploy and authenticated yt-dlp healthcheck passed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
 
       - name: Report deployment failure
         if: ${{ failure() || cancelled() }}
@@ -157,4 +175,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "{\"state\":\"failure\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deployment failed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+            -d "{\"state\":\"failure\",\"context\":\"deploy/easypanel\",\"description\":\"EasyPanel deployment or download-auth validation failed\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
