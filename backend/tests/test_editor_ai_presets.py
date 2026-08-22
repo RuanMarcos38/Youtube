@@ -15,4 +15,4 @@ def test_editor_presets_boot_without_auth_or_database():
     for item in payload:
         assert item["label"]
         assert item["description"]
-        assert item["target"] == "TikTok Shop / Social Commerce"
+        assert item["target"] == "TikTok Shop / Reels / YouTube Shorts"
