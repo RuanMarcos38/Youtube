@@ -1,4 +1,4 @@
-from app.config import Settings, normalize_postgres_database_url
+from app.config import Settings, is_known_invalid_shortsflow_database_url, normalize_postgres_database_url
 
 
 def test_prisma_supabase_query_parameters_are_removed_for_psycopg():
@@ -35,3 +35,34 @@ def test_settings_uses_sanitized_database_url():
 
 def test_non_postgres_urls_are_not_rewritten():
     assert normalize_postgres_database_url("sqlite:///data/app.db") == "sqlite:///data/app.db"
+
+
+def test_known_invalid_inherited_pooler_binding_is_detected():
+    value = (
+        "postgresql://prisma_zenite.iqrnytsgwaiegddfxfjs:secret"
+        "@aws-0-us-west-2.pooler.supabase.com:5432/postgres?schema=public"
+    )
+    assert is_known_invalid_shortsflow_database_url(value) is True
+
+
+def test_known_invalid_inherited_pooler_binding_falls_back_to_sqlite():
+    configured = Settings(
+        _env_file=None,
+        database_url=(
+            "postgresql://prisma_zenite.iqrnytsgwaiegddfxfjs:secret"
+            "@aws-0-us-west-2.pooler.supabase.com:5432/postgres?schema=public"
+        ),
+        sqlite_path="/tmp/shortsflow-test.db",
+    )
+    assert configured.sqlalchemy_database_url == "sqlite:////tmp/shortsflow-test.db"
+
+
+def test_other_supabase_database_urls_are_not_disabled():
+    configured = Settings(
+        _env_file=None,
+        database_url=(
+            "postgresql://postgres.otherproject:secret"
+            "@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
+        ),
+    )
+    assert configured.sqlalchemy_database_url.startswith("postgresql+psycopg://postgres.otherproject:secret@")

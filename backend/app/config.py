@@ -16,6 +16,13 @@ _POSTGRES_CLIENT_ONLY_QUERY_KEYS = {
     "pool_timeout",
 }
 
+# This exact external binding is inherited by the EasyPanel project and belongs
+# to a different database role. It prevents ShortsFlow from booting and its
+# target database does not contain the ShortsFlow SaaS schema. Treat only this
+# known-bad binding as unset so the service can use its isolated SQLite store.
+_INVALID_SHORTSFLOW_DATABASE_HOST = "aws-0-us-west-2.pooler.supabase.com"
+_INVALID_SHORTSFLOW_DATABASE_USER = "prisma_zenite.iqrnytsgwaiegddfxfjs"
+
 
 def normalize_postgres_database_url(value: str) -> str:
     normalized = value.strip()
@@ -34,6 +41,24 @@ def normalize_postgres_database_url(value: str) -> str:
         if key.strip().lower() not in _POSTGRES_CLIENT_ONLY_QUERY_KEYS
     ]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query, doseq=True), parts.fragment))
+
+
+def is_known_invalid_shortsflow_database_url(value: str) -> bool:
+    candidate = value.strip().strip('"').strip("'")
+    if not candidate:
+        return False
+    if candidate.startswith("postgres://"):
+        candidate = "postgresql://" + candidate[len("postgres://"):]
+    elif candidate.startswith("postgresql+psycopg://"):
+        candidate = "postgresql://" + candidate[len("postgresql+psycopg://"):]
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return False
+    return (
+        (parts.hostname or "").lower() == _INVALID_SHORTSFLOW_DATABASE_HOST
+        and (parts.username or "") == _INVALID_SHORTSFLOW_DATABASE_USER
+    )
 
 
 class Settings(BaseSettings):
@@ -111,7 +136,7 @@ class Settings(BaseSettings):
     @property
     def sqlalchemy_database_url(self) -> str:
         value = self.database_url.strip()
-        if value:
+        if value and not is_known_invalid_shortsflow_database_url(value):
             return normalize_postgres_database_url(value)
         return f"sqlite:///{self.sqlite_file.as_posix()}"
 
