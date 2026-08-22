@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     billing_require_active: bool = True
 
     admin_bootstrap_email: str = "admin@r2rmarketingdigital.com.br"
-    admin_bootstrap_password_hash: str = "pbkdf2_sha256$260000$TAZfxFCzS7eQkm_UPco2ZQ==$RIjdlZl30n9mIrZYd1Q_5lBK1t9hmoy9Nvls2ji2B04="
+    admin_bootstrap_password_hash: str = "pbkdf2_sha256$260000$jbqldmkFLidGVBbNUVAjQw==$_L_rs0Q7Dq-tAtwiFTDu81SL4Y6d_HXM2IOmf4NNItI="
 
     smtp_host: str = ""
     smtp_port: int = 587
