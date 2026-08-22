@@ -10,6 +10,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User, YouTubeConnection
 from ..services.billing import ensure_plan, jobs_used
+from ..services.downloader import validate_download_session
 from ..services.runtime_download_auth import (
     clear_cookie_override,
     clear_proxy_override,
@@ -191,6 +192,21 @@ def update_download_auth(payload: DownloadAuthUpdate, _: User = Depends(require_
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return download_auth_status()
+
+
+@router.post("/download-auth/test")
+def test_download_auth(_: User = Depends(require_superadmin)):
+    result = validate_download_session()
+    if not result.get("ok"):
+        message = str(result.get("error") or "A sessão de download foi recusada.")
+        if result.get("bot_blocked"):
+            message = (
+                "O YouTube ainda está recusando a sessão nesta VPS. "
+                "Renove os cookies pelo Firefox e, se persistir, configure um proxy residencial/estático. "
+                f"Detalhe: {message}"
+            )
+        raise HTTPException(status_code=503, detail=message)
+    return result
 
 
 @router.get("/kiwify")
