@@ -18,6 +18,9 @@
   --border: #e4e7ec;
   --border-strong: #d0d5dd;
   --danger: #b42318;
+  --youtube: #ff0033;
+  --tiktok-cyan: #25f4ee;
+  --tiktok-pink: #fe2c55;
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
   --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.08);
 }
@@ -48,7 +51,57 @@ a { color: inherit; text-decoration: none; }
   outline-offset: 2px;
 }
 
-/* Normaliza a linguagem visual antiga para o novo sistema sem alterar lógica. */
+/* Mantém o design profissional e recupera a identidade social da marca. */
+aside[aria-label="Menu principal da plataforma"] {
+  position: fixed;
+}
+
+aside[aria-label="Menu principal da plataforma"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--tiktok-cyan) 0 33.33%, var(--tiktok-pink) 33.33% 66.66%, var(--youtube) 66.66% 100%);
+  pointer-events: none;
+}
+
+/* Criar Shorts = identidade YouTube, sem alterar texto ou estrutura. */
+a[href="/#configurar"] > svg {
+  display: none;
+}
+a[href="/#configurar"]::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2.2' y='5.2' width='19.6' height='13.6' rx='4' fill='%23FF0033'/%3E%3Cpath d='m10 9 5.2 3-5.2 3V9Z' fill='white'/%3E%3C/svg%3E");
+}
+
+/* Editor de vídeo = identidade TikTok em ciano/rosa, mantendo o menu sóbrio. */
+a[href="/editor-ia"] > svg {
+  display: none;
+}
+a[href="/editor-ia"]::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='%2325F4EE' transform='translate(-.55 .35)'/%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='%23FE2C55' transform='translate(.45 -.25)'/%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='%23101828'/%3E%3C/svg%3E");
+}
+
+@media (min-width: 1280px) {
+  a[href="/editor-ia"]::before {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='%2325F4EE' transform='translate(-.55 .35)'/%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='%23FE2C55' transform='translate(.45 -.25)'/%3E%3Cpath d='M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z' fill='white'/%3E%3C/svg%3E");
+  }
+}
+
+/* Preserva a linguagem visual profissional aplicada anteriormente. */
 [class*="bg-[#f8faf5]"] { background-color: var(--background) !important; }
 [class*="bg-[#fbfcfa]"], [class*="bg-[#fbfcf9]"] { background-color: var(--surface-2) !important; }
 [class*="bg-[#0d241d]"], [class*="bg-[#0d2b22]"] { background-color: var(--nav) !important; }
@@ -70,4 +123,11 @@ a { color: inherit; text-decoration: none; }
 
 @media (max-width: 1279px) {
   body { padding-bottom: 76px; }
+  nav[aria-label="Menu principal da plataforma"]::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--tiktok-cyan) 0 33.33%, var(--tiktok-pink) 33.33% 66.66%, var(--youtube) 66.66% 100%);
+  }
 }
