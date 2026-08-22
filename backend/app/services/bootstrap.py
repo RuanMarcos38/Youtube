@@ -5,6 +5,9 @@ from ..database import SessionLocal
 from ..models import SystemSetting, Tenant, TenantPlan, User
 
 
+ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v2"
+
+
 def _ensure_kiwify_webhook_token(db) -> None:
     row = db.get(SystemSetting, "kiwify_webhook_token")
     if row and row.value.strip():
@@ -16,6 +19,24 @@ def _ensure_kiwify_webhook_token(db) -> None:
     else:
         db.add(SystemSetting(key="kiwify_webhook_token", value=value, secret=True))
     db.commit()
+
+
+def _apply_admin_credential_once(db, user: User, password_hash: str) -> None:
+    """Reset the bootstrap admin password exactly once for this credential version.
+
+    This guarantees that the generated administrator credential works after the
+    deployment without forcing that password back on every future restart.
+    """
+    key = "admin_bootstrap_credential_version"
+    row = db.get(SystemSetting, key)
+    if row and row.value == ADMIN_CREDENTIAL_VERSION:
+        return
+    user.password_hash = password_hash
+    if row:
+        row.value = ADMIN_CREDENTIAL_VERSION
+        row.secret = False
+    else:
+        db.add(SystemSetting(key=key, value=ADMIN_CREDENTIAL_VERSION, secret=False))
 
 
 def ensure_superadmin() -> None:
@@ -31,6 +52,7 @@ def ensure_superadmin() -> None:
         if user:
             user.role = "superadmin"
             user.active = True
+            _apply_admin_credential_once(db, user, password_hash)
             plan = db.query(TenantPlan).filter(TenantPlan.tenant_id == user.tenant_id).first()
             if not plan:
                 plan = TenantPlan(
@@ -73,6 +95,11 @@ def ensure_superadmin() -> None:
                 unlimited=True,
             )
         )
+        db.add(SystemSetting(
+            key="admin_bootstrap_credential_version",
+            value=ADMIN_CREDENTIAL_VERSION,
+            secret=False,
+        ))
         db.commit()
     finally:
         db.close()
