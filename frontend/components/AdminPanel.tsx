@@ -7,6 +7,7 @@ import {
   adminKiwifySettings,
   adminMarkCredentialDelivered,
   adminMetrics,
+  adminRegisterKiwify,
   adminTestDownloadAuth,
   adminUpdateDownloadAuth,
   adminUpdatePlan,
@@ -26,9 +27,13 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [kiwify, setKiwify] = useState<KiwifyAdminSettings | null>(null);
   const [cookiesB64, setCookiesB64] = useState("");
   const [proxyUrl, setProxyUrl] = useState("");
+  const [kiwifyClientId, setKiwifyClientId] = useState("");
+  const [kiwifyClientSecret, setKiwifyClientSecret] = useState("");
+  const [kiwifyAccountId, setKiwifyAccountId] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [testingDownload, setTestingDownload] = useState(false);
+  const [connectingKiwify, setConnectingKiwify] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -77,11 +82,32 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
     setMessage("");
     try {
       const result = await adminTestDownloadAuth();
-      setMessage(`Download autenticado validado com sucesso (${result.mode}). A VPS está apta a iniciar novos Shorts.`);
+      const strategy = result.strategy ? ` • ${result.strategy}` : "";
+      setMessage(`Download validado com sucesso (${result.mode}${strategy}). A VPS está apta a iniciar novos Shorts.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "A sessão ainda foi recusada pelo YouTube.");
     } finally {
       setTestingDownload(false);
+    }
+  }
+
+  async function connectKiwify(event: FormEvent) {
+    event.preventDefault();
+    setConnectingKiwify(true);
+    setMessage("");
+    try {
+      const result = await adminRegisterKiwify({
+        client_id: kiwifyClientId.trim(),
+        client_secret: kiwifyClientSecret.trim(),
+        account_id: kiwifyAccountId.trim(),
+        products: "all",
+      });
+      setKiwifyClientSecret("");
+      setMessage(`Kiwify conectada. Webhook ${result.action === "created" ? "criado" : "atualizado"} com sucesso.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Falha ao conectar a Kiwify.");
+    } finally {
+      setConnectingKiwify(false);
     }
   }
 
@@ -123,7 +149,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <form onSubmit={saveDownloadAuth} className="rounded-2xl bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3"><div><h3 className="font-black">Download YouTube</h3><p className="mt-1 text-xs text-[#6e7971]">Renove os cookies aqui quando o YouTube recusar a sessão da VPS. Se cookies novos forem recusados, use um proxy residencial/estático.</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-black ${downloadAuth?.cookie_override || downloadAuth?.cookie_environment ? "bg-[#eaf8c8] text-[#4b6a00]" : "bg-red-50 text-red-700"}`}>{downloadAuth?.cookie_override ? "Cookie renovado" : downloadAuth?.cookie_environment ? "Cookie do servidor" : "Sem cookie"}</span></div>
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-black">Download YouTube</h3><p className="mt-1 text-xs text-[#6e7971]">O sistema tenta cookies e também fallbacks públicos sem cookies. Se a própria saída da VPS continuar bloqueada, configure um proxy residencial/estático.</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-black ${downloadAuth?.cookie_override || downloadAuth?.cookie_environment ? "bg-[#eaf8c8] text-[#4b6a00]" : "bg-red-50 text-red-700"}`}>{downloadAuth?.cookie_override ? "Cookie renovado" : downloadAuth?.cookie_environment ? "Cookie do servidor" : "Sem cookie"}</span></div>
             <label className="mt-4 block text-xs font-black">YTDLP_COOKIES_B64<textarea value={cookiesB64} onChange={(e) => setCookiesB64(e.target.value)} rows={4} placeholder="Cole o Base64 gerado pelo Firefox. O valor não será exibido depois." className="mt-2 w-full rounded-xl border border-black/10 p-3 text-xs outline-none focus:border-[#91c51d]" /></label>
             <label className="mt-3 block text-xs font-black">Proxy residencial/estático (opcional)<input value={proxyUrl} onChange={(e) => setProxyUrl(e.target.value)} placeholder="http://usuario:senha@host:porta" className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 text-xs outline-none focus:border-[#91c51d]" /></label>
             <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-xl bg-[#111815] px-4 py-3 text-xs font-black text-white">Atualizar autenticação</button><button type="button" disabled={testingDownload} onClick={() => void testDownload()} className="rounded-xl bg-[#b8f238] px-4 py-3 text-xs font-black text-[#111815] disabled:opacity-50">{testingDownload ? "Testando..." : "Testar download"}</button></div>
@@ -131,8 +157,15 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <h3 className="font-black">Integração Kiwify</h3>
-            <p className="mt-1 text-xs text-[#6e7971]">Cadastre esta URL em Apps → Webhooks na Kiwify e selecione compra aprovada, reembolso, chargeback e eventos de assinatura.</p>
+            <p className="mt-1 text-xs text-[#6e7971]">O webhook libera automaticamente o plano quando a Kiwify envia compra aprovada. PIX é liberado assim que a Kiwify confirma o pagamento.</p>
             <div className="mt-4 rounded-xl bg-[#f4f7f0] p-3 text-[11px] font-bold break-all">{kiwify?.webhook_url || "Carregando URL..."}</div>
+            <form onSubmit={connectKiwify} className="mt-4 grid gap-2">
+              <input required value={kiwifyClientId} onChange={(e) => setKiwifyClientId(e.target.value)} placeholder="Kiwify Client ID" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
+              <input required type="password" value={kiwifyClientSecret} onChange={(e) => setKiwifyClientSecret(e.target.value)} placeholder="Kiwify Client Secret" autoComplete="off" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
+              <input required value={kiwifyAccountId} onChange={(e) => setKiwifyAccountId(e.target.value)} placeholder="Kiwify Account ID" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
+              <button disabled={connectingKiwify} className="rounded-xl bg-[#b8f238] px-4 py-3 text-xs font-black text-[#111815] disabled:opacity-50">{connectingKiwify ? "Conectando..." : "Conectar Kiwify automaticamente"}</button>
+            </form>
+            <p className="mt-2 text-[10px] leading-4 text-[#7b857e]">As credenciais da API são usadas somente para criar/atualizar o webhook e não são gravadas no banco do ShortsFlow.</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2"><a href={kiwify?.checkout_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#b8f238] px-4 py-3 text-center text-xs font-black">Assine já</a><a href={kiwify?.upgrade_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0d241d] px-4 py-3 text-center text-xs font-black text-white">Upgrade ilimitado</a></div>
           </div>
         </div>
