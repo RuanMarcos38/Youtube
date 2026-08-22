@@ -82,8 +82,13 @@ export const adminMetrics = () => api<AdminMetrics>("/api/admin/dashboard");
 export const adminUsers = () => api<AdminUser[]>("/api/admin/users");
 export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/provisioned-credentials");
 export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
-export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string }>("/api/admin/download-auth/test", { method: "POST" });
+export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string; strategy?: string }>("/api/admin/download-auth/test", { method: "POST" });
 export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
+export const adminRegisterKiwify = (payload: { client_id: string; client_secret: string; account_id: string; products?: string }) =>
+  api<{ ok: boolean; action: string; webhook_id: string; webhook_url: string; triggers: string[] }>("/api/admin/kiwify/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 export const adminUpdatePlan = (
   userId: number,
   payload: { plan_code?: string; billing_status?: string; monthly_job_limit?: number; unlimited?: boolean },
