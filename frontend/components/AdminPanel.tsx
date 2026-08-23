@@ -56,6 +56,8 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       setCredentials(c);
       setDownloadAuth(d);
       setKiwify(k);
+      setKiwifyClientId(k.client_id || "");
+      setKiwifyAccountId(k.account_id || "");
       setSystemConfig(s);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao carregar o painel administrativo.");
@@ -127,14 +129,17 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
     setMessage("");
     try {
       const result = await adminRegisterKiwify({
-        client_id: kiwifyClientId.trim(),
-        client_secret: kiwifyClientSecret.trim(),
-        account_id: kiwifyAccountId.trim(),
+        ...(kiwifyClientId.trim() ? { client_id: kiwifyClientId.trim() } : {}),
+        ...(kiwifyClientSecret.trim() ? { client_secret: kiwifyClientSecret.trim() } : {}),
+        ...(kiwifyAccountId.trim() ? { account_id: kiwifyAccountId.trim() } : {}),
         products: "all",
       });
       setKiwifyClientSecret("");
-      setMessage(`Kiwify conectada. Webhook ${result.action === "created" ? "criado" : "atualizado"} com sucesso.`);
-      setKiwify(await adminKiwifySettings());
+      const updated = await adminKiwifySettings();
+      setKiwify(updated);
+      setKiwifyClientId(updated.client_id || result.client_id || "");
+      setKiwifyAccountId(updated.account_id || result.account_id || "");
+      setMessage(`Kiwify conectada. API validada e webhook ${result.action === "created" ? "criado" : "atualizado"} com sucesso.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Falha ao conectar a Kiwify.");
     } finally {
@@ -203,16 +208,18 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
           </form>
 
           <div className="rounded-2xl bg-white p-5 shadow-sm">
-            <h3 className="font-black">Integração Kiwify</h3>
-            <p className="mt-1 text-xs text-[#6e7971]">O webhook libera automaticamente o plano quando a Kiwify envia compra aprovada. PIX é liberado assim que a Kiwify confirma o pagamento.</p>
-            <div className="mt-4 rounded-xl bg-[#f4f7f0] p-3 text-[11px] font-bold break-all">{kiwify?.webhook_url || "Carregando URL..."}</div>
-            <form onSubmit={connectKiwify} className="mt-4 grid gap-2">
-              <input required value={kiwifyClientId} onChange={(e) => setKiwifyClientId(e.target.value)} placeholder="Kiwify Client ID" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
-              <input required type="password" value={kiwifyClientSecret} onChange={(e) => setKiwifyClientSecret(e.target.value)} placeholder="Kiwify Client Secret" autoComplete="off" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
-              <input required value={kiwifyAccountId} onChange={(e) => setKiwifyAccountId(e.target.value)} placeholder="Kiwify Account ID" className="rounded-xl border border-black/10 px-3 py-2.5 text-xs outline-none focus:border-[#91c51d]" />
-              <button disabled={connectingKiwify} className="rounded-xl bg-[#b8f238] px-4 py-3 text-xs font-black text-[#111815] disabled:opacity-50">{connectingKiwify ? "Conectando..." : "Conectar Kiwify automaticamente"}</button>
+            <div className="flex items-start justify-between gap-3">
+              <div><h3 className="font-black">Integração Kiwify</h3><p className="mt-1 text-xs text-[#6e7971]">API + webhook para ativar, renovar e bloquear planos automaticamente conforme os eventos de pagamento.</p></div>
+              <span className={`rounded-full px-3 py-1 text-[10px] font-black ${kiwify?.webhook_connected && kiwify?.credentials_configured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{kiwify?.webhook_connected && kiwify?.credentials_configured ? "Conectada" : "Configurar"}</span>
+            </div>
+            <div className="mt-4 rounded-xl bg-[#f4f7f0] p-3 text-[11px] font-bold break-all">{kiwify?.webhook_url || "Carregando URL do webhook..."}</div>
+            <form onSubmit={connectKiwify} className="mt-4 grid gap-3">
+              <label className="text-xs font-black">Client ID da API<input required value={kiwifyClientId} onChange={(e) => setKiwifyClientId(e.target.value)} placeholder="Copie em Kiwify > Apps > API > client_id" className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5 text-xs font-normal outline-none focus:border-[#91c51d]" /></label>
+              <label className="text-xs font-black">Client Secret da API<input required={!kiwify?.client_secret_configured} type="password" value={kiwifyClientSecret} onChange={(e) => setKiwifyClientSecret(e.target.value)} placeholder={kiwify?.client_secret_configured ? "Secret já salvo — deixe em branco para reutilizar" : "Copie o client_secret da Kiwify"} autoComplete="new-password" className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5 text-xs font-normal outline-none focus:border-[#91c51d]" /></label>
+              <label className="text-xs font-black">Account ID <span className="font-normal text-[#7b857e]">(não é e-mail)</span><input required value={kiwifyAccountId} onChange={(e) => setKiwifyAccountId(e.target.value)} placeholder="Copie exatamente o account_id exibido em Apps > API" className="mt-2 w-full rounded-xl border border-black/10 px-3 py-2.5 text-xs font-normal outline-none focus:border-[#91c51d]" /></label>
+              <button disabled={connectingKiwify} className="rounded-xl bg-[#168f80] px-4 py-3 text-xs font-black text-white disabled:opacity-50">{connectingKiwify ? "Validando API e webhook..." : kiwify?.webhook_connected ? "Validar e sincronizar Kiwify" : "Conectar Kiwify automaticamente"}</button>
             </form>
-            <p className="mt-2 text-[10px] leading-4 text-[#7b857e]">As credenciais da API são usadas somente para criar/atualizar o webhook e não são gravadas no banco do ShortsFlow.</p>
+            <p className="mt-3 text-[10px] leading-4 text-[#7b857e]">Após a primeira conexão, as credenciais ficam no volume privado do servidor. O Client Secret não é exibido novamente no navegador. O sistema valida a conta pela API oficial e cria ou atualiza o webhook existente sem duplicar.</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2"><a href={kiwify?.checkout_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#b8f238] px-4 py-3 text-center text-xs font-black">Assine já</a><a href={kiwify?.upgrade_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0d241d] px-4 py-3 text-center text-xs font-black text-white">Upgrade ilimitado</a></div>
           </div>
         </div>
