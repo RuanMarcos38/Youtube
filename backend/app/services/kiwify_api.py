@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 from urllib.parse import urlsplit
 
 import httpx
@@ -19,6 +21,8 @@ DEFAULT_TRIGGERS = [
     "subscription_renewed",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 class KiwifyApiError(RuntimeError):
     pass
@@ -31,10 +35,18 @@ def _safe_error(response: httpx.Response, fallback: str) -> str:
             for key in ("message", "error_description", "error", "detail"):
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip():
-                    return value.strip()[:300]
+                    return value.strip()[:400]
     except Exception:
         pass
-    return fallback
+    text = str(response.text or "").strip()
+    return text[:400] if text else fallback
+
+
+def _upstream_error(stage: str, response: httpx.Response, fallback: str) -> KiwifyApiError:
+    detail = _safe_error(response, fallback)
+    message = f"Kiwify • {stage}: {detail} (HTTP {response.status_code})"
+    logger.warning(message)
+    return KiwifyApiError(message)
 
 
 def _webhook_identity(url: str) -> tuple[str, str]:
@@ -43,6 +55,31 @@ def _webhook_identity(url: str) -> tuple[str, str]:
         return (parsed.netloc.lower(), parsed.path.rstrip("/").lower())
     except Exception:
         return ("", "")
+
+
+def _delivery_token(secret: str) -> str:
+    """Token curto e estável para o campo `token` da Kiwify.
+
+    O segredo interno completo continua somente na query string do endpoint do
+    ShortsFlow. O token cadastrado na Kiwify não precisa expor esse segredo e
+    fica no formato compacto usado pela documentação oficial.
+    """
+    value = str(secret or "").strip()
+    if not value:
+        return "shortsflow"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def _client() -> httpx.Client:
+    # A VPS do ShortsFlow não possui uma rota IPv6 funcional. Forçar IPv4
+    # evita que uma tentativa IPv6 sem rota seja confundida com falha da API.
+    transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
+    return httpx.Client(
+        timeout=httpx.Timeout(30.0, connect=12.0),
+        transport=transport,
+        follow_redirects=True,
+        trust_env=False,
+    )
 
 
 def _resolve_checkout_products(
@@ -60,6 +97,7 @@ def _resolve_checkout_products(
 
     listing = client.get(PRODUCTS_URL, headers=headers, params={"page_size": "100", "page_number": "1"})
     if not listing.is_success:
+        logger.info("Kiwify product mapping skipped: HTTP %s", listing.status_code)
         return found
     payload = listing.json()
     rows = payload.get("data", []) if isinstance(payload, dict) else []
@@ -106,18 +144,29 @@ def register_webhook(
 ) -> dict:
     """Validate the Kiwify API account and create/update the ShortsFlow webhook."""
     try:
-        with httpx.Client(timeout=30.0) as client:
+        with _client() as client:
             oauth = client.post(
                 OAUTH_URL,
                 data={"client_id": client_id.strip(), "client_secret": client_secret.strip()},
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             if not oauth.is_success:
-                raise KiwifyApiError(_safe_error(oauth, "A Kiwify recusou o Client ID/Client Secret."))
+                raise _upstream_error("autenticação OAuth", oauth, "A Kiwify recusou o Client ID/Client Secret.")
             token_payload = oauth.json()
             access_token = str(token_payload.get("access_token") or "").strip()
             if not access_token:
-                raise KiwifyApiError("A Kiwify não retornou um access_token.")
+                raise KiwifyApiError("Kiwify • autenticação OAuth: a API não retornou access_token.")
+
+            scope = {
+                item.strip().lower()
+                for item in str(token_payload.get("scope") or "").replace(",", " ").split()
+                if item.strip()
+            }
+            if scope and "webhooks" not in scope:
+                raise KiwifyApiError(
+                    "Kiwify • permissões: a API Key atual não possui acesso a Webhooks. "
+                    "Em Apps > API, habilite o endpoint Webhooks nesta chave e tente novamente."
+                )
 
             headers = {
                 "Authorization": f"Bearer {access_token}",
@@ -128,8 +177,10 @@ def register_webhook(
 
             account = client.get(ACCOUNT_DETAILS_URL, headers=headers)
             if not account.is_success:
-                raise KiwifyApiError(
-                    _safe_error(account, "A Kiwify recusou o Account ID. Copie o account_id exibido em Apps > API.")
+                raise _upstream_error(
+                    "validação da conta",
+                    account,
+                    "A Kiwify recusou o Account ID. Copie o account_id exibido em Apps > API.",
                 )
             account_payload = account.json() if account.content else {}
             account_name = str(account_payload.get("company_name") or "").strip() if isinstance(account_payload, dict) else ""
@@ -145,45 +196,60 @@ def register_webhook(
                 "url": webhook_url,
                 "products": products.strip() or "all",
                 "triggers": DEFAULT_TRIGGERS,
-                "token": webhook_token,
+                "token": _delivery_token(webhook_token),
             }
 
             existing_id = ""
             listing = client.get(WEBHOOKS_URL, headers=headers)
-            if listing.is_success:
-                listing_payload = listing.json()
-                rows = listing_payload.get("data", []) if isinstance(listing_payload, dict) else []
-                if isinstance(rows, list):
-                    target_identity = _webhook_identity(webhook_url)
-                    for row in rows:
-                        if not isinstance(row, dict):
-                            continue
-                        row_url = str(row.get("url") or "").strip()
-                        row_name = str(row.get("name") or "").strip().lower()
-                        if row_url == webhook_url or _webhook_identity(row_url) == target_identity or row_name in {"shortsflow saas", "shorts i.a", "shortsflow"}:
-                            existing_id = str(row.get("id") or "").strip()
-                            if existing_id:
-                                break
+            if not listing.is_success:
+                raise _upstream_error(
+                    "listagem de webhooks",
+                    listing,
+                    "Não foi possível consultar os webhooks existentes. Verifique a permissão Webhooks da API Key.",
+                )
+            listing_payload = listing.json()
+            rows = listing_payload.get("data", []) if isinstance(listing_payload, dict) else []
+            if isinstance(rows, list):
+                target_identity = _webhook_identity(webhook_url)
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    row_url = str(row.get("url") or "").strip()
+                    row_name = str(row.get("name") or "").strip().lower()
+                    if row_url == webhook_url or _webhook_identity(row_url) == target_identity or row_name in {"shortsflow saas", "shorts i.a", "shortsflow"}:
+                        existing_id = str(row.get("id") or "").strip()
+                        if existing_id:
+                            break
 
             if existing_id:
                 result = client.put(f"{WEBHOOKS_URL}/{existing_id}", headers=headers, json=body)
                 action = "updated"
+                stage = "atualização do webhook"
             else:
                 result = client.post(WEBHOOKS_URL, headers=headers, json=body)
                 action = "created"
+                stage = "criação do webhook"
 
             if not result.is_success:
-                raise KiwifyApiError(_safe_error(result, "A Kiwify recusou o cadastro do webhook."))
+                raise _upstream_error(stage, result, "A Kiwify recusou o cadastro do webhook.")
 
             payload = result.json() if result.content else {}
+            webhook_id = str(payload.get("id") or existing_id).strip()
+            if not webhook_id:
+                raise KiwifyApiError("Kiwify • webhook: a API confirmou a operação, mas não retornou o ID do webhook.")
+
             return {
                 "ok": True,
                 "action": action,
-                "webhook_id": str(payload.get("id") or existing_id),
+                "webhook_id": webhook_id,
                 "webhook_url": webhook_url,
                 "triggers": DEFAULT_TRIGGERS,
                 "account_name": account_name,
                 **product_map,
             }
+    except KiwifyApiError:
+        raise
     except httpx.RequestError as exc:
-        raise KiwifyApiError(f"Falha de comunicação com a API da Kiwify: {exc}") from exc
+        message = f"Kiwify • comunicação: não foi possível alcançar a API por IPv4: {exc}"
+        logger.warning(message)
+        raise KiwifyApiError(message) from exc
