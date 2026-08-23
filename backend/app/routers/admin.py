@@ -19,6 +19,11 @@ from ..services.runtime_download_auth import (
     set_proxy_override,
     status_payload as download_auth_status,
 )
+from ..services.runtime_kiwify_auth import (
+    resolve_credentials as resolve_kiwify_credentials,
+    save_credentials as save_kiwify_credentials,
+    status_payload as kiwify_auth_status,
+)
 from ..services.system_config import get_public_config, update_public_config
 
 
@@ -44,9 +49,9 @@ class CredentialDelivered(BaseModel):
 
 
 class KiwifyConnectRequest(BaseModel):
-    client_id: str = Field(min_length=5, max_length=200)
-    client_secret: str = Field(min_length=8, max_length=500)
-    account_id: str = Field(min_length=3, max_length=200)
+    client_id: str | None = Field(default=None, max_length=200)
+    client_secret: str | None = Field(default=None, max_length=500)
+    account_id: str | None = Field(default=None, max_length=200)
     products: str = Field(default="all", min_length=1, max_length=500)
 
 
@@ -87,6 +92,11 @@ def _set_system_setting(db: Session, key: str, value: str, *, secret: bool = Fal
         row.secret = secret
     else:
         db.add(SystemSetting(key=key, value=value, secret=secret))
+
+
+def _setting_value(db: Session, key: str) -> str:
+    row = db.get(SystemSetting, key)
+    return row.value.strip() if row and row.value else ""
 
 
 @router.get("/system-config")
@@ -277,13 +287,17 @@ def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends
     base_product = db.get(SystemSetting, "kiwify_base_product_id")
     upgrade_product = db.get(SystemSetting, "kiwify_upgrade_product_id")
     public_config = get_public_config(db)
+    auth = kiwify_auth_status()
+    webhook_id = _setting_value(db, "kiwify_webhook_id")
     return {
         "webhook_url": _kiwify_webhook_url(db),
+        "webhook_id": webhook_id,
+        "webhook_connected": bool(webhook_id),
         "checkout_url": public_config["checkout_url"],
         "upgrade_url": public_config["upgrade_url"],
         "events": [
-            "compra_aprovada/order_approved",
-            "compra_reembolsada/order_refunded",
+            "compra_aprovada",
+            "compra_reembolsada",
             "chargeback",
             "subscription_canceled",
             "subscription_late",
@@ -291,6 +305,7 @@ def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends
         ],
         "base_product_mapped": bool(base_product and base_product.value.strip()),
         "upgrade_product_mapped": bool(upgrade_product and upgrade_product.value.strip()),
+        **auth,
     }
 
 
@@ -304,11 +319,22 @@ def register_kiwify_webhook(
     webhook_url = _kiwify_webhook_url(db)
     if not token or not webhook_url:
         raise HTTPException(status_code=503, detail="Token interno do webhook Kiwify ainda não foi inicializado.")
+
+    credentials = resolve_kiwify_credentials(
+        client_id=payload.client_id or "",
+        client_secret=payload.client_secret or "",
+        account_id=payload.account_id or "",
+    )
+    try:
+        save_kiwify_credentials(**credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     try:
         result = register_webhook(
-            client_id=payload.client_id,
-            client_secret=payload.client_secret,
-            account_id=payload.account_id,
+            client_id=credentials["client_id"],
+            client_secret=credentials["client_secret"],
+            account_id=credentials["account_id"],
             webhook_url=webhook_url,
             webhook_token=token,
             products=payload.products,
@@ -318,11 +344,20 @@ def register_kiwify_webhook(
     except KiwifyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    webhook_id = str(result.get("webhook_id") or "").strip()
     base_product_id = str(result.get("base_product_id") or "").strip()
     upgrade_product_id = str(result.get("upgrade_product_id") or "").strip()
+    if webhook_id:
+        _set_system_setting(db, "kiwify_webhook_id", webhook_id)
     if base_product_id:
         _set_system_setting(db, "kiwify_base_product_id", base_product_id)
     if upgrade_product_id:
         _set_system_setting(db, "kiwify_upgrade_product_id", upgrade_product_id)
     db.commit()
-    return result
+    return {
+        **result,
+        "client_id": credentials["client_id"],
+        "account_id": credentials["account_id"],
+        "client_secret_configured": True,
+        "credentials_configured": True,
+    }
