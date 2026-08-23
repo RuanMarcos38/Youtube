@@ -42,7 +42,9 @@ RUN python3 -m venv /opt/venv
 WORKDIR /app/backend
 COPY backend/requirements.txt ./requirements.txt
 RUN /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -r requirements.txt
+    && /opt/venv/bin/pip install -r requirements.txt \
+    && test -x /usr/bin/chromium \
+    && /opt/venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('yt_dlp_plugins.extractor.getpot_wpc')"
 COPY backend/ /app/backend/
 
 COPY --from=pot-provider-builder /build/pot-provider /app/pot-provider
