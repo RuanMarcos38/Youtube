@@ -29,10 +29,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     DATA_DIR=/app/data \
     SQLITE_PATH=/app/data/app.db \
-    YTDLP_POT_PROVIDER_URL=http://127.0.0.1:4416
+    YTDLP_POT_PROVIDER_URL=http://127.0.0.1:4416 \
+    DISPLAY=:99 \
+    CHROME_BIN=/usr/bin/chromium
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip ffmpeg ca-certificates fonts-dejavu-core supervisor \
+    chromium xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/venv
