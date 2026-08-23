@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import httpx
 
 
@@ -7,6 +9,7 @@ API_BASE = "https://public-api.kiwify.com/v1"
 OAUTH_URL = f"{API_BASE}/oauth/token"
 WEBHOOKS_URL = f"{API_BASE}/webhooks"
 PRODUCTS_URL = f"{API_BASE}/products"
+ACCOUNT_DETAILS_URL = f"{API_BASE}/account-details"
 DEFAULT_TRIGGERS = [
     "compra_aprovada",
     "compra_reembolsada",
@@ -32,6 +35,14 @@ def _safe_error(response: httpx.Response, fallback: str) -> str:
     except Exception:
         pass
     return fallback
+
+
+def _webhook_identity(url: str) -> tuple[str, str]:
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        return (parsed.netloc.lower(), parsed.path.rstrip("/").lower())
+    except Exception:
+        return ("", "")
 
 
 def _resolve_checkout_products(
@@ -93,7 +104,7 @@ def register_webhook(
     base_checkout_code: str = "",
     upgrade_checkout_code: str = "",
 ) -> dict:
-    """Create/update the ShortsFlow webhook without persisting Kiwify API credentials."""
+    """Validate the Kiwify API account and create/update the ShortsFlow webhook."""
     try:
         with httpx.Client(timeout=30.0) as client:
             oauth = client.post(
@@ -114,6 +125,15 @@ def register_webhook(
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+
+            account = client.get(ACCOUNT_DETAILS_URL, headers=headers)
+            if not account.is_success:
+                raise KiwifyApiError(
+                    _safe_error(account, "A Kiwify recusou o Account ID. Copie o account_id exibido em Apps > API.")
+                )
+            account_payload = account.json() if account.content else {}
+            account_name = str(account_payload.get("company_name") or "").strip() if isinstance(account_payload, dict) else ""
+
             product_map = _resolve_checkout_products(
                 client,
                 headers,
@@ -134,12 +154,16 @@ def register_webhook(
                 listing_payload = listing.json()
                 rows = listing_payload.get("data", []) if isinstance(listing_payload, dict) else []
                 if isinstance(rows, list):
+                    target_identity = _webhook_identity(webhook_url)
                     for row in rows:
                         if not isinstance(row, dict):
                             continue
-                        if str(row.get("url") or "").strip() == webhook_url:
+                        row_url = str(row.get("url") or "").strip()
+                        row_name = str(row.get("name") or "").strip().lower()
+                        if row_url == webhook_url or _webhook_identity(row_url) == target_identity or row_name in {"shortsflow saas", "shorts i.a", "shortsflow"}:
                             existing_id = str(row.get("id") or "").strip()
-                            break
+                            if existing_id:
+                                break
 
             if existing_id:
                 result = client.put(f"{WEBHOOKS_URL}/{existing_id}", headers=headers, json=body)
@@ -158,6 +182,7 @@ def register_webhook(
                 "webhook_id": str(payload.get("id") or existing_id),
                 "webhook_url": webhook_url,
                 "triggers": DEFAULT_TRIGGERS,
+                "account_name": account_name,
                 **product_map,
             }
     except httpx.RequestError as exc:
