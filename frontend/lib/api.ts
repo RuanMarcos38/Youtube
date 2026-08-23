@@ -91,8 +91,8 @@ export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/ki
 export const adminSystemConfig = () => api<PublicConfig>("/api/admin/system-config");
 export const adminUpdateSystemConfig = (payload: PublicConfig) =>
   api<PublicConfig>("/api/admin/system-config", { method: "PUT", body: JSON.stringify(payload) });
-export const adminRegisterKiwify = (payload: { client_id: string; client_secret: string; account_id: string; products?: string }) =>
-  api<{ ok: boolean; action: string; webhook_id: string; webhook_url: string; triggers: string[] }>("/api/admin/kiwify/register", {
+export const adminRegisterKiwify = (payload: { client_id?: string; client_secret?: string; account_id?: string; products?: string }) =>
+  api<{ ok: boolean; action: string; webhook_id: string; webhook_url: string; triggers: string[]; client_id?: string; account_id?: string; client_secret_configured?: boolean }>("/api/admin/kiwify/register", {
     method: "POST",
     body: JSON.stringify(payload),
   });

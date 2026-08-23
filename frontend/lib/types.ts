@@ -120,11 +120,17 @@ export type DiagnosticResult = {
 
 export type KiwifyAdminSettings = {
   webhook_url: string;
+  webhook_id?: string;
+  webhook_connected?: boolean;
   checkout_url: string;
   upgrade_url: string;
   events: string[];
   base_product_mapped?: boolean;
   upgrade_product_mapped?: boolean;
+  client_id?: string;
+  account_id?: string;
+  client_secret_configured?: boolean;
+  credentials_configured?: boolean;
 };
 
 export type TrendingVideo = {
