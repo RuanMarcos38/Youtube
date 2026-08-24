@@ -1,6 +1,5 @@
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 from ..config import settings
 from .downloader import validate_download_session
@@ -27,16 +26,15 @@ def _public_result(raw: dict) -> dict:
     ok = bool(raw.get("ok"))
     bot_blocked = bool(raw.get("bot_blocked", False))
     raw_error = str(raw.get("error") or "")
-    network_unreachable = _network_unreachable(raw_error)
+    network_unreachable = bool(raw.get("network_unreachable", False)) or _network_unreachable(raw_error)
 
-    # Several yt-dlp strategies may be attempted. In environments without a
-    # working IPv6 route, the last strategy can end with "Network is unreachable"
-    # even when earlier IPv4 attempts already reached YouTube and were challenged.
-    # Prefer the actionable/root cause instead of exposing the incidental last error.
+    # validate_download_session keeps the actionable YouTube challenge as the
+    # primary failure. Preserve aggregate network diagnostics separately so a
+    # secondary route failure can never replace the real root cause in the UI.
     if not ok and bot_blocked and network_unreachable:
         error = (
-            "A VPS conseguiu alcançar o YouTube por uma ou mais rotas, mas o IP/sessão de saída foi recusado pelo mecanismo anti-bot. "
-            "Também foi detectada uma tentativa de rede sem rota (normalmente IPv6 indisponível); essa rota secundária não é a causa principal."
+            "A VPS conseguiu alcançar o YouTube por IPv4, mas o IP/sessão de saída foi recusado pelo mecanismo anti-bot. "
+            "Também houve uma falha secundária de rede em alguma tentativa; ela não é a causa principal."
         )
         failure_kind = "youtube_ip_challenge"
     elif not ok and bot_blocked:
@@ -55,6 +53,7 @@ def _public_result(raw: dict) -> dict:
         "mode": raw.get("mode"),
         "strategy": raw.get("strategy"),
         "attempts": raw.get("attempts"),
+        "ip_family": raw.get("ip_family", "ipv4"),
         "bot_blocked": bot_blocked,
         "network_unreachable": network_unreachable,
         "failure_kind": failure_kind,
@@ -75,6 +74,7 @@ def run_and_store_download_probe() -> dict:
             "mode": "unknown",
             "strategy": None,
             "attempts": 0,
+            "ip_family": "ipv4",
             "bot_blocked": False,
             "network_unreachable": _network_unreachable(message),
             "failure_kind": "network_unreachable" if _network_unreachable(message) else "unknown",
