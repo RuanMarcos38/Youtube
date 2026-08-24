@@ -3,7 +3,6 @@ import binascii
 import hashlib
 import os
 import shutil
-import socket
 import sys
 import tempfile
 from collections.abc import Callable
@@ -39,8 +38,17 @@ def download_proxy_configured() -> bool:
     return bool(effective_proxy_url())
 
 
+def _browser_pot_path() -> str:
+    browser_path = os.environ.get("CHROME_BIN", "").strip()
+    return browser_path if browser_path and Path(browser_path).is_file() else ""
+
+
+def pot_provider_configured() -> bool:
+    return bool(settings.ytdlp_pot_provider_url.strip() or _browser_pot_path())
+
+
 def download_access_configured() -> bool:
-    return bool(download_auth_configured() or download_proxy_configured() or settings.ytdlp_pot_provider_url.strip())
+    return bool(download_auth_configured() or download_proxy_configured() or pot_provider_configured())
 
 
 def _download_auth_configured() -> bool:
@@ -142,6 +150,11 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None, *
         "sleep_interval_requests": 1,
         "cachedir": str(YTDLP_CACHE_DIR),
         "js_runtimes": _js_runtimes(),
+        # EasyPanel/VPS environments frequently expose an IPv6-capable Python
+        # runtime without a usable IPv6 default route. Binding to IPv4 prevents
+        # incidental "Network is unreachable" failures from masking the real
+        # YouTube response and keeps cookies/proxy traffic on one stable family.
+        "source_address": "0.0.0.0",
     }
     if progress_hook is not None:
         def safe_progress_hook(event: dict) -> None:
@@ -160,13 +173,23 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None, *
     return options
 
 
-def _pot_provider_args(player_client: str = "mweb", *, skip_webpage: bool = False) -> dict | None:
-    if not settings.ytdlp_pot_provider_url:
-        return None
+def _pot_provider_args(player_client: str = "mweb", *, skip_webpage: bool = False) -> dict:
     youtube_args: dict[str, list[str]] = {"player_client": [player_client], "fetch_pot": ["always"]}
     if skip_webpage:
         youtube_args["player_skip"] = ["webpage", "configs"]
-    return {"extractor_args": {"youtube": youtube_args, "youtubepot-bgutilhttp": {"base_url": [settings.ytdlp_pot_provider_url]}}}
+
+    extractor_args: dict[str, dict[str, list[str]]] = {"youtube": youtube_args}
+    provider_url = settings.ytdlp_pot_provider_url.strip()
+    if provider_url:
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [provider_url]}
+
+    browser_path = _browser_pot_path()
+    if browser_path:
+        # The WPC provider is installed in production and can mint PO Tokens in
+        # Chromium when the bgutil service is challenged or unavailable.
+        extractor_args["youtubepot-wpc"] = {"browser_path": [browser_path]}
+
+    return {"extractor_args": extractor_args}
 
 
 def _client_args(player_client: str, *, skip_webpage: bool = False) -> dict:
@@ -188,12 +211,6 @@ def _impersonated_client_args(player_client: str, *, skip_webpage: bool = False)
     return variant
 
 
-def _ipv6_variant(variant: dict) -> dict:
-    copy = dict(variant)
-    copy["source_address"] = "::"
-    return copy
-
-
 def _strategy_variants() -> list[tuple[str, dict, bool]]:
     strategies: list[tuple[str, dict, bool]] = []
     if download_auth_configured():
@@ -207,8 +224,11 @@ def _strategy_variants() -> list[tuple[str, dict, bool]]:
             ("auth:default", {}),
         ]
         for name, variant in authenticated:
-            if variant is not None:
-                strategies.append((name, variant, True))
+            strategies.append((name, variant, True))
+
+    # Keep all public fallbacks on IPv4. A working IPv6 route is not required
+    # for this deployment and trying an unavailable family only adds noise and
+    # can make the final error look like a network outage instead of a challenge.
     guest = [
         ("guest:mweb+pot:skip-webpage", _pot_provider_args("mweb", skip_webpage=True)),
         ("guest:mweb+pot", _pot_provider_args("mweb")),
@@ -220,22 +240,12 @@ def _strategy_variants() -> list[tuple[str, dict, bool]]:
         ("guest:android_vr", _client_args("android_vr", skip_webpage=True)),
         ("guest:ios", _client_args("ios", skip_webpage=True)),
         ("guest:web_embedded", _client_args("web_embedded", skip_webpage=True)),
-        ("guest:chrome+mweb+pot", None if not settings.ytdlp_pot_provider_url else {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
+        ("guest:chrome+mweb+pot", {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
         ("guest:chrome:web_safari", _impersonated_client_args("web_safari", skip_webpage=True)),
+        ("guest:default", {}),
     ]
-    if socket.has_ipv6:
-        ipv6_candidates = [
-            ("guest:ipv6:mweb+pot", _pot_provider_args("mweb", skip_webpage=True)),
-            ("guest:ipv6:web_safari:hls", _hls_client_args("web_safari", skip_webpage=True)),
-            ("guest:ipv6:web_safari", _client_args("web_safari", skip_webpage=True)),
-        ]
-        for name, variant in ipv6_candidates:
-            if variant is not None:
-                guest.insert(0, (name, _ipv6_variant(variant)))
-    guest.append(("guest:default", {}))
     for name, variant in guest:
-        if variant is not None:
-            strategies.append((name, variant, False))
+        strategies.append((name, variant, False))
     return strategies
 
 
@@ -264,8 +274,45 @@ def _compact_error(message: str) -> str:
 
 
 def _is_bot_block(message: str) -> bool:
-    lowered = message.lower()
-    return "sign in to confirm" in lowered or "not a bot" in lowered or "login_required" in lowered or "http error 403" in lowered or "forbidden" in lowered
+    lowered = str(message or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "sign in to confirm",
+            "confirm you're not a bot",
+            "confirm you’re not a bot",
+            "not a bot",
+            "login_required",
+            "http error 403",
+            "forbidden",
+        )
+    )
+
+
+def _is_network_unreachable(message: str) -> bool:
+    lowered = str(message or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "network is unreachable",
+            "no route to host",
+            "failed to establish a new connection",
+            "connection timed out",
+            "connect timeout",
+        )
+    )
+
+
+def _primary_failure(errors: list[str]) -> str:
+    if not errors:
+        return "Sessão de download indisponível."
+    challenged = [item for item in errors if _is_bot_block(item)]
+    if challenged:
+        return challenged[-1]
+    non_network = [item for item in errors if not _is_network_unreachable(item)]
+    if non_network:
+        return non_network[-1]
+    return errors[-1]
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
@@ -288,23 +335,25 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                     "mode": "cookies+proxy" if include_cookies and download_proxy_configured() else "cookies" if include_cookies else "proxy" if download_proxy_configured() else "guest-fallback",
                     "strategy": strategy,
                     "attempts": len(attempted),
+                    "ip_family": "ipv4",
                     "js_runtimes": js_runtime_status(),
-                    "pot_provider": bool(settings.ytdlp_pot_provider_url),
+                    "pot_provider": pot_provider_configured(),
                 }
             except Exception as exc:
                 message = _compact_error(str(exc))
                 if message and message not in errors:
                     errors.append(message)
-    message = errors[-1] if errors else "Sessão de download indisponível."
     return {
         "ok": False,
-        "error": message,
+        "error": _primary_failure(errors),
         "bot_blocked": any(_is_bot_block(item) for item in errors),
+        "network_unreachable": any(_is_network_unreachable(item) for item in errors),
         "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
         "attempts": len(attempted),
         "strategies": attempted,
+        "ip_family": "ipv4",
         "js_runtimes": js_runtime_status(),
-        "pot_provider": bool(settings.ytdlp_pot_provider_url),
+        "pot_provider": pot_provider_configured(),
     }
 
 
@@ -330,8 +379,13 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
         if any(_is_bot_block(error) for error in errors):
             if not download_proxy_configured():
                 raise DownloadError(
-                    "O YouTube recusou todas as rotas automáticas desta VPS, incluindo PO Token, clientes alternativos, web_safari/HLS, tentativas sem webpage, Deno/Node e saída IPv6 quando disponível. Isso caracteriza bloqueio de reputação da rede de saída. Para estabilidade de produção, configure no Administrador > Download YouTube um proxy residencial/estático com IP persistente. Se usar cookies, renove-os através do mesmo IP do proxy."
+                    "O backend alcançou o YouTube por IPv4, mas o IP/sessão atual foi recusado pelo mecanismo anti-bot. "
+                    "O runtime já tentou PO Token automático, clientes alternativos, web_safari/HLS, Chromium/Deno/Node e fallbacks públicos. "
+                    "Para estabilizar a produção, configure no Administrador > Download YouTube um proxy residencial/estático com IP persistente e renove os cookies usando o mesmo IP do proxy."
                 )
-            raise DownloadError("O YouTube recusou o IP/proxy atual mesmo após a cadeia completa de fallbacks. Valide a reputação/saída do proxy no Administrador > Download YouTube e mantenha cookies e proxy no mesmo IP.")
+            raise DownloadError(
+                "O backend alcançou o YouTube por IPv4 através do proxy configurado, mas o IP/sessão ainda foi recusado. "
+                "Mantenha um proxy residencial/estático persistente e gere/renove os cookies pela mesma saída do proxy antes de testar novamente."
+            )
         raise DownloadError(f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}")
     raise DownloadError("yt-dlp terminou sem produzir um arquivo de vídeo")
