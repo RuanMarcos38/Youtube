@@ -6,6 +6,7 @@ from app.services import downloader
 
 
 def test_pot_provider_args_are_enabled_from_settings(monkeypatch):
+    monkeypatch.delenv("CHROME_BIN", raising=False)
     monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://shortsia-pot:4416")
 
     args = downloader._pot_provider_args("mweb")
@@ -24,6 +25,7 @@ def test_pot_provider_args_are_enabled_from_settings(monkeypatch):
 
 
 def test_pot_provider_uses_one_client_per_strategy(monkeypatch):
+    monkeypatch.delenv("CHROME_BIN", raising=False)
     monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://127.0.0.1:4416")
 
     args = downloader._pot_provider_args("web_safari")
@@ -32,10 +34,25 @@ def test_pot_provider_uses_one_client_per_strategy(monkeypatch):
     assert args["extractor_args"]["youtube"]["fetch_pot"] == ["always"]
 
 
-def test_pot_provider_args_are_skipped_when_unset(monkeypatch):
+def test_pot_strategy_still_requests_token_when_server_unset(monkeypatch):
+    monkeypatch.delenv("CHROME_BIN", raising=False)
     monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "")
 
-    assert downloader._pot_provider_args() is None
+    args = downloader._pot_provider_args("mweb")
+
+    assert args["extractor_args"]["youtube"]["fetch_pot"] == ["always"]
+    assert "youtubepot-bgutilhttp" not in args["extractor_args"]
+
+
+def test_pot_provider_passes_production_chromium_to_wpc(tmp_path, monkeypatch):
+    chromium = tmp_path / "chromium"
+    chromium.write_text("", encoding="utf-8")
+    monkeypatch.setenv("CHROME_BIN", str(chromium))
+    monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "")
+
+    args = downloader._pot_provider_args("mweb")
+
+    assert args["extractor_args"]["youtubepot-wpc"]["browser_path"] == [str(chromium)]
 
 
 def test_base_options_enable_available_js_runtime_and_proxy(tmp_path, monkeypatch):
@@ -51,6 +68,7 @@ def test_base_options_enable_available_js_runtime_and_proxy(tmp_path, monkeypatc
     assert options["js_runtimes"]["node"] == {"path": "/usr/local/bin/node"}
     assert options["js_runtimes"]["deno"] == {"path": "/opt/venv/bin/deno"}
     assert options["proxy"] == "http://proxy.internal:8080"
+    assert options["source_address"] == "0.0.0.0"
     assert options["concurrent_fragment_downloads"] >= 1
 
 
@@ -116,6 +134,7 @@ def test_guest_strategies_include_pot_hls_and_impersonation(monkeypatch):
     assert "guest:web_safari" in names
     assert "guest:tv" in names
     assert "guest:chrome+mweb+pot" in names
+    assert not any("ipv6" in name for name in names)
 
 
 def test_bot_challenge_without_proxy_has_actionable_message(tmp_path, monkeypatch):
@@ -132,6 +151,15 @@ def test_bot_challenge_without_proxy_has_actionable_message(tmp_path, monkeypatc
 
     with pytest.raises(downloader.DownloadError, match="proxy residencial/estático"):
         downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path / "job")
+
+
+def test_primary_failure_prefers_youtube_challenge_over_network_noise():
+    errors = [
+        "Sign in to confirm you're not a bot",
+        "HTTPSConnection(host='www.youtube.com'): Network is unreachable",
+    ]
+
+    assert downloader._primary_failure(errors) == "Sign in to confirm you're not a bot"
 
 
 def test_compact_error_limits_repeated_ui_noise():
