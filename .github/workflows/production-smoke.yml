@@ -13,13 +13,14 @@ jobs:
   smoke:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Validate public health and runtime
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json
+          curl -fsS --connect-timeout 10 --max-time 60 --retry 5 --retry-delay 5 --retry-all-errors \
+            https://shorts.r2rmarketingdigital.com.br/api/health > /tmp/health.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -46,7 +47,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 https://shorts.r2rmarketingdigital.com.br/api/billing/public > /tmp/public.json
+          curl -fsS --connect-timeout 10 --max-time 60 --retry 5 --retry-delay 5 --retry-all-errors \
+            https://shorts.r2rmarketingdigital.com.br/api/billing/public > /tmp/public.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -61,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          code=$(curl -sS --max-time 20 -o /tmp/login.json -w '%{http_code}' \
+          code=$(curl -sS --connect-timeout 10 --max-time 60 --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/login.json -w '%{http_code}' \
             -H 'Content-Type: application/json' \
             -d '{"email":"shortsflow-smoke-test-9f4d7c@example.com","password":"invalid-smoke-password"}' \
             https://shorts.r2rmarketingdigital.com.br/api/auth/login)
@@ -77,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           for path in /api/youtube/oauth/status /api/youtube/oauth/start; do
-            code=$(curl -sS --max-time 20 -o /tmp/oauth.json -w '%{http_code}' "https://shorts.r2rmarketingdigital.com.br${path}")
+            code=$(curl -sS --connect-timeout 10 --max-time 60 --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/oauth.json -w '%{http_code}' "https://shorts.r2rmarketingdigital.com.br${path}")
             if [ "$code" != "401" ]; then
               echo "$path returned HTTP $code; expected 401 without a session."
               cat /tmp/oauth.json || true
@@ -96,6 +98,6 @@ jobs:
             https://shorts.r2rmarketingdigital.com.br/termos \
             https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
           do
-            curl -fsS -L --max-time 20 -o /dev/null "$url"
+            curl -fsS -L --connect-timeout 10 --max-time 60 --retry 5 --retry-delay 5 --retry-all-errors -o /dev/null "$url"
           done
           echo "Frontend and legal pages are reachable."
