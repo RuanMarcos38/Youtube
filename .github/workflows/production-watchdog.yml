@@ -96,10 +96,8 @@ jobs:
         if: steps.health.outputs.download_failed == '1'
         shell: bash
         run: |
-          echo "Real YouTube download probe is blocked."
-          echo "The watchdog will not loop deployments or rotate credentials because IP/cookie reputation is external state."
+          echo "::warning title=YouTube download probe blocked::Real YouTube download probe is blocked by IP/session reputation. The watchdog will not loop deployments or rotate credentials because this is external state."
           echo "Use Administrador > Download YouTube to renew the authorized session or configure a stable authorized proxy."
-          exit 1
 
       - name: Validate frontend and authentication contract
         shell: bash

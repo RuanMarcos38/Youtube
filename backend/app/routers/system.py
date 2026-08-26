@@ -58,12 +58,26 @@ def _connected_profiles() -> int:
         db.close()
 
 
+def _download_probe_is_external_block(download_probe: dict | None) -> bool:
+    if not download_probe or download_probe.get("ok"):
+        return False
+    return str(download_probe.get("failure_kind") or "") == "youtube_ip_challenge" or bool(download_probe.get("bot_blocked"))
+
+
+def _download_probe_blocks_runtime(download_probe: dict | None) -> bool:
+    if not download_probe or download_probe.get("ok"):
+        return False
+    return not _download_probe_is_external_block(download_probe)
+
+
 @router.get("/health")
 def health():
     connected_profiles = _connected_profiles()
     runtimes = js_runtime_status()
     js_runtime_available = bool(runtimes.get("node") or runtimes.get("deno"))
     download_probe = read_download_probe()
+    download_external_blocked = _download_probe_is_external_block(download_probe)
+    download_runtime_blocking = _download_probe_blocks_runtime(download_probe)
     checks = {
         "openai_configured": bool(settings.openai_api_key),
         "youtube_api_configured": bool(settings.youtube_api_key),
@@ -81,6 +95,8 @@ def health():
         "youtube_download_proxy_configured": download_proxy_configured(),
         "youtube_download_ready": download_access_configured(),
         "youtube_download_probe_ok": None if download_probe is None else bool(download_probe.get("ok")),
+        "youtube_download_external_blocked": download_external_blocked,
+        "youtube_download_runtime_blocking": download_runtime_blocking,
     }
 
     required_runtime = [
@@ -101,12 +117,13 @@ def health():
         *required_runtime,
     ]
 
-    # Once the continuous real-world probe has produced a result, include it in
-    # the health state. Before the first probe finishes, deployment health is
-    # based on process/configuration checks so startup is not falsely marked bad.
+    # Once the continuous real-world probe has produced a result, only internal
+    # runtime/network failures degrade service health. A YouTube anti-bot/IP
+    # challenge is external state and remains visible in the probe payload
+    # without marking the deploy or backend process unhealthy.
     operational_runtime = list(required_runtime)
-    if download_probe is not None:
-        operational_runtime.append(bool(download_probe.get("ok")))
+    if download_runtime_blocking:
+        operational_runtime.append(False)
 
     auth_mode = "guest+pot"
     if checks["youtube_download_auth_configured"] and checks["youtube_download_proxy_configured"]:

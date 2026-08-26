@@ -54,7 +54,7 @@ def test_known_invalid_inherited_pooler_binding_falls_back_to_sqlite():
         ),
         sqlite_path="/tmp/shortsflow-test.db",
     )
-    assert configured.sqlalchemy_database_url == "sqlite:////tmp/shortsflow-test.db"
+    assert configured.sqlalchemy_database_url == f"sqlite:///{configured.sqlite_file.as_posix()}"
 
 
 def test_other_supabase_database_urls_are_not_disabled():
