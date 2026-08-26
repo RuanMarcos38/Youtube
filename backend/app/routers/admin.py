@@ -10,6 +10,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User, YouTubeConnection
 from ..services.billing import ensure_plan, jobs_used
+from ..services.download_probe import store_download_probe_result
 from ..services.downloader import validate_download_session
 from ..services.kiwify_api import KiwifyApiError, register_webhook
 from ..services.runtime_download_auth import (
@@ -269,6 +270,10 @@ def update_download_auth(payload: DownloadAuthUpdate, _: User = Depends(require_
 @router.post("/download-auth/test")
 def test_download_auth(_: User = Depends(require_superadmin)):
     result = validate_download_session()
+    try:
+        store_download_probe_result(result)
+    except Exception:
+        pass
     if not result.get("ok"):
         message = str(result.get("error") or "A sessão de download foi recusada.")
         if result.get("bot_blocked"):

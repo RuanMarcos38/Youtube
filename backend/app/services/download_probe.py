@@ -86,6 +86,15 @@ def run_and_store_download_probe() -> dict:
     return result
 
 
+def store_download_probe_result(raw: dict) -> dict:
+    settings.data_path.mkdir(parents=True, exist_ok=True)
+    result = _public_result(raw)
+    tmp = PROBE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(PROBE_FILE)
+    return result
+
+
 def read_download_probe() -> dict | None:
     if not PROBE_FILE.is_file():
         return None
