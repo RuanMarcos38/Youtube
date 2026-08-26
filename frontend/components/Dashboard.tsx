@@ -80,6 +80,20 @@ function statusLabel(status: string) {
   return labels[status] || status;
 }
 
+function youtubeOauthErrorMessage(reason: string) {
+  const normalized = reason.trim().toLowerCase();
+  if (normalized === "access_denied") {
+    return "Google bloqueou o acesso desta conta. O app OAuth ainda está em modo de teste/não verificado para esse e-mail; adicione o e-mail em Test users no Google Cloud Console ou publique/verifique o app.";
+  }
+  if (normalized === "oauth_nao_concluido") {
+    return "Não foi possível concluir a conexão com o YouTube. Tente novamente escolhendo a conta Google que possui o canal.";
+  }
+  if (normalized === "oauth_callback_incompleto") {
+    return "O Google retornou uma autorização incompleta. Inicie a conexão do YouTube novamente.";
+  }
+  return reason ? `Google não autorizou a conexão do YouTube: ${reason}.` : "Google não autorizou a conexão do YouTube.";
+}
+
 function StatusBadge({ status }: { status: string }) {
   const ready = ["ready_for_review", "ready", "approved", "uploaded"].includes(status);
   const failed = ["failed", "upload_failed"].includes(status);
@@ -106,6 +120,24 @@ export default function Dashboard() {
 
   const activeJobs = useMemo(() => jobs.filter((job) => !["ready_for_review", "failed"].includes(job.status)).length, [jobs]);
   const readyClips = useMemo(() => clips.filter((clip) => ["ready", "approved", "uploaded"].includes(clip.status)).length, [clips]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const youtube = params.get("youtube");
+    if (!youtube) return;
+
+    const reason = params.get("reason") || "";
+    if (youtube === "connected") {
+      setMessage("Canal do YouTube conectado com sucesso.");
+    } else if (youtube === "error") {
+      setError(youtubeOauthErrorMessage(reason));
+    }
+
+    params.delete("youtube");
+    params.delete("reason");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }, []);
 
   async function refresh() {
     try {

@@ -59,3 +59,19 @@ def test_successful_recent_probe_is_reported_ok(monkeypatch):
     assert download["ok"] is True
     assert check["ok"] is True
     assert check["recommendation"] == ""
+
+
+def test_google_oauth_check_explains_external_access_denied(monkeypatch):
+    monkeypatch.setattr(self_test, "oauth_configured", lambda: True)
+    monkeypatch.setattr(
+        self_test.settings,
+        "youtube_oauth_redirect_uri",
+        "https://shorts.r2rmarketingdigital.com.br/api/youtube/oauth/callback",
+    )
+
+    ok, detail = self_test._google_oauth_check()
+
+    assert ok is True
+    assert "403 access_denied" in detail
+    assert "Test users" in detail
+    assert "https://shorts.r2rmarketingdigital.com.br/api/youtube/oauth/callback" in detail

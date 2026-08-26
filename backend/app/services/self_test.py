@@ -156,6 +156,19 @@ def _download_check_from_probe() -> tuple[dict, dict]:
     return download, _check("Download real do YouTube", ok, detail, required=False, recommendation=recommendation)
 
 
+def _google_oauth_check() -> tuple[bool, str]:
+    if not oauth_configured():
+        return False, "Cliente OAuth ausente."
+
+    return True, (
+        "Cliente OAuth configurado. Redirect ativo: "
+        f"{settings.youtube_oauth_redirect_uri}. "
+        "Se uma conta Google externa receber 403 access_denied, o app OAuth ainda "
+        "está em modo de teste/não verificado para essa conta; adicione o e-mail em "
+        "Test users no Google Cloud Console ou publique/verifique o app."
+    )
+
+
 def _editor_projects_health() -> tuple[bool, str]:
     users_root = settings.data_path / "users"
     if not users_root.exists():
@@ -210,7 +223,13 @@ def run_self_test(db: Session, *, auto_fix: bool = True) -> dict:
 
     checks.append(_check("OpenAI", bool(settings.openai_api_key), "API key configurada." if settings.openai_api_key else "API key ausente.", recommendation="Configure OPENAI_API_KEY apenas no ambiente seguro do EasyPanel."))
     checks.append(_check("YouTube Data API", bool(settings.youtube_api_key), "API key configurada." if settings.youtube_api_key else "API key ausente.", required=False, recommendation="Configure YOUTUBE_API_KEY no EasyPanel para busca de tendências."))
-    checks.append(_check("Google OAuth", oauth_configured(), "Cliente OAuth configurado." if oauth_configured() else "Cliente OAuth ausente.", required=False, recommendation="Configure Client ID/Secret e mantenha o app Google em Produção para contas externas."))
+    _safe_check(
+        checks,
+        "Google OAuth",
+        _google_oauth_check,
+        required=False,
+        recommendation="Configure Client ID/Secret e mantenha o app Google em Produção ou adicione o e-mail em Test users.",
+    )
 
     runtime = js_runtime_status()
     js_ok = bool(runtime.get("node") or runtime.get("deno"))
