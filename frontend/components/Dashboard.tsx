@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   API_URL,
   approveClip,
+  createEditorProjectFromClip,
   createJob,
   getTrending,
   listClips,
@@ -43,6 +44,13 @@ const captionPositions: Array<{ value: CaptionDraft["caption_position"]; label: 
   { value: "middle", label: "Centro" },
   { value: "top", label: "Topo" },
 ];
+
+const DEFAULT_CAPTION_POSITION: CaptionDraft["caption_position"] = "bottom";
+const DEFAULT_CAPTION_MARGIN = 120;
+const DEFAULT_CAPTION_FONT_SIZE = 18;
+const CAPTION_MARGIN_MIN = 40;
+const CAPTION_MARGIN_MAX = 760;
+const ASS_CANVAS_HEIGHT = 1920;
 
 const pipeline = [
   "Preparando",
@@ -206,13 +214,148 @@ function AlertCard({ alert }: { alert: YouTubeDashboardAlert }) {
 function captionDraftFromClip(clip: Clip): CaptionDraft {
   const position = captionPositions.some((item) => item.value === clip.caption_position)
     ? clip.caption_position as CaptionDraft["caption_position"]
-    : "bottom";
+    : DEFAULT_CAPTION_POSITION;
   return {
     caption_position: position,
-    caption_margin_v: Number.isFinite(clip.caption_margin_v) ? clip.caption_margin_v : 120,
-    caption_font_size: Number.isFinite(clip.caption_font_size) ? clip.caption_font_size : 18,
+    caption_margin_v: Number.isFinite(clip.caption_margin_v) ? clip.caption_margin_v : DEFAULT_CAPTION_MARGIN,
+    caption_font_size: Number.isFinite(clip.caption_font_size) ? clip.caption_font_size : DEFAULT_CAPTION_FONT_SIZE,
     subtitle_srt: clip.subtitle_srt || "",
   };
+}
+
+function defaultCaptionDraft(clip: Clip): CaptionDraft {
+  return {
+    caption_position: DEFAULT_CAPTION_POSITION,
+    caption_margin_v: DEFAULT_CAPTION_MARGIN,
+    caption_font_size: DEFAULT_CAPTION_FONT_SIZE,
+    subtitle_srt: clip.subtitle_srt || "",
+  };
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function snapCaptionMargin(value: number) {
+  return clampNumber(Math.round(value / 20) * 20, CAPTION_MARGIN_MIN, CAPTION_MARGIN_MAX);
+}
+
+function captionVerticalPercent(draft: CaptionDraft) {
+  if (draft.caption_position === "top") return clampNumber((draft.caption_margin_v / ASS_CANVAS_HEIGHT) * 100, 4, 42);
+  if (draft.caption_position === "middle") return 50;
+  return clampNumber(100 - (draft.caption_margin_v / ASS_CANVAS_HEIGHT) * 100, 58, 96);
+}
+
+function captionPreviewStyle(draft: CaptionDraft): CSSProperties {
+  const margin = clampNumber((draft.caption_margin_v / ASS_CANVAS_HEIGHT) * 100, 4, 42);
+  if (draft.caption_position === "top") return { top: `${margin}%` };
+  if (draft.caption_position === "middle") return { top: "50%", transform: "translateY(-50%)" };
+  return { bottom: `${margin}%` };
+}
+
+function previewCaptionText(source: string) {
+  const text = source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\d+$/.test(line) && !line.includes("-->"))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 110 ? `${text.slice(0, 107)}...` : text || "Arraste a legenda para ajustar";
+}
+
+function CaptionLivePreview({
+  draft,
+  blocked,
+  onChange,
+}: {
+  draft: CaptionDraft;
+  blocked: boolean;
+  onChange: (patch: Partial<CaptionDraft>) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const previewText = previewCaptionText(draft.subtitle_srt);
+
+  function updateFromPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if (blocked) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = clampNumber((event.clientY - rect.top) / Math.max(1, rect.height), 0.07, 0.93);
+    let caption_position: CaptionDraft["caption_position"] = "middle";
+    let caption_margin_v = DEFAULT_CAPTION_MARGIN;
+
+    if (ratio < 0.35) {
+      caption_position = "top";
+      caption_margin_v = ratio * ASS_CANVAS_HEIGHT;
+    } else if (ratio > 0.65) {
+      caption_position = "bottom";
+      caption_margin_v = (1 - ratio) * ASS_CANVAS_HEIGHT;
+    }
+
+    onChange({ caption_position, caption_margin_v: snapCaptionMargin(caption_margin_v) });
+  }
+
+  function moveWithKeyboard(direction: -1 | 1) {
+    if (blocked) return;
+    if (draft.caption_position === "middle") {
+      onChange({ caption_position: direction < 0 ? "top" : "bottom", caption_margin_v: DEFAULT_CAPTION_MARGIN });
+      return;
+    }
+    const delta = direction < 0 ? 20 : -20;
+    const nextMargin = draft.caption_position === "top" ? draft.caption_margin_v - delta : draft.caption_margin_v + delta;
+    onChange({ caption_margin_v: snapCaptionMargin(nextMargin) });
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">Prévia segura 9:16</span>
+        <span className="text-[11px] font-medium text-[#667085]">{Math.round(captionVerticalPercent(draft))}%</span>
+      </div>
+      <div
+        role="slider"
+        aria-label="Posição vertical da legenda"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(captionVerticalPercent(draft))}
+        tabIndex={blocked ? -1 : 0}
+        onPointerDown={(event) => {
+          if (blocked) return;
+          setDragging(true);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          updateFromPointer(event);
+        }}
+        onPointerMove={(event) => {
+          if (dragging) updateFromPointer(event);
+        }}
+        onPointerUp={(event) => {
+          setDragging(false);
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => setDragging(false)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            moveWithKeyboard(-1);
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            moveWithKeyboard(1);
+          }
+        }}
+        className={`relative mx-auto aspect-[9/16] w-full max-w-[220px] touch-none overflow-hidden rounded-xl border border-[#222] bg-[linear-gradient(180deg,#222,#0b0b0b)] shadow-inner ${blocked ? "opacity-70" : "cursor-grab active:cursor-grabbing"}`}
+      >
+        <div className="absolute inset-x-[11%] bottom-[17%] top-[10%] rounded-[10px] border border-dashed border-white/30" />
+        <div className="absolute inset-x-[16%] bottom-[18%] h-px bg-white/25" />
+        <div className="absolute inset-x-[16%] top-[12%] h-px bg-white/20" />
+        <div
+          className="absolute left-[10%] right-[10%] rounded-lg bg-black/80 px-2.5 py-1.5 text-center font-black leading-tight text-white shadow-[0_2px_0_rgba(0,0,0,0.8)]"
+          style={{ ...captionPreviewStyle(draft), fontSize: `${clampNumber(draft.caption_font_size * 0.72, 11, 22)}px` }}
+        >
+          {previewText}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CaptionControls({
@@ -220,76 +363,168 @@ function CaptionControls({
   draft,
   busy,
   onChange,
+  onReset,
   onSave,
 }: {
   clip: Clip;
   draft: CaptionDraft;
   busy: boolean;
   onChange: (patch: Partial<CaptionDraft>) => void;
+  onReset: () => void;
   onSave: () => void;
 }) {
   const blocked = ["upload_queued", "uploading", "uploaded"].includes(clip.status);
   return (
-    <details className="mt-3 rounded-lg border border-[#e8e8e8] bg-white">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-[#222]">Ajustar legenda</summary>
-      <div className="space-y-3 border-t border-[#ededed] p-3">
-        <div className="grid gap-2 sm:grid-cols-3">
-          {captionPositions.map((item) => (
+    <details className="mt-3 rounded-xl border border-[#e8e8e8] bg-white shadow-sm group">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-3 text-xs font-semibold text-[#222] [&::-webkit-details-marker]:hidden">
+        <span>Ajustar legenda</span>
+        <span className="rounded-full bg-[#f5f5f5] px-2 py-1 text-[10px] font-medium text-[#667085] group-open:bg-red-50 group-open:text-red-700">
+          Texto, posição e tamanho
+        </span>
+      </summary>
+      <div className="grid gap-4 border-t border-[#ededed] p-3.5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <CaptionLivePreview draft={draft} blocked={blocked} onChange={onChange} />
+        <div className="min-w-0 space-y-3">
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              <span>Posição vertical</span>
+              <span>{draft.caption_position === "bottom" ? "Base" : draft.caption_position === "top" ? "Topo" : "Centro"}</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {captionPositions.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  disabled={blocked}
+                  onClick={() => onChange({ caption_position: item.value })}
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${draft.caption_position === item.value ? "border-red-200 bg-red-50 text-red-700" : "border-[#e8e8e8] bg-[#f7f7f7] text-[#555] hover:border-[#d0d5dd] hover:bg-white"}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="block text-[11px] font-medium leading-5 text-[#555]">
+            Distância da borda: {draft.caption_margin_v}px
+            <input
+              type="range"
+              min={CAPTION_MARGIN_MIN}
+              max={CAPTION_MARGIN_MAX}
+              step={20}
+              value={draft.caption_margin_v}
+              disabled={blocked}
+              onChange={(event) => onChange({ caption_margin_v: Number(event.target.value) })}
+              className="mt-1 w-full accent-[#ff0000] disabled:opacity-45"
+            />
+          </label>
+          <label className="block text-[11px] font-medium leading-5 text-[#555]">
+            Tamanho da fonte: {draft.caption_font_size}px
+            <input
+              type="range"
+              min={14}
+              max={32}
+              step={1}
+              value={draft.caption_font_size}
+              disabled={blocked}
+              onChange={(event) => onChange({ caption_font_size: Number(event.target.value) })}
+              className="mt-1 w-full accent-[#ff0000] disabled:opacity-45"
+            />
+          </label>
+          <label className="block text-[11px] font-medium leading-5 text-[#555]">
+            Texto da legenda
+            <textarea
+              value={draft.subtitle_srt}
+              onChange={(event) => onChange({ subtitle_srt: event.target.value })}
+              disabled={blocked}
+              rows={4}
+              className="mt-1 max-h-[180px] w-full resize-y rounded-lg border border-[#d8d8d8] bg-[#fdfdfd] p-2.5 text-[11px] leading-5 text-[#333] outline-none focus:border-[#ff0000] disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Edite o SRT ou escreva um texto simples para aparecer no corte inteiro."
+            />
+          </label>
+          {blocked && <p className="rounded-lg bg-amber-50 p-2 text-[11px] font-medium leading-5 text-amber-800">Ajustes ficam disponíveis antes do envio ao YouTube.</p>}
+          <div className="flex flex-wrap gap-2">
             <button
-              key={item.value}
               type="button"
-              onClick={() => onChange({ caption_position: item.value })}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${draft.caption_position === item.value ? "border-red-200 bg-red-50 text-red-700" : "border-[#e8e8e8] bg-[#f7f7f7] text-[#555]"}`}
+              onClick={onReset}
+              disabled={busy || blocked}
+              className="inline-flex min-h-9 items-center justify-center rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold text-[#333] transition hover:border-[#c4c4c4] hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {item.label}
+              Restaurar padrão
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={busy || blocked}
+              className="inline-flex min-h-9 items-center justify-center rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#262626] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? "Salvando..." : "Salvar alterações"}
+            </button>
+          </div>
         </div>
-        <label className="block text-[11px] font-medium leading-5 text-[#555]">
-          Altura da legenda: {draft.caption_margin_v}px
-          <input
-            type="range"
-            min={40}
-            max={760}
-            step={20}
-            value={draft.caption_margin_v}
-            onChange={(event) => onChange({ caption_margin_v: Number(event.target.value) })}
-            className="mt-1 w-full accent-[#ff0000]"
-          />
-        </label>
-        <label className="block text-[11px] font-medium leading-5 text-[#555]">
-          Tamanho da fonte: {draft.caption_font_size}px
-          <input
-            type="range"
-            min={14}
-            max={32}
-            step={1}
-            value={draft.caption_font_size}
-            onChange={(event) => onChange({ caption_font_size: Number(event.target.value) })}
-            className="mt-1 w-full accent-[#ff0000]"
-          />
-        </label>
-        <label className="block text-[11px] font-medium leading-5 text-[#555]">
-          Texto da legenda
-          <textarea
-            value={draft.subtitle_srt}
-            onChange={(event) => onChange({ subtitle_srt: event.target.value })}
-            rows={5}
-            className="mt-1 w-full resize-y rounded-lg border border-[#d8d8d8] bg-[#fdfdfd] p-2 text-[11px] leading-5 text-[#333] outline-none focus:border-[#ff0000]"
-            placeholder="Edite o SRT ou escreva um texto simples para aparecer no corte inteiro."
-          />
-        </label>
-        {blocked && <p className="rounded-lg bg-amber-50 p-2 text-[11px] font-medium leading-5 text-amber-800">Ajustes ficam disponíveis antes do envio ao YouTube.</p>}
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={busy || blocked}
-          className="inline-flex w-full items-center justify-center rounded-lg bg-[#111] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 sm:w-auto"
-        >
-          {busy ? "Aplicando..." : "Aplicar no vídeo"}
-        </button>
       </div>
     </details>
+  );
+}
+
+function ClipPreview({ clip, mediaSrc, draft }: { clip: Clip; mediaSrc: string; draft?: CaptionDraft }) {
+  const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  function retryPreview() {
+    setFailed(false);
+    setRetryKey((value) => value + 1);
+  }
+
+  return (
+    <div className="w-full">
+      <div className="mx-auto w-full max-w-[260px] sm:mx-0 sm:max-w-[240px] 2xl:max-w-[270px]">
+        <div className="relative aspect-[9/16] overflow-hidden rounded-xl border border-[#161616] bg-[#080808] shadow-sm">
+          {mediaSrc && !failed ? (
+            <video
+              key={retryKey}
+              controls
+              playsInline
+              preload="metadata"
+              onError={() => setFailed(true)}
+              className="h-full w-full bg-[#080808] object-contain"
+              src={mediaSrc}
+            />
+          ) : (
+            <div className="grid h-full place-items-center p-4 text-center text-white/80">
+              <div>
+                <PlayIcon className="mx-auto h-9 w-9 text-white/70" />
+                <p className="mt-3 text-xs font-semibold">{mediaSrc ? "Não foi possível carregar o preview." : "Preview indisponível."}</p>
+                {mediaSrc && (
+                  <button
+                    type="button"
+                    onClick={retryPreview}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[11px] font-semibold text-[#111]"
+                  >
+                    <RefreshIcon className="h-3.5 w-3.5" />
+                    Tentar novamente
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {draft && !failed && (
+            <>
+              <div className="pointer-events-none absolute inset-x-[11%] bottom-[17%] top-[10%] rounded-[10px] border border-dashed border-white/30" />
+              <div
+                className="pointer-events-none absolute left-[8%] right-[8%] rounded-lg bg-black/80 px-2 py-1.5 text-center font-black leading-tight text-white shadow-[0_2px_0_rgba(0,0,0,0.8)]"
+                style={{ ...captionPreviewStyle(draft), fontSize: `${clampNumber(draft.caption_font_size * 0.62, 10, 20)}px` }}
+              >
+                {previewCaptionText(draft.subtitle_srt)}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[#777]">
+          <span>9:16</span>
+          <span>{(clip.end_seconds - clip.start_seconds).toFixed(1)}s</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -479,6 +714,29 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao ajustar a legenda");
     } finally { setActionId(null); }
+  }
+
+  function resetCaptionSettings(clip: Clip) {
+    setCaptionDrafts((current) => ({
+      ...current,
+      [clip.id]: defaultCaptionDraft(clip),
+    }));
+  }
+
+  async function openClipInEditor(clip: Clip) {
+    setActionId(`edit-${clip.id}`); setError(""); setMessage("");
+    try {
+      const project = await createEditorProjectFromClip(clip.id);
+      const params = new URLSearchParams({
+        project: project.id,
+        clip: String(clip.id),
+        return: "/#cortes",
+      });
+      window.location.href = `/editor-ia?${params.toString()}`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao abrir o corte no editor de vídeo");
+      setActionId(null);
+    }
   }
 
   return (
@@ -743,10 +1001,44 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             {clips.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Os cortes gerados aparecerão aqui.</div> : <div className="grid gap-4 p-5 xl:grid-cols-2">{clips.map((clip) => {
               const draft = captionDrafts[clip.id] ?? captionDraftFromClip(clip);
               const mediaSrc = clip.media_url ? `${API_URL}${clip.media_url}?v=${encodeURIComponent(clip.updated_at || clip.created_at)}` : "";
+              const uploadLocked = ["approved", "upload_queued", "uploading", "uploaded"].includes(clip.status);
               return (
-                <article key={clip.id} className="grid gap-4 rounded-xl border border-[#e8e8e8] bg-white p-4 sm:grid-cols-[160px_1fr]">
-                  <div className="overflow-hidden rounded-lg bg-[#111]">{mediaSrc ? <video controls preload="metadata" className="aspect-[9/16] max-h-[340px] w-full object-contain" src={mediaSrc} /> : <div className="grid aspect-[9/16] place-items-center"><PlayIcon className="h-9 w-9 text-white/70" /></div>}</div>
-                  <div className="min-w-0"><div className="flex flex-wrap items-center justify-between gap-2"><StatusBadge status={clip.status} /><span className="text-xs text-[#777]">{(clip.end_seconds - clip.start_seconds).toFixed(1)}s</span></div><h3 className="mt-3 text-base font-semibold leading-6 text-[#111]">{clip.title}</h3>{clip.hook && <p className="mt-2 text-sm font-medium text-[#444]">{clip.hook}</p>}<p className="mt-3 text-xs leading-5 text-[#666]">{clip.description}</p><div className="mt-3 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><CopyIcon className="h-4 w-4 flex-none text-[#ff0000]" />{clip.copy}</div><div className="mt-2 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><TagsIcon className="h-4 w-4 flex-none text-[#ff0000]" /><span>{clip.tags.slice(0, 8).map((tag) => `#${tag}`).join(" ")}</span></div><CaptionControls clip={clip} draft={draft} busy={actionId === `caption-${clip.id}`} onChange={(patch) => updateCaptionDraft(clip.id, clip, patch)} onSave={() => void applyCaptionSettings(clip)} />{clip.upload_error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700">{clip.upload_error}</p>}{clip.youtube_video_id && <a href={`https://www.youtube.com/watch?v=${clip.youtube_video_id}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-red-600">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>}<div className="mt-4 flex flex-wrap gap-2"><button onClick={() => approve(clip.id)} disabled={["approved", "upload_queued", "uploading", "uploaded"].includes(clip.status) || actionId === `approve-${clip.id}`} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{clip.status === "approved" ? "Aprovado" : "Aprovar"}</button><button onClick={() => upload(clip.id)} disabled={!youtubeConnected || clip.status !== "approved" || actionId === `upload-${clip.id}`} className="flex items-center gap-2 rounded-lg bg-[#ff0000] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"><UploadIcon className="h-3.5 w-3.5" />{clip.status === "uploading" ? "Enviando..." : clip.status === "uploaded" ? "Publicado" : "Enviar ao YouTube"}</button></div></div>
+                <article key={clip.id} className="grid items-start gap-4 rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-[0_10px_28px_rgba(17,17,17,0.04)] md:grid-cols-[minmax(210px,240px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(230px,270px)_minmax(0,1fr)]">
+                  <ClipPreview clip={clip} mediaSrc={mediaSrc} draft={captionDrafts[clip.id]} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <StatusBadge status={clip.status} />
+                      <span className="text-xs text-[#777]">{(clip.end_seconds - clip.start_seconds).toFixed(1)}s</span>
+                    </div>
+                    <h3 className="mt-3 line-clamp-3 text-base font-semibold leading-6 text-[#111]">{clip.title}</h3>
+                    {clip.hook && <p className="mt-2 text-sm font-medium leading-5 text-[#444]">{clip.hook}</p>}
+                    <p className="mt-3 max-h-28 overflow-y-auto pr-1 text-xs leading-5 text-[#666]">{clip.description}</p>
+                    <div className="mt-3 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]">
+                      <CopyIcon className="h-4 w-4 flex-none text-[#ff0000]" />
+                      <span className="max-h-20 overflow-y-auto pr-1">{clip.copy}</span>
+                    </div>
+                    <div className="mt-2 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]">
+                      <TagsIcon className="h-4 w-4 flex-none text-[#ff0000]" />
+                      <span className="max-h-20 overflow-y-auto pr-1">{clip.tags.slice(0, 12).map((tag) => `#${tag}`).join(" ")}</span>
+                    </div>
+                    <CaptionControls
+                      clip={clip}
+                      draft={draft}
+                      busy={actionId === `caption-${clip.id}`}
+                      onChange={(patch) => updateCaptionDraft(clip.id, clip, patch)}
+                      onReset={() => resetCaptionSettings(clip)}
+                      onSave={() => void applyCaptionSettings(clip)}
+                    />
+                    {clip.upload_error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700">{clip.upload_error}</p>}
+                    {clip.youtube_video_id && <a href={`https://www.youtube.com/watch?v=${clip.youtube_video_id}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-red-600">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button onClick={() => void openClipInEditor(clip)} disabled={actionId === `edit-${clip.id}`} className="inline-flex items-center justify-center rounded-lg border border-[#d8d8d8] bg-white px-3.5 py-2 text-xs font-semibold text-[#222] transition hover:border-[#c4c4c4] hover:bg-[#fafafa] disabled:opacity-40">
+                        {actionId === `edit-${clip.id}` ? "Abrindo..." : "Editar vídeo"}
+                      </button>
+                      <button onClick={() => approve(clip.id)} disabled={uploadLocked || actionId === `approve-${clip.id}`} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{clip.status === "approved" ? "Aprovado" : "Aprovar"}</button>
+                      <button onClick={() => upload(clip.id)} disabled={!youtubeConnected || clip.status !== "approved" || actionId === `upload-${clip.id}`} className="flex items-center gap-2 rounded-lg bg-[#ff0000] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"><UploadIcon className="h-3.5 w-3.5" />{clip.status === "uploading" ? "Enviando..." : clip.status === "uploaded" ? "Publicado" : "Enviar ao YouTube"}</button>
+                    </div>
+                  </div>
                 </article>
               );
             })}</div>}

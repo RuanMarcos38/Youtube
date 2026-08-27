@@ -121,9 +121,39 @@ export default function EditorIAPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [returnHref, setReturnHref] = useState("/");
 
   useEffect(() => {
     api<Preset[]>("/api/editor-ai/presets").then((data) => { if (data.length) setPresets(data); }).catch(() => setPresets(DEFAULT_PRESETS));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get("project");
+    const clipId = params.get("clip");
+    const returnParam = params.get("return");
+    if (returnParam?.startsWith("/") && !returnParam.startsWith("//")) setReturnHref(returnParam);
+    if (!projectId) return;
+
+    let cancelled = false;
+    setBusy(true);
+    setError("");
+    api<Project>(`/api/editor-ai/projects/${projectId}`)
+      .then((loaded) => {
+        if (cancelled) return;
+        setProject(loaded);
+        setTimeline(loaded.timeline || null);
+        if (loaded.preset) setPreset(loaded.preset);
+        setMessage(clipId ? `Corte #${clipId} carregado no editor de vídeo.` : "Projeto carregado no editor de vídeo.");
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Falha ao carregar o projeto do editor.");
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -250,7 +280,7 @@ export default function EditorIAPage() {
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5 text-[11px] text-[#667085] sm:inline-flex"><TikTokIcon /> TikTok</span>
             <span className="hidden items-center gap-1.5 rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5 text-[11px] text-[#667085] sm:inline-flex"><YoutubeIcon /> YouTube</span>
-            <a href="/" className="sf-button sf-button-outline min-h-9 px-3 py-2">Voltar ao painel</a>
+            <a href={returnHref} className="sf-button sf-button-outline min-h-9 px-3 py-2">Voltar ao painel</a>
           </div>
         </div>
       </header>

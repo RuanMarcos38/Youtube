@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import User
+from ..models import Clip, User
 from ..services.billing import can_use_tool
 from ..services.editor_ai import (
     ALLOWED_EXTENSIONS,
@@ -65,6 +65,68 @@ def _normalize_edit_options(payload: AutoEditRequest) -> dict[str, Any]:
         "edit_intensity": edit_intensity,
         "auto_reframe": bool(payload.auto_reframe),
         "hook_variants": bool(payload.hook_variants),
+    }
+
+
+def _clip_editor_project_payload(clip: Clip, project_id: str, stored_filename: str, created_at: str) -> dict[str, Any]:
+    duration = max(0.1, float(clip.end_seconds or 0) - float(clip.start_seconds or 0))
+    return {
+        "source_clip_id": clip.id,
+        "source_job_id": clip.job_id,
+        "preview_url": f"/api/media/editor-projects/{project_id}/{stored_filename}",
+        "timeline": {
+            "version": 1,
+            "duration": round(duration, 3),
+            "preset": "shorts_review",
+            "canvas": {"width": 1080, "height": 1920, "fps": 30, "aspect_ratio": "9:16"},
+            "tracks": [
+                {
+                    "id": "video-main",
+                    "type": "video",
+                    "items": [
+                        {
+                            "id": f"clip-{clip.id}",
+                            "source": stored_filename,
+                            "source_in": 0,
+                            "source_out": round(duration, 3),
+                            "timeline_in": 0,
+                            "timeline_out": round(duration, 3),
+                            "enabled": True,
+                        }
+                    ],
+                },
+                {
+                    "id": "caption-main",
+                    "type": "captions",
+                    "items": [
+                        {
+                            "id": f"caption-{clip.id}",
+                            "caption_position": clip.caption_position or "bottom",
+                            "caption_margin_v": clip.caption_margin_v or 120,
+                            "caption_font_size": clip.caption_font_size or 18,
+                        }
+                    ],
+                },
+            ],
+        },
+        "analysis": {
+            "source_duration": round(duration, 3),
+            "edited_duration": round(duration, 3),
+            "removed_seconds": 0,
+            "notes": ["Projeto criado a partir de um corte aprovado em Publicações."],
+            "captions": {
+                "enabled": bool(clip.subtitle_path),
+                "style": "revisão",
+                "safe_zone": True,
+            },
+        },
+        "edit_options": dict(DEFAULT_EDIT_OPTIONS),
+        "updated_at": created_at,
+        "loaded_from_clip": {
+            "clip_id": clip.id,
+            "job_id": clip.job_id,
+            "title": clip.title,
+        },
     }
 
 
@@ -122,6 +184,54 @@ def project(project_id: str, user: User = Depends(get_current_user)):
         return read_project(user.id, project_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Projeto de edição não encontrado.") from exc
+
+
+@router.post("/clips/{clip_id}/project", status_code=status.HTTP_201_CREATED)
+def create_project_from_clip(
+    clip_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    clip = db.query(Clip).filter(Clip.id == clip_id, Clip.user_id == user.id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Corte não encontrado.")
+
+    source = Path(clip.file_path)
+    if not source.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo do corte não encontrado para edição.")
+
+    for item in list_projects(user.id):
+        if int(item.get("source_clip_id") or 0) != clip.id:
+            continue
+        project_id = str(item.get("id") or "")
+        stored_filename = str(item.get("source_filename") or "")
+        if not project_id:
+            continue
+        try:
+            existing = read_project(user.id, project_id)
+            if stored_filename and (project_dir(user.id, project_id) / stored_filename).is_file():
+                return existing
+        except (FileNotFoundError, ValueError):
+            continue
+
+    extension = source.suffix.lower() if source.suffix.lower() in ALLOWED_EXTENSIONS else ".mp4"
+    stored_filename = f"source{extension}"
+    created_at = _now()
+    project = create_project_record(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        original_filename=f"ShortsFlow corte #{clip.id}{extension}",
+        stored_filename=stored_filename,
+        preset="fast_retention",
+        target_platform="youtube_shorts",
+        created_at=created_at,
+    )
+    root = project_dir(user.id, project["id"])
+    shutil.copy2(source, root / stored_filename)
+    project.update(_clip_editor_project_payload(clip, project["id"], stored_filename, created_at))
+    project["status"] = "ready"
+    project["progress"] = 100
+    return save_project(user.id, project["id"], project)
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)

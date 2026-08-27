@@ -149,6 +149,8 @@ export const updateClipCaptions = (
 ) => api<Clip>(`/api/clips/${id}/captions`, { method: "PATCH", body: JSON.stringify(payload) });
 export const uploadClip = (id: number, privacyStatus: string) =>
   api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
+export const createEditorProjectFromClip = (id: number) =>
+  api<{ id: string; status: string }>(`/api/editor-ai/clips/${id}/project`, { method: "POST" });
 export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");
 export const youtubeLiveMetrics = () => api<YouTubeLiveMetrics>("/api/youtube/live-metrics");
