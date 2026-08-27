@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import BrandLogo from "@/components/BrandLogo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -11,8 +11,24 @@ type TimelineItem = { id: string; source: string; source_in: number; source_out:
 type TimelineTrack = { id: string; type: string; locked?: boolean; items: Array<TimelineItem | Record<string, unknown>> };
 type Timeline = { version: number; duration: number; preset: string; canvas: { width: number; height: number; fps: number; aspect_ratio: string }; tracks: TimelineTrack[] };
 type HookVariant = { variant: string; text: string; duration_seconds: number; media_url: string };
+type AiEditPlan = {
+  action: "move_caption" | "remove_caption" | "edit_caption_text" | "resize_caption" | "change_caption_alignment" | "change_caption_safe_area" | "restore_caption_default" | "trim_video" | "change_music_volume" | "remove_music" | "change_caption_style" | "unsupported";
+  target: "current_video";
+  supported: boolean;
+  reason: string;
+  requires_render: boolean;
+  caption_position?: "top" | "middle" | "bottom" | null;
+  caption_margin_v?: number | null;
+  caption_font_size?: number | null;
+  captions_enabled?: boolean | null;
+  music_mode?: "auto" | "none" | "custom" | null;
+  music_volume?: number | null;
+  preview_note?: string | null;
+  unsupported_reason?: string | null;
+};
 type Project = {
   id: string;
+  source_clip_id?: number | null;
   original_filename: string;
   preset: string;
   target_platform: string;
@@ -25,6 +41,8 @@ type Project = {
   hook_variants?: HookVariant[];
   custom_music_original_name?: string | null;
   edit_options?: Record<string, unknown>;
+  pending_ai_edit?: AiEditPlan | null;
+  last_ai_edit_snapshot?: Record<string, unknown> | null;
   analysis?: {
     source_duration?: number;
     edited_duration?: number;
@@ -104,6 +122,32 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+function describeAiAction(plan: AiEditPlan) {
+  const labels: Record<AiEditPlan["action"], string> = {
+    move_caption: "Reposicionar legenda",
+    remove_caption: "Remover legendas",
+    edit_caption_text: "Corrigir texto da legenda",
+    resize_caption: "Ajustar tamanho da legenda",
+    change_caption_alignment: "Alinhar legenda",
+    change_caption_safe_area: "Aplicar área segura",
+    restore_caption_default: "Restaurar legenda padrão",
+    trim_video: "Ajustar corte do vídeo",
+    change_music_volume: "Ajustar volume da música",
+    remove_music: "Remover música",
+    change_caption_style: "Alterar estilo da legenda",
+    unsupported: "Alteração não suportada",
+  };
+  return labels[plan.action] || "Alteração preparada";
+}
+
+function aiCaptionPreviewStyle(plan: AiEditPlan): CSSProperties {
+  const fontSize = Math.max(18, Math.min(30, Math.round((plan.caption_font_size || 18) * 1.25)));
+  const margin = Math.max(40, Math.min(760, Number(plan.caption_margin_v || 120)));
+  if (plan.caption_position === "top") return { top: `${Math.max(8, Math.min(24, margin / 10))}%`, fontSize };
+  if (plan.caption_position === "middle") return { top: "48%", transform: "translateY(-50%)", fontSize };
+  return { bottom: `${Math.max(10, Math.min(26, margin / 10))}%`, fontSize };
+}
+
 export default function EditorIAPage() {
   const [presets, setPresets] = useState<Preset[]>(DEFAULT_PRESETS);
   const [preset, setPreset] = useState("tiktok_shop_sales");
@@ -119,6 +163,10 @@ export default function EditorIAPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiPlan, setAiPlan] = useState<AiEditPlan | null>(null);
+  const [aiPreview, setAiPreview] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [returnHref, setReturnHref] = useState("/");
@@ -226,6 +274,71 @@ export default function EditorIAPage() {
     finally { setBusy(false); }
   }
 
+  async function prepareAiEdit() {
+    if (!project) return setError("Carregue um vídeo no editor antes de usar o Editar com IA.");
+    const prompt = aiPrompt.trim();
+    if (!prompt) return setError("Descreva o que deseja alterar neste vídeo.");
+    setAiBusy(true); setError(""); setAiPreview(false); setMessage("Analisando solicitação...");
+    try {
+      const plan = await api<AiEditPlan>(`/api/editor-ai/projects/${project.id}/ai-edit-plan`, {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      });
+      setAiPlan(plan);
+      if (plan.supported) {
+        setMessage("Alteração preparada. Visualize antes de salvar no projeto.");
+      } else {
+        setMessage("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível interpretar esta edição. Tente novamente.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function applyAiEditPlan() {
+    if (!project || !aiPlan) return;
+    setAiBusy(true); setError(""); setMessage("Aplicando alteração e atualizando a prévia...");
+    try {
+      const updated = await api<Project>(`/api/editor-ai/projects/${project.id}/ai-edit-apply`, {
+        method: "POST",
+        body: JSON.stringify({ plan: aiPlan }),
+      });
+      setProject(updated);
+      if (updated.timeline) setTimeline(updated.timeline);
+      setAiPlan(null);
+      setAiPreview(false);
+      setMessage("Prévia atualizada. Alteração salva no projeto.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível aplicar a alteração.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function undoAiEdit() {
+    if (aiPlan || aiPreview || aiPrompt) {
+      setAiPlan(null);
+      setAiPreview(false);
+      setAiPrompt("");
+      setMessage("");
+      return;
+    }
+    if (!project?.last_ai_edit_snapshot) return;
+    setAiBusy(true); setError(""); setMessage("Desfazendo última alteração de IA...");
+    try {
+      const updated = await api<Project>(`/api/editor-ai/projects/${project.id}/ai-edit-undo`, { method: "POST" });
+      setProject(updated);
+      if (updated.timeline) setTimeline(updated.timeline);
+      setMessage("Última alteração de IA desfeita.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível desfazer a última alteração.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   function toggleClip(id: string) {
     if (!timeline) return;
     setTimeline({
@@ -330,6 +443,46 @@ export default function EditorIAPage() {
                 </div>
               </details>
 
+              <details className="mt-5 rounded-lg border border-red-100 bg-red-50/30" open>
+                <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-[#344054]">✨ Editar com IA</summary>
+                <div className="space-y-3 border-t border-red-100 p-4">
+                  <div>
+                    <label className="text-[11px] font-medium text-[#475467]">Pedido em linguagem natural</label>
+                    <textarea
+                      value={aiPrompt}
+                      onChange={(event) => setAiPrompt(event.target.value)}
+                      placeholder="Descreva o que deseja alterar neste vídeo..."
+                      rows={4}
+                      className="mt-1.5 w-full resize-none rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-xs leading-5 text-[#344054] shadow-sm outline-none transition placeholder:text-[#98a2b3] focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                    />
+                    <p className="mt-1.5 text-[10px] leading-4 text-[#667085]">Ex.: Mova a legenda para baixo para não cobrir o rosto.</p>
+                  </div>
+
+                  {aiPlan && <div className={`rounded-lg border px-3 py-2.5 text-xs leading-5 ${aiPlan.supported ? "border-[#b7d8d3] bg-white text-[#344054]" : "border-red-200 bg-white text-red-700"}`}>
+                    <div className="font-semibold">{describeAiAction(aiPlan)}</div>
+                    <div className="mt-1 text-[11px] text-[#667085]">{aiPlan.supported ? aiPlan.preview_note || aiPlan.reason : aiPlan.unsupported_reason || "Esta alteração ainda não é suportada pelo editor atual."}</div>
+                    {aiPlan.supported && <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-[#667085]">
+                      {aiPlan.caption_position && <span className="rounded-md bg-[#f8fafc] px-2 py-1">Posição: {aiPlan.caption_position === "bottom" ? "inferior" : aiPlan.caption_position === "top" ? "superior" : "central"}</span>}
+                      {aiPlan.caption_font_size && <span className="rounded-md bg-[#f8fafc] px-2 py-1">Fonte: {aiPlan.caption_font_size}px</span>}
+                      {aiPlan.music_volume !== null && aiPlan.music_volume !== undefined && <span className="rounded-md bg-[#f8fafc] px-2 py-1">Música: {Math.round(aiPlan.music_volume * 100)}%</span>}
+                      {aiPlan.requires_render && <span className="rounded-md bg-[#f8fafc] px-2 py-1">Requer render</span>}
+                    </div>}
+                  </div>}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={prepareAiEdit} disabled={aiBusy || !project} className="sf-button sf-button-youtube min-h-9 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{aiBusy ? "Analisando..." : "Aplicar com IA"}</button>
+                    <button onClick={undoAiEdit} disabled={aiBusy || (!aiPlan && !aiPrompt && !project?.last_ai_edit_snapshot)} className="sf-button sf-button-outline min-h-9 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">Desfazer</button>
+                  </div>
+
+                  {aiPlan?.supported && <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setAiPreview((value) => !value)} disabled={aiBusy} className="sf-button sf-button-outline min-h-9 px-3 py-2 text-xs disabled:opacity-40">{aiPreview ? "Ocultar prévia" : "Visualizar alteração"}</button>
+                    <button onClick={applyAiEditPlan} disabled={aiBusy} className="sf-button sf-button-primary min-h-9 px-3 py-2 text-xs disabled:opacity-40">Salvar alteração</button>
+                  </div>}
+
+                  <p className="text-[10px] leading-4 text-[#667085]">A IA prepara um plano validado. O vídeo só é salvo/renderizado depois da confirmação.</p>
+                </div>
+              </details>
+
               <div className="mt-5 border-t border-[#eef0f2] pt-4"><label className="flex items-start gap-3 text-xs leading-5 text-[#667085]"><input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[#147d72]" /><span>Confirmo que sou proprietário dos materiais ou tenho autorização para editar e publicar.</span></label></div>
 
               <button onClick={upload} disabled={busy || !file} className="sf-button sf-button-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Processando..." : "Anexar vídeo"}</button>
@@ -345,7 +498,11 @@ export default function EditorIAPage() {
               <div className="space-y-4 p-5">
                 <div className="flex items-center justify-between gap-4 rounded-lg border border-[#e4e7ec] bg-[#fafbfc] px-4 py-3"><div className="min-w-0"><div className="text-[11px] text-[#667085]">Arquivo</div><div className="mt-0.5 truncate text-sm font-medium text-[#344054]">{project.original_filename}</div></div><span className="shrink-0 rounded-md bg-white px-2 py-1 text-[10px] font-medium text-[#667085] shadow-sm">{selectedPreset.label}</span></div>
                 {project.error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">{project.error}</div>}
-                {project.preview_url && <div className="overflow-hidden rounded-lg border border-[#e4e7ec] bg-[#101828]"><video controls playsInline src={`${API_URL}${project.preview_url}`} className="max-h-[500px] w-full object-contain" /></div>}
+                {project.preview_url && <div className="relative overflow-hidden rounded-lg border border-[#e4e7ec] bg-[#101828]">
+                  <video key={project.preview_url} controls playsInline src={`${API_URL}${project.preview_url}`} className="max-h-[500px] w-full object-contain" />
+                  {aiPreview && aiPlan?.supported && aiPlan.action !== "remove_caption" && (aiPlan.caption_position || aiPlan.caption_font_size) && <div className="pointer-events-none absolute left-[16%] right-[16%] z-10 text-center font-black leading-tight text-white drop-shadow-[0_2px_0_rgba(0,0,0,0.95)] [text-shadow:_0_0_2px_#000,_0_2px_0_#000]" style={aiCaptionPreviewStyle(aiPlan)}>Prévia da legenda em área segura</div>}
+                  {aiPreview && aiPlan?.supported && aiPlan.action === "remove_caption" && <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-[#101828] shadow-sm">Prévia: legendas removidas</div>}
+                </div>}
 
                 {project.analysis && <>
                   <div className="grid grid-cols-3 gap-3"><div className="rounded-lg border border-[#e4e7ec] p-3"><div className="text-[10px] text-[#667085]">Original</div><div className="mt-1 text-base font-semibold text-[#101828]">{Math.round(project.analysis.source_duration || 0)}s</div></div><div className="rounded-lg border border-[#e4e7ec] p-3"><div className="text-[10px] text-[#667085]">Editado</div><div className="mt-1 text-base font-semibold text-[#101828]">{Math.round(project.analysis.edited_duration || 0)}s</div></div><div className="rounded-lg border border-[#e4e7ec] p-3"><div className="text-[10px] text-[#667085]">Removido</div><div className="mt-1 text-base font-semibold text-[#101828]">{Math.round(project.analysis.removed_seconds || 0)}s</div></div></div>
