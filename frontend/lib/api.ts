@@ -41,15 +41,21 @@ function apiErrorMessage(body: unknown, fallback: string): string {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
+  } catch (err) {
+    const detail = err instanceof Error && err.message ? ` (${err.message})` : "";
+    throw new Error(`${path}: não foi possível conectar ao servidor agora. Aguarde alguns segundos e atualize novamente.${detail}`);
+  }
   if (!response.ok) {
     const fallback = `${response.status} ${response.statusText}`;
     let message = fallback;

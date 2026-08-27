@@ -47,6 +47,22 @@ def _download_progress_updater(job_id: int):
     return update
 
 
+def _transcription_progress_updater(job_id: int):
+    last_progress = 45
+
+    def update(done: int, total: int, _audio_path) -> None:
+        nonlocal last_progress
+        if total <= 0:
+            return
+        ratio = max(0.0, min(1.0, float(done) / float(total)))
+        next_progress = 45 + int(ratio * 17)
+        if next_progress > last_progress:
+            last_progress = next_progress
+            _set_status(job_id, "transcribing", min(62, next_progress))
+
+    return update
+
+
 def run_pipeline(job_id: int) -> None:
     db = SessionLocal()
     try:
@@ -71,7 +87,7 @@ def run_pipeline(job_id: int) -> None:
         audio_files = extract_audio_chunks(video_path, work_dir / "audio")
 
         _set_status(job_id, "transcribing", 45)
-        transcript_text, segments = transcribe_chunks(audio_files)
+        transcript_text, segments = transcribe_chunks(audio_files, progress_hook=_transcription_progress_updater(job_id))
         (work_dir / "transcript.txt").write_text(transcript_text, encoding="utf-8")
         (work_dir / "segments.json").write_text(json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8")
 

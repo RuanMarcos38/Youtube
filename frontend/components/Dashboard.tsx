@@ -139,20 +139,20 @@ export default function Dashboard() {
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
   }, []);
 
-  async function refresh() {
+  async function refresh({ silent = false }: { silent?: boolean } = {}) {
     try {
       const [jobData, clipData, yt] = await Promise.all([listJobs(), listClips(), youtubeStatus()]);
       setJobs(jobData);
       setClips(clipData);
       setYoutubeConnected(yt.connected);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao atualizar o dashboard");
+      if (!silent) setError(err instanceof Error ? err.message : "Falha ao atualizar o dashboard");
     }
   }
 
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 3000);
+    const timer = window.setInterval(() => void refresh({ silent: true }), 3000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -284,7 +284,7 @@ export default function Dashboard() {
 
       <section id="processamento" className="mx-auto max-w-[1440px] px-5 pb-8 md:px-8">
         <div className="rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
-          <div className="flex flex-col justify-between gap-3 border-b border-[#e4e7ec] px-5 py-4 md:flex-row md:items-center"><div><h2 className="text-sm font-semibold text-[#101828]">Processamentos</h2><p className="mt-1 text-xs text-[#667085]">{activeJobs} job(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={refresh} className="flex w-fit items-center gap-2 rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-xs font-semibold text-[#344054]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
+          <div className="flex flex-col justify-between gap-3 border-b border-[#e4e7ec] px-5 py-4 md:flex-row md:items-center"><div><h2 className="text-sm font-semibold text-[#101828]">Processamentos</h2><p className="mt-1 text-xs text-[#667085]">{activeJobs} job(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-xs font-semibold text-[#344054]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
           {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#667085]">Seus processamentos aparecerão aqui.</div> : <div className="divide-y divide-[#eef0f2]">{jobs.map((job) => {
             const current = stageIndex[job.status] ?? 0;
             return <article key={job.id} className="p-5">
