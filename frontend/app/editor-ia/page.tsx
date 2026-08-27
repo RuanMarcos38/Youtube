@@ -242,8 +242,8 @@ export default function EditorIAPage() {
       <header className="sticky top-0 z-40 border-b border-[#e4e7ec] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-4 px-5 md:px-8">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#101828] text-white"><FilmIcon className="h-5 w-5" /></div>
-            <div><div className="text-sm font-semibold tracking-[-.01em] text-[#101828]">ShortsFlow</div><div className="text-[11px] text-[#667085]">Editor de vídeo</div></div>
+            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#b8f238] text-[#111815] shadow-[0_10px_24px_rgba(184,255,32,.22)]"><FilmIcon className="h-5 w-5" /></div>
+            <div><div className="text-sm font-semibold tracking-[-.01em] text-[#101828]">ShortsFlow AI</div><div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#667085]">Editor de vídeo</div></div>
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5 text-[11px] text-[#667085] sm:inline-flex"><TikTokIcon /> TikTok</span>

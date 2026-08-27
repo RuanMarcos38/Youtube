@@ -29,6 +29,16 @@ const DEFAULT_CONFIG: PublicConfig = {
 
 const ACTIVE_BILLING = new Set(["active", "paid", "trial"]);
 
+function MarketingHeadline({ text }: { text: string }) {
+  const highlight = "Shorts prontos para publicar";
+  const index = text.toLowerCase().indexOf(highlight.toLowerCase());
+  if (index < 0) return <>{text}</>;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + highlight.length);
+  const after = text.slice(index + highlight.length);
+  return <>{before}<span className="text-[#b8f238]">{match}</span>{after}</>;
+}
+
 export default function SaasApp() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [config, setConfig] = useState<PublicConfig>(DEFAULT_CONFIG);
@@ -134,7 +144,7 @@ export default function SaasApp() {
           <section className="bg-[#0d241d] p-8 text-white md:p-12">
             <div className="text-2xl font-black">{config.brand_name}</div>
             <div className="mt-2 text-xs font-bold uppercase tracking-[.18em] text-[#b8f238]">{config.marketing_badge}</div>
-            <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl">{config.marketing_headline}</h1>
+            <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl"><MarketingHeadline text={config.marketing_headline} /></h1>
             <p className="mt-5 max-w-lg text-sm leading-7 text-white/70">{config.marketing_description}</p>
             <div className="mt-8 grid gap-3 text-sm font-bold text-white/85">
               {config.benefits.slice(0, 4).map((benefit) => <div key={benefit}>✓ {benefit}</div>)}

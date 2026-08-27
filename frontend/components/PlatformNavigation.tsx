@@ -95,8 +95,15 @@ export default function PlatformNavigation() {
     <>
       <aside className="fixed inset-y-0 left-0 z-[70] hidden w-[248px] flex-col border-r border-white/10 bg-[#101828] text-white xl:flex" aria-label="Menu principal da plataforma">
         <div className="border-b border-white/10 px-6 py-5">
-          <div className="text-[15px] font-semibold tracking-[-.01em]">ShortsFlow</div>
-          <div className="mt-1 text-[11px] text-white/45">Video operations workspace</div>
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#b8f238] text-[#111815] shadow-[0_10px_24px_rgba(184,255,32,.22)]">
+              <ShortsIcon className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-[15px] font-semibold tracking-[-.01em]">ShortsFlow</div>
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[.16em] text-white/45">Shorts automation</div>
+            </div>
+          </div>
         </div>
 
         <nav className="flex-1 px-3 py-5">
@@ -109,10 +116,10 @@ export default function PlatformNavigation() {
                 <a
                   key={item.href}
                   href={item.href}
-                  className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors ${active ? "bg-white/10 text-white" : "text-white/65 hover:bg-white/[.06] hover:text-white"}`}
+                  className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors ${active ? "bg-[#b8f238] text-[#111815] shadow-[0_10px_22px_rgba(184,255,32,.16)]" : "text-white/65 hover:bg-white/[.07] hover:text-white"}`}
                 >
-                  {active && <span className="absolute -left-3 h-6 w-[3px] rounded-r bg-[#2aa198]" />}
-                  <Icon className={`h-[18px] w-[18px] ${active ? "text-[#5cc7be]" : "text-white/50"}`} />
+                  {active && <span className="absolute -left-3 h-6 w-[3px] rounded-r bg-[#b8f238]" />}
+                  <Icon className={`h-[18px] w-[18px] ${active ? "text-[#111815]" : "text-white/50"}`} />
                   <span className={active ? "font-semibold" : "font-medium"}>{item.label}</span>
                 </a>
               );
@@ -135,7 +142,7 @@ export default function PlatformNavigation() {
             const active = activeHref === item.href;
             const Icon = item.icon;
             return (
-              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-medium ${active ? "text-[#147d72]" : "text-[#667085]"}`}>
+              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-medium ${active ? "bg-[#efffce] text-[#62a900]" : "text-[#667085]"}`}>
                 <Icon className="h-[18px] w-[18px]" />
                 <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Visão geral", "Início").replace("Editor de vídeo", "Editor")}</span>
               </a>
