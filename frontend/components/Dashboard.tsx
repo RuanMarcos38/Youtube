@@ -342,7 +342,7 @@ function CaptionLivePreview({
             moveWithKeyboard(1);
           }
         }}
-        className={`relative mx-auto aspect-[9/16] w-full max-w-[220px] touch-none overflow-hidden rounded-xl border border-[#222] bg-[linear-gradient(180deg,#222,#0b0b0b)] shadow-inner ${blocked ? "opacity-70" : "cursor-grab active:cursor-grabbing"}`}
+        className={`relative mx-auto aspect-[9/16] w-full max-w-[140px] touch-none overflow-hidden rounded-xl border border-[#222] bg-[linear-gradient(180deg,#222,#0b0b0b)] shadow-inner 2xl:max-w-[170px] ${blocked ? "opacity-70" : "cursor-grab active:cursor-grabbing"}`}
       >
         <div className="absolute inset-x-[11%] bottom-[17%] top-[10%] rounded-[10px] border border-dashed border-white/30" />
         <div className="absolute inset-x-[16%] bottom-[18%] h-px bg-white/25" />
@@ -377,12 +377,12 @@ function CaptionControls({
   return (
     <details className="mt-3 rounded-xl border border-[#e8e8e8] bg-white shadow-sm group">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-3 text-xs font-semibold text-[#222] [&::-webkit-details-marker]:hidden">
-        <span>Ajustar legenda</span>
-        <span className="rounded-full bg-[#f5f5f5] px-2 py-1 text-[10px] font-medium text-[#667085] group-open:bg-red-50 group-open:text-red-700">
+        <span className="shrink-0">Ajustar legenda</span>
+        <span className="hidden rounded-full bg-[#f5f5f5] px-2 py-1 text-[10px] font-medium text-[#667085] group-open:bg-red-50 group-open:text-red-700 2xl:inline-flex">
           Texto, posição e tamanho
         </span>
       </summary>
-      <div className="grid gap-4 border-t border-[#ededed] p-3.5 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="grid gap-3 border-t border-[#ededed] p-3.5 2xl:grid-cols-[170px_minmax(0,1fr)]">
         <CaptionLivePreview draft={draft} blocked={blocked} onChange={onChange} />
         <div className="min-w-0 space-y-3">
           <div>
