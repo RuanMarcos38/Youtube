@@ -33,6 +33,11 @@ type Job = {
 
 const statusLabel: Record<string, string> = {
   uploaded: "Vídeo anexado",
+  ai_video_queued: "Preparando geração IA",
+  ai_video_submitted: "Geração enviada ao Veo",
+  ai_video_processing: "Gerando vídeo com IA",
+  ai_video_downloading: "Salvando vídeo gerado",
+  cancelled: "Cancelado",
   queued: "Na fila",
   analyzing: "Analisando",
   transcribing: "Transcrevendo",

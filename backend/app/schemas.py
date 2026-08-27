@@ -161,6 +161,13 @@ class YouTubeVideoMetric(BaseModel):
     duration_seconds: int = 0
 
 
+class YouTubeLiveBroadcastMetric(BaseModel):
+    video_id: str
+    title: str
+    url: str
+    concurrent_viewers: int | None = None
+
+
 class YouTubeDashboardAlert(BaseModel):
     kind: str
     title: str
@@ -206,3 +213,9 @@ class YouTubeLiveMetrics(BaseModel):
     views_last_90d: int | None = None
     watch_hours_last_365d: float | None = None
     refreshed_at: datetime
+    live_concurrent_viewers: int | None = None
+    active_live_broadcasts: int = 0
+    live_viewers_status: str = "ok"
+    live_viewers_detail: str = "Nenhuma transmissão ao vivo"
+    live_viewers_updated_at: datetime | None = None
+    live_broadcasts: list[YouTubeLiveBroadcastMetric] = Field(default_factory=list)

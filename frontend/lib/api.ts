@@ -1,10 +1,12 @@
 import type {
   AdminMetrics,
   AdminUser,
+  AiVideoOptions,
   BillingStatus,
   Clip,
   DiagnosticResult,
   DownloadAuthStatus,
+  EditorProject,
   Job,
   KiwifyAdminSettings,
   ProvisionedCredential,
@@ -154,3 +156,15 @@ export const createEditorProjectFromClip = (id: number) =>
 export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");
 export const youtubeLiveMetrics = () => api<YouTubeLiveMetrics>("/api/youtube/live-metrics");
+export const aiVideoOptions = () => api<AiVideoOptions>("/api/editor-ai/ai-video/options");
+export const aiVideoImprovePrompt = (prompt: string) =>
+  api<{ prompt: string }>("/api/editor-ai/ai-video/improve-prompt", { method: "POST", body: JSON.stringify({ prompt }) });
+export const aiVideoGenerate = (payload: {
+  prompt: string;
+  aspect_ratio: "9:16" | "16:9";
+  resolution: "720p" | "1080p";
+  mode: "fast" | "quality";
+  style: "cinematic" | "creative" | "ugc" | "product";
+  request_id: string;
+}) => api<EditorProject>("/api/editor-ai/ai-video/generate", { method: "POST", body: JSON.stringify(payload) });
+export const aiVideoProject = (projectId: string) => api<EditorProject>(`/api/editor-ai/ai-video/projects/${projectId}`);

@@ -32,6 +32,13 @@ from ..services.editor_ai import (
     save_project,
     save_timeline,
 )
+from ..services.ai_video import (
+    ai_video_options,
+    cancel_ai_video_project,
+    enforce_ai_video_rate_limit,
+    improve_prompt,
+    queue_ai_video_project,
+)
 from ..services.editor_ai_pro import DEFAULT_EDIT_OPTIONS, MAX_MUSIC_BYTES, MUSIC_EXTENSIONS
 
 router = APIRouter(prefix="/editor-ai", tags=["editor-ai"])
@@ -104,6 +111,19 @@ class EditorAiActionPlan(BaseModel):
 
 class EditorAiApplyRequest(BaseModel):
     plan: EditorAiActionPlan | None = None
+
+
+class AiVideoGenerateRequest(BaseModel):
+    prompt: str = Field(min_length=10, max_length=4000)
+    aspect_ratio: Literal["9:16", "16:9"] = "9:16"
+    resolution: Literal["720p", "1080p"] = "1080p"
+    mode: Literal["fast", "quality"] = "fast"
+    style: Literal["cinematic", "creative", "ugc", "product"] = "cinematic"
+    request_id: str | None = Field(default=None, max_length=120)
+
+
+class AiVideoImprovePromptRequest(BaseModel):
+    prompt: str = Field(min_length=5, max_length=4000)
 
 
 def _normalize_edit_options(payload: AutoEditRequest) -> dict[str, Any]:
@@ -885,6 +905,70 @@ async def upload_video(
     project["upload_bytes"] = total
     save_project(user.id, project["id"], project)
     return project
+
+
+@router.get("/ai-video/options")
+def ai_video_editor_options(_user: User = Depends(get_current_user)):
+    return ai_video_options()
+
+
+@router.post("/ai-video/improve-prompt")
+def improve_ai_video_prompt(payload: AiVideoImprovePromptRequest, _user: User = Depends(get_current_user)):
+    try:
+        return {"prompt": improve_prompt(payload.prompt)}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível melhorar o prompt agora.",
+        ) from exc
+
+
+@router.post("/ai-video/generate", status_code=status.HTTP_202_ACCEPTED)
+def generate_ai_video_project(
+    payload: AiVideoGenerateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    allowed, reason = can_use_tool(db, user)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+    try:
+        enforce_ai_video_rate_limit(user.id)
+        return queue_ai_video_project(
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            prompt=payload.prompt,
+            aspect_ratio=payload.aspect_ratio,
+            resolution=payload.resolution,
+            mode=payload.mode,
+            style=payload.style,
+            request_id=payload.request_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/ai-video/projects/{project_id}")
+def ai_video_editor_project(project_id: str, user: User = Depends(get_current_user)):
+    try:
+        project = read_project(user.id, project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geração de vídeo não encontrada.") from exc
+    if not project.get("ai_video_generation"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geração de vídeo não encontrada.")
+    return project
+
+
+@router.post("/ai-video/projects/{project_id}/cancel")
+def cancel_ai_video_editor_project(project_id: str, user: User = Depends(get_current_user)):
+    try:
+        return cancel_ai_video_project(user.id, project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geração de vídeo não encontrada.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/music")

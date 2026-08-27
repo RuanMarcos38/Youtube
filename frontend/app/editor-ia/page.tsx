@@ -67,9 +67,14 @@ const DEFAULT_PRESETS: Preset[] = [
   { id: "fast_retention", label: "Retenção Máxima", description: "Jump cuts, punch-ins e legendas de alto contraste para retenção.", target: "Short-form" },
 ];
 
-const workingStatuses = new Set(["queued", "analyzing", "transcribing", "ai_editing", "rendering", "export_queued", "exporting"]);
+const workingStatuses = new Set(["queued", "analyzing", "transcribing", "ai_editing", "rendering", "export_queued", "exporting", "ai_video_queued", "ai_video_submitted", "ai_video_processing", "ai_video_downloading"]);
 const statusLabels: Record<string, string> = {
   uploaded: "Vídeo anexado",
+  ai_video_queued: "Preparando geração IA",
+  ai_video_submitted: "Geração enviada ao Veo",
+  ai_video_processing: "Gerando vídeo com IA",
+  ai_video_downloading: "Salvando vídeo gerado",
+  cancelled: "Cancelado",
   queued: "Na fila",
   analyzing: "Analisando vídeo e áudio",
   transcribing: "Transcrevendo fala",
