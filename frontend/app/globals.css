@@ -43,13 +43,12 @@ body {
   transition: padding-left .2s ease;
 }
 
-button, input, select, textarea { font: inherit; }
+button, input, select, textarea { font-family: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 h1, h2, h3 { letter-spacing: 0; text-wrap: balance; }
-p, li, label, button, a, span { min-width: 0; }
+:where(p, li, label, button, a, span) { min-width: 0; }
 p, h1, h2, h3 { overflow-wrap: break-word; }
-button, a, input, select, textarea { line-height: 1.25; }
 [class*="tracking-"] { letter-spacing: 0 !important; }
 ::selection { background: #ffd7d7; color: var(--text-strong); }
 

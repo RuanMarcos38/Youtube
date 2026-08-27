@@ -412,7 +412,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                     <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Video em destaque</div>
                     <h2 className="mt-1 max-w-3xl text-xl font-semibold leading-tight text-[#111]">{topVideo?.title || "Conecte o canal para exibir o destaque ao vivo"}</h2>
                   </div>
-                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} className="inline-flex min-w-[154px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222] shadow-sm disabled:opacity-50">
+                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} style={{ minWidth: 154 }} className="inline-flex w-fit items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222] shadow-sm disabled:opacity-50">
                     <RefreshIcon className="h-3.5 w-3.5" />{liveLoading ? "Atualizando..." : "Atualizar metricas"}
                   </button>
                 </div>
