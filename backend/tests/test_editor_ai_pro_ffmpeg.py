@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from app.services.editor_ai_pro import (
+    MotionCue,
     _render_reframed,
     _write_original_soundtrack,
     _write_pro_ass,
@@ -29,7 +30,13 @@ def test_professional_render_and_audio_ducking_pipeline(tmp_path):
     ])
 
     captions = [{"start": 0.05, "end": 1.0, "text": "TESTE PREMIUM", "highlighted_words": ["premium"]}]
-    ass = _write_pro_ass(captions, tmp_path / "captions.ass", "impact", True)
+    ass = _write_pro_ass(
+        captions,
+        tmp_path / "captions.ass",
+        "impact",
+        True,
+        [MotionCue(start=0.12, end=0.9, text="IMPACTO PREMIUM", emphasis="impact", position="center")],
+    )
     reframed = tmp_path / "reframed.mp4"
     _render_reframed(
         source,
@@ -37,7 +44,7 @@ def test_professional_render_and_audio_ducking_pipeline(tmp_path):
         [{"source_in": 0.0, "source_out": 1.2, "timeline_in": 0.0, "timeline_out": 1.2, "enabled": True}],
         [0.5],
         ass,
-        [],
+        [{"timeline_in": 0.2, "timeline_out": 0.95, "enabled": True}],
         preset="tiktok_shop_sales",
         intensity="high",
     )

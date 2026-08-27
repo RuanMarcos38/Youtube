@@ -1,8 +1,10 @@
 from app.services.editor_ai_pro import (
     DEFAULT_EDIT_OPTIONS,
+    MotionCue,
     _append_or_replace_track,
     _build_broll_items,
     _fallback_hooks,
+    _fallback_motion_cues,
     _micro_captions,
     _normalized_options,
     _zoom_for_clip,
@@ -40,6 +42,19 @@ def test_fallback_hooks_returns_three_short_variants():
     assert len(hooks) == 3
     assert len({hook.lower() for hook in hooks}) == 3
     assert all(len(hook) <= 64 for hook in hooks)
+
+
+def test_fallback_motion_cues_prioritize_hook_numbers_and_keywords():
+    timeline = _timeline()
+    timeline["tracks"][0]["items"].append({"start": 9.0, "end": 10.0, "text": "Foram 3 detalhes importantes", "highlighted_words": ["detalhes"]})
+
+    cues = _fallback_motion_cues(timeline, ["acabamento premium"])
+
+    assert cues
+    assert any(cue.emphasis == "hook" for cue in cues)
+    assert any(cue.emphasis == "number" for cue in cues)
+    assert any(cue.position in {"side_left", "side_right"} for cue in cues)
+    assert all(isinstance(cue, MotionCue) for cue in cues)
 
 
 def test_append_or_replace_track_does_not_duplicate_track():
