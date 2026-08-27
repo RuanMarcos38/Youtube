@@ -148,7 +148,7 @@ jobs:
             https://shorts.r2rmarketingdigital.com.br/termos \
             https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
           do
-            curl -fsS -L --max-time 20 -o /dev/null "$url"
+            curl -fsS -L --connect-timeout 10 --max-time 60 --retry 6 --retry-delay 5 --retry-all-errors -o /dev/null "$url"
           done
 
       - name: Diagnose exact service on failure
