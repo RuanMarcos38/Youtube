@@ -52,35 +52,12 @@ const CAPTION_MARGIN_MIN = 40;
 const CAPTION_MARGIN_MAX = 760;
 const ASS_CANVAS_HEIGHT = 1920;
 
-const pipeline = [
-  "Preparando",
-  "Baixando vídeo",
-  "Extraindo áudio",
-  "Transcrevendo",
-  "Selecionando cortes",
-  "Renderizando em 9:16",
-  "Gerando legendas",
-  "Pronto para revisão",
-];
-
 const sections: Array<{ id: SectionId; label: string; description: string }> = [
   { id: "automacao", label: "Painel ao vivo", description: "Métricas, alertas e destaque do canal" },
   { id: "configurar", label: "Criar Shorts", description: "Busca e configuração de cortes" },
   { id: "processamento", label: "Processamentos", description: "Fila e andamento dos processamentos" },
   { id: "cortes", label: "Publicações", description: "Revisão e envio ao YouTube" },
 ];
-
-const stageIndex: Record<string, number> = {
-  queued: 0,
-  checking_ffmpeg: 0,
-  downloading: 1,
-  extracting_audio: 2,
-  transcribing: 3,
-  selecting_clips: 4,
-  rendering: 5,
-  ready_for_review: 7,
-  failed: -1,
-};
 
 function fmtNumber(value: number) {
   return new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
@@ -979,11 +956,9 @@ export default function Dashboard({ user }: { user: UserProfile }) {
           <div className="sf-card overflow-hidden">
             <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="sf-kicker">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criação dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} processamento(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="sf-button sf-button-outline w-fit"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
             {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Seus processamentos aparecerão aqui.</div> : <div className="divide-y divide-[#ededed]">{jobs.map((job) => {
-              const current = stageIndex[job.status] ?? 0;
               return <article key={job.id} className="p-5">
                 <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center"><div className="flex min-w-0 items-center gap-4">{job.source_video.thumbnail_url ? <img src={job.source_video.thumbnail_url} alt="" className="h-14 w-24 rounded-md object-cover" /> : <div className="grid h-14 w-24 place-items-center rounded-md bg-[#111]"><YoutubeIcon className="h-7 w-7 text-red-500" /></div>}<div className="min-w-0"><div className="text-[10px] text-[#777]">Processamento #{job.id}</div><h3 className="line-clamp-2 text-sm font-semibold text-[#222]">{job.source_video.title}</h3><p className="mt-1 text-xs text-[#777]">{job.clips.length}/{job.requested_clips} cortes</p></div></div><div className="flex items-center gap-3"><StatusBadge status={job.status} /><span className="text-xs font-semibold text-[#222]">{job.progress}%</span></div></div>
                 <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#ececec]"><div className={`h-full rounded-full transition-all duration-700 ${job.status === "failed" ? "bg-red-500" : "bg-[#ff0000]"}`} style={{ width: `${job.progress}%` }} /></div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{pipeline.map((stage, index) => { const active = job.status !== "failed" && (current >= index || job.status === "ready_for_review"); return <div key={stage} className={`rounded-lg border px-3 py-2 ${active ? "border-red-100 bg-red-50" : "border-[#e8e8e8] bg-white"}`}><div className={`text-[9px] font-medium ${active ? "text-red-700" : "text-[#999]"}`}>{String(index + 1).padStart(2, "0")}</div><div className="mt-0.5 text-[11px] font-medium text-[#555]">{stage}</div></div>; })}</div>
                 {job.error && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700 sm:flex-row sm:items-center sm:justify-between">
                   <p className="leading-5">{jobErrorMessage(job.error)}</p>
                   {job.status === "failed" && <button onClick={() => retryFailedJob(job.id)} disabled={actionId === `retry-${job.id}`} className="inline-flex w-fit flex-none items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><RefreshIcon className="h-3.5 w-3.5" />{actionId === `retry-${job.id}` ? "Recriando..." : "Tentar novamente"}</button>}
