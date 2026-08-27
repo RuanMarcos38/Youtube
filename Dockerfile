@@ -50,6 +50,7 @@ COPY backend/ /app/backend/
 COPY --from=pot-provider-builder /build/pot-provider /app/pot-provider
 COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend
 COPY --from=frontend-builder /build/frontend/.next/static /app/frontend/.next/static
+COPY --from=frontend-builder /build/frontend/public /app/frontend/public
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/shortsflow.conf
 
 RUN mkdir -p /app/data /var/log/supervisor

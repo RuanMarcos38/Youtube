@@ -94,6 +94,7 @@ jobs:
           set -euo pipefail
           for url in \
             https://shorts.r2rmarketingdigital.com.br/ \
+            https://shorts.r2rmarketingdigital.com.br/Logo.png \
             https://shorts.r2rmarketingdigital.com.br/privacidade \
             https://shorts.r2rmarketingdigital.com.br/termos \
             https://shorts.r2rmarketingdigital.com.br/exclusao-de-dados
