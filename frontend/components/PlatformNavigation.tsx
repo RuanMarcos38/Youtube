@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import BrandLogo from "./BrandLogo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -96,12 +97,12 @@ export default function PlatformNavigation() {
       <aside className="fixed inset-y-0 left-0 z-[70] hidden w-[248px] flex-col border-r border-[#e6e6e6] bg-white text-[#111] xl:flex" aria-label="Menu principal da plataforma">
         <div className="border-b border-[#e6e6e6] px-5 py-5">
           <a href="/#automacao" className="flex items-center">
-            <img src="/Logo.png" alt="ShortsFlow AI" className="h-12 w-auto object-contain" />
+            <BrandLogo size="md" className="max-w-[205px]" />
           </a>
         </div>
 
         <nav className="flex-1 px-3 py-5">
-          <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[.12em] text-[#999]">Workspace</div>
+          <div className="mb-3 px-3 text-[10px] font-semibold uppercase leading-4 text-[#999]">Workspace</div>
           <div className="space-y-1">
             {items.map((item) => {
               const active = activeHref === item.href;
@@ -114,7 +115,7 @@ export default function PlatformNavigation() {
                 >
                   {active && <span className="absolute -left-3 h-6 w-[3px] rounded-r bg-[#ff0000]" />}
                   <Icon className={`h-[18px] w-[18px] ${active ? "text-[#ff0000]" : "text-[#999]"}`} />
-                  <span className={active ? "font-semibold" : "font-medium"}>{item.label}</span>
+                  <span className={`min-w-0 leading-5 ${active ? "font-semibold" : "font-medium"}`}>{item.label}</span>
                 </a>
               );
             })}
@@ -136,7 +137,7 @@ export default function PlatformNavigation() {
             const active = activeHref === item.href;
             const Icon = item.icon;
             return (
-              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-medium ${active ? "bg-red-50 text-[#e00000]" : "text-[#667085]"}`}>
+              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-center text-[9px] font-medium leading-tight ${active ? "bg-red-50 text-[#e00000]" : "text-[#667085]"}`}>
                 <Icon className="h-[18px] w-[18px]" />
                 <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Painel ao vivo", "Painel").replace("Editor de vídeo", "Editor")}</span>
               </a>

@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import AdminPanel from "./AdminPanel";
 import Dashboard from "./Dashboard";
+import BrandLogo from "./BrandLogo";
 import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam, publicConfig } from "@/lib/api";
 import type { PublicConfig, TeamUser, UserProfile } from "@/lib/types";
 
@@ -142,8 +143,8 @@ export default function SaasApp() {
       <main className="min-h-screen bg-[#f7f7f7] px-4 py-10 text-[#111815] md:py-16">
         <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] border border-[#e6e6e6] bg-white shadow-[0_24px_90px_rgba(17,17,17,.08)] lg:grid-cols-[1.05fr_.95fr]">
           <section className="border-b border-[#e6e6e6] bg-white p-8 text-[#111] md:p-12 lg:border-b-0 lg:border-r">
-            <img src="/Logo.png" alt="ShortsFlow AI" className="h-14 w-auto object-contain" />
-            <div className="mt-8 text-xs font-bold uppercase tracking-[.18em] text-[#ff0000]">{config.marketing_badge}</div>
+            <BrandLogo size="lg" className="max-w-[230px]" />
+            <div className="mt-8 text-xs font-bold uppercase leading-5 text-[#ff0000]">{config.marketing_badge}</div>
             <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl"><MarketingHeadline text={config.marketing_headline} /></h1>
             <p className="mt-5 max-w-lg text-sm leading-7 text-[#5f5f5f]">{config.marketing_description}</p>
             <div className="mt-8 grid gap-3 text-sm font-bold text-[#333]">
@@ -153,7 +154,7 @@ export default function SaasApp() {
           </section>
 
           <section className="p-8 md:p-12">
-            <div className="mb-8 inline-flex rounded-full bg-red-50 px-3 py-1 text-[11px] font-black uppercase tracking-[.12em] text-red-700">Área do assinante</div>
+            <div className="mb-8 inline-flex rounded-full bg-red-50 px-3 py-1 text-[11px] font-black uppercase leading-4 text-red-700">Área do assinante</div>
             <h2 className="text-2xl font-black">{config.login_title}</h2>
             <p className="mt-2 text-sm leading-6 text-[#6e7971]">{config.login_description}</p>
 
@@ -194,7 +195,7 @@ export default function SaasApp() {
       <div className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white px-4 py-2.5 text-[#111] shadow-sm md:px-8">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs">
           <a href="/#automacao" className="flex items-center">
-            <img src="/Logo.png" alt="ShortsFlow AI" className="h-10 w-auto object-contain" />
+            <BrandLogo size="sm" className="max-w-[190px]" />
           </a>
           <div className="flex items-center gap-2">
             {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#ff0000] px-3 py-2 font-black text-white">Assine já</a>}
@@ -224,7 +225,7 @@ export default function SaasApp() {
 
       {!billingActive ? (
         <main className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8">
-          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o pagamento for confirmado, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
+          <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase leading-5 text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black leading-tight">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o pagamento for confirmado, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black leading-5">Assine já</a></div>
         </main>
       ) : <Dashboard user={user} />}
     </div>

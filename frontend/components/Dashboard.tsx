@@ -15,6 +15,7 @@ import {
   youtubeStatus,
 } from "@/lib/api";
 import type { Clip, Job, TrendingVideo, UserProfile, YouTubeDashboardAlert, YouTubeLiveMetrics } from "@/lib/types";
+import BrandLogo from "./BrandLogo";
 import {
   ArrowIcon,
   CheckIcon,
@@ -149,10 +150,12 @@ function StatusBadge({ status }: { status: string }) {
 
 function MetricCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <div className="rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-sm">
-      <div className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#777]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-[-.02em] text-[#111]">{value}</div>
-      {detail && <div className="mt-1 text-xs text-[#666]">{detail}</div>}
+    <div className="flex min-h-[142px] flex-col justify-between rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-sm">
+      <div className="text-[11px] font-semibold uppercase leading-4 text-[#777]">{label}</div>
+      <div>
+        <div className="mt-3 break-words text-[26px] font-semibold leading-[1.08] text-[#111]">{value}</div>
+        {detail && <div className="mt-2 break-words text-xs leading-5 text-[#666]">{detail}</div>}
+      </div>
     </div>
   );
 }
@@ -161,9 +164,9 @@ function ProgressBar({ label, value, target, progress }: { label: string; value:
   const width = Math.min(100, Math.max(0, progress || 0));
   return (
     <div>
-      <div className="flex items-end justify-between gap-3 text-xs">
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1 text-xs leading-5">
         <span className="font-semibold text-[#222]">{label}</span>
-        <span className="text-[#666]">{value} / {target}</span>
+        <span className="text-right text-[#666]">{value} / {target}</span>
       </div>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#ececec]">
         <div className="h-full rounded-full bg-[#ff0000] transition-all duration-700" style={{ width: `${width}%` }} />
@@ -354,19 +357,19 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       <section className="border-b border-[#e6e6e6] bg-white">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-5 md:px-8 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-4">
-            <img src="/Logo.png" alt="ShortsFlow AI" className="h-12 w-auto max-w-[230px] object-contain" />
+            <BrandLogo size="md" className="max-w-[230px]" />
             <div className="hidden h-10 w-px bg-[#ececec] sm:block" />
             <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-[.16em] text-[#ff0000]">Workspace ao vivo</div>
-              <h1 className="mt-1 truncate text-2xl font-semibold tracking-[-.03em] text-[#111]">Painel ShortsFlow</h1>
+              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Workspace ao vivo</div>
+              <h1 className="mt-1 truncate text-2xl font-semibold leading-tight text-[#111]">Painel ShortsFlow</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={connectYoutube} disabled={actionId === "youtube"} className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold shadow-sm ${youtubeConnected ? "border-red-100 bg-red-50 text-red-700" : "border-[#d8d8d8] bg-white text-[#222] hover:bg-[#f4f4f4]"}`}>
+            <button onClick={connectYoutube} disabled={actionId === "youtube"} className={`inline-flex max-w-full items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold leading-5 shadow-sm ${youtubeConnected ? "border-red-100 bg-red-50 text-red-700" : "border-[#d8d8d8] bg-white text-[#222] hover:bg-[#f4f4f4]"}`}>
               <YoutubeIcon className="h-4 w-4 text-[#ff0000]" />
-              {youtubeConnected ? youtubeChannelTitle || "YouTube conectado" : actionId === "youtube" ? "Conectando..." : "Conectar YouTube"}
+              <span className="min-w-0 truncate">{youtubeConnected ? youtubeChannelTitle || "YouTube conectado" : actionId === "youtube" ? "Conectando..." : "Conectar YouTube"}</span>
             </button>
-            <button onClick={() => openSection("configurar")} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white shadow-sm">Novo processamento</button>
+            <button onClick={() => openSection("configurar")} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold leading-5 text-white shadow-sm">Novo processamento</button>
           </div>
         </div>
       </section>
@@ -378,7 +381,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             return (
               <button key={item.id} onClick={() => openSection(item.id)} className={`rounded-xl border px-4 py-3 text-left transition ${active ? "border-red-200 bg-red-50 shadow-sm" : "border-[#ededed] bg-white hover:border-[#d8d8d8]"}`}>
                 <span className={`block text-sm font-semibold ${active ? "text-[#e00000]" : "text-[#222]"}`}>{item.label}</span>
-                <span className="mt-1 block text-[11px] text-[#777]">{item.description}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-[#777]">{item.description}</span>
               </button>
             );
           })}
@@ -400,16 +403,16 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <MetricCard label="Inscritos" value={liveMetrics?.hidden_subscriber_count ? "Oculto" : fmtNumber(liveMetrics?.subscriber_count || 0)} detail={liveMetrics?.channel_title || "Canal conectado"} />
                 <MetricCard label="Visualizacoes" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
                 <MetricCard label="Videos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} jobs ativos`} />
-                <MetricCard label="Uso do plano" value={user.unlimited ? `${fmtExact(user.jobs_used)} / ilimitado` : `${fmtExact(user.jobs_used)} / ${fmtExact(user.monthly_job_limit)}`} detail={user.plan_code || "starter"} />
+                <MetricCard label="Uso do plano" value={user.unlimited ? `${fmtExact(user.jobs_used)} jobs` : `${fmtExact(user.jobs_used)} / ${fmtExact(user.monthly_job_limit)}`} detail={user.unlimited ? `Ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · ${user.plan_code || "starter"}`} />
               </div>
 
               <div className="overflow-hidden rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-[#e8e8e8] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Video em destaque</div>
-                    <h2 className="mt-1 text-xl font-semibold tracking-[-.02em] text-[#111]">{topVideo?.title || "Conecte o canal para exibir o destaque ao vivo"}</h2>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Video em destaque</div>
+                    <h2 className="mt-1 max-w-3xl text-xl font-semibold leading-tight text-[#111]">{topVideo?.title || "Conecte o canal para exibir o destaque ao vivo"}</h2>
                   </div>
-                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold text-[#222] shadow-sm disabled:opacity-50">
+                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} className="inline-flex min-w-[154px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222] shadow-sm disabled:opacity-50">
                     <RefreshIcon className="h-3.5 w-3.5" />{liveLoading ? "Atualizando..." : "Atualizar metricas"}
                   </button>
                 </div>
@@ -420,7 +423,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                       {topVideo?.thumbnail_url ? <img src={topVideo.thumbnail_url} alt="" className="h-full w-full object-cover opacity-70" /> : <div className="h-full w-full bg-[radial-gradient(circle_at_center,#343434,#111)]" />}
                       <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/10 to-black/60" />
                       <div className="absolute left-5 top-5 flex items-center gap-3">
-                        <img src="/Logo.png" alt="" className="h-10 w-auto rounded-md bg-white object-contain shadow" />
+                        <BrandLogo size="sm" className="rounded-md bg-white shadow" />
                       </div>
                       <div className="absolute inset-0 grid place-items-center">
                         <span className="grid h-16 w-16 place-items-center rounded-full bg-white/95 text-[#111] shadow-2xl">
@@ -429,7 +432,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                       </div>
                       <div className="absolute bottom-0 left-0 right-0 p-5">
                         <div className="h-1.5 overflow-hidden rounded-full bg-white/25"><div className="h-full w-[42%] rounded-full bg-[#ff0000]" /></div>
-                        <div className="mt-3 flex items-center gap-5 text-xs font-semibold text-white/90">
+                        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-semibold leading-5 text-white/90">
                           <span>{topVideo ? fmtDuration(topVideo.duration_seconds) : "0:00"}</span>
                           <span>{topVideo ? fmtNumber(topVideo.view_count) : "0"} views</span>
                           <span>{topVideo ? fmtNumber(topVideo.like_count) : "0"} likes</span>
@@ -444,11 +447,11 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                     {topVideo && (
                       <div className="space-y-4">
                         <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[.12em] text-[#777]">Canal</div>
-                          <div className="mt-1 text-lg font-semibold text-[#111]">{liveMetrics?.channel_title || youtubeChannelTitle}</div>
+                          <div className="text-[11px] font-semibold uppercase leading-4 text-[#777]">Canal</div>
+                          <div className="mt-1 break-words text-lg font-semibold leading-tight text-[#111]">{liveMetrics?.channel_title || youtubeChannelTitle}</div>
                           <div className="mt-1 text-xs text-[#777]">Atualizado {liveMetrics?.refreshed_at ? fmtDate(liveMetrics.refreshed_at) : "agora"}</div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="grid gap-2 text-center sm:grid-cols-3">
                           <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.view_count)}</div><div className="text-[10px] text-[#777]">views</div></div>
                           <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.like_count)}</div><div className="text-[10px] text-[#777]">likes</div></div>
                           <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.comment_count)}</div><div className="text-[10px] text-[#777]">comentarios</div></div>
@@ -463,8 +466,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Videos recentes</div>
-                    <h2 className="mt-1 text-xl font-semibold tracking-[-.02em] text-[#111]">Ranking do canal conectado</h2>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Videos recentes</div>
+                    <h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Ranking do canal conectado</h2>
                   </div>
                   <span className="text-xs text-[#777]">{liveMetrics?.recent_videos.length || 0} videos analisados</span>
                 </div>
@@ -477,7 +480,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                         <div className="line-clamp-2 text-sm font-semibold text-[#222]">{video.title}</div>
                         <div className="mt-1 text-[11px] text-[#777]">{fmtDate(video.published_at)} · {fmtDuration(video.duration_seconds)}</div>
                       </div>
-                      <div className="grid grid-cols-3 gap-3 text-right text-xs text-[#666]">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-[#666] sm:justify-end sm:text-right">
                         <span>{fmtNumber(video.view_count)} views</span>
                         <span>{fmtNumber(video.like_count)} likes</span>
                         <span>{fmtNumber(video.comment_count)} com.</span>
@@ -494,8 +497,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Monetizacao</div>
-                    <h2 className="mt-1 text-lg font-semibold text-[#111]">{monetization?.eligible_full_estimate ? "Pronto para YPP" : monetization?.near_monetization ? "Perto dos marcos" : "Em evolucao"}</h2>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Monetizacao</div>
+                    <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">{monetization?.eligible_full_estimate ? "Pronto para YPP" : monetization?.near_monetization ? "Perto dos marcos" : "Em evolucao"}</h2>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-[10px] font-semibold ${monetization?.near_monetization ? "bg-red-50 text-red-700" : "bg-[#f1f1f1] text-[#666]"}`}>{monetization?.eligible_full_estimate ? "Elegivel" : monetization?.near_monetization ? "Alerta" : "Monitorando"}</span>
                 </div>
@@ -510,15 +513,15 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               </div>
 
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Alertas</div>
+                <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Alertas</div>
                 <div className="mt-4 grid gap-3">
                   {(liveMetrics?.alerts || [{ kind: "info", title: "Aguardando YouTube", detail: "Conecte ou atualize o canal para receber alertas ao vivo." }]).map((alert) => <AlertCard key={`${alert.title}-${alert.detail}`} alert={alert} />)}
                 </div>
               </div>
 
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Perfis e limites</div>
-                <h2 className="mt-1 text-lg font-semibold text-[#111]">Plano {user.plan_code || "starter"}</h2>
+                <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Perfis e limites</div>
+                <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Plano {user.plan_code || "starter"}</h2>
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs"><span className="font-semibold text-[#222]">Uso mensal</span><span className="text-[#666]">{user.unlimited ? `${fmtExact(user.jobs_used)} jobs` : `${fmtExact(user.jobs_used)} de ${fmtExact(user.monthly_job_limit)}`}</span></div>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#ececec]"><div className="h-full rounded-full bg-[#ff0000]" style={{ width: `${usagePercent}%` }} /></div>
@@ -538,8 +541,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
         <section id="configurar" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
           <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Criar Shorts</div>
-              <h2 className="mt-1 text-3xl font-semibold tracking-[-.03em] text-[#111]">Pesquisa e corte automatico</h2>
+              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Criar Shorts</div>
+              <h2 className="mt-1 text-3xl font-semibold leading-tight text-[#111]">Pesquisa e corte automatico</h2>
               <p className="mt-2 text-sm text-[#666]">Pesquise tendencias usando a YouTube Data API e gere cortes verticais.</p>
             </div>
             <button onClick={() => openSection("automacao")} className="w-fit rounded-lg border border-[#d8d8d8] bg-white px-3.5 py-2 text-xs font-semibold text-[#222] shadow-sm">Voltar ao painel</button>
@@ -586,7 +589,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       {activeSection === "processamento" && (
         <section id="processamento" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
           <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Processamentos</div><h2 className="mt-1 text-xl font-semibold text-[#111]">Fila de criacao dos Shorts</h2><p className="mt-1 text-xs text-[#777]">{activeJobs} job(s) ativo(s). Atualizacao automatica a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold text-[#222]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criacao dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} job(s) ativo(s). Atualizacao automatica a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
             {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Seus processamentos aparecerao aqui.</div> : <div className="divide-y divide-[#ededed]">{jobs.map((job) => {
               const current = stageIndex[job.status] ?? 0;
               return <article key={job.id} className="p-5">
@@ -606,7 +609,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       {activeSection === "cortes" && (
         <section id="cortes" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
           <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#ff0000]">Publicacoes</div><h2 className="mt-1 text-xl font-semibold text-[#111]">Cortes para revisao</h2><p className="mt-1 text-xs text-[#777]">Aprove individualmente antes do upload.</p></div><label className="flex w-fit items-center gap-2 text-xs text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="rounded-lg border border-[#d8d8d8] bg-white px-2.5 py-2 font-medium text-[#222] outline-none"><option value="private">Privado</option><option value="unlisted">Nao listado</option><option value="public">Publico</option></select></label></div>
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Publicacoes</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Cortes para revisao</h2><p className="mt-1 text-xs leading-5 text-[#777]">Aprove individualmente antes do upload.</p></div><label className="flex w-fit items-center gap-2 text-xs leading-5 text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="rounded-lg border border-[#d8d8d8] bg-white px-2.5 py-2 font-medium text-[#222] outline-none"><option value="private">Privado</option><option value="unlisted">Nao listado</option><option value="public">Publico</option></select></label></div>
             {clips.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Os cortes gerados aparecerao aqui.</div> : <div className="grid gap-4 p-5 xl:grid-cols-2">{clips.map((clip) => (
               <article key={clip.id} className="grid gap-4 rounded-xl border border-[#e8e8e8] bg-white p-4 sm:grid-cols-[160px_1fr]">
                 <div className="overflow-hidden rounded-lg bg-[#111]">{clip.media_url ? <video controls preload="metadata" className="aspect-[9/16] max-h-[340px] w-full object-contain" src={`${API_URL}${clip.media_url}`} /> : <div className="grid aspect-[9/16] place-items-center"><PlayIcon className="h-9 w-9 text-white/70" /></div>}</div>
