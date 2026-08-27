@@ -143,6 +143,10 @@ export const listJobs = () => api<Job[]>("/api/jobs");
 export const retryJob = (id: number) => api<Job>(`/api/jobs/${id}/retry`, { method: "POST" });
 export const listClips = () => api<Clip[]>("/api/clips");
 export const approveClip = (id: number) => api<Clip>(`/api/clips/${id}/approve`, { method: "POST" });
+export const updateClipCaptions = (
+  id: number,
+  payload: { caption_position: string; caption_margin_v: number; caption_font_size: number; subtitle_srt?: string },
+) => api<Clip>(`/api/clips/${id}/captions`, { method: "PATCH", body: JSON.stringify(payload) });
 export const uploadClip = (id: number, privacyStatus: string) =>
   api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
 export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");

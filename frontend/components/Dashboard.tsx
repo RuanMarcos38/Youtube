@@ -9,6 +9,7 @@ import {
   listClips,
   listJobs,
   retryJob,
+  updateClipCaptions,
   uploadClip,
   youtubeLiveMetrics,
   youtubeStart,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/api";
 import type { Clip, Job, TrendingVideo, UserProfile, YouTubeDashboardAlert, YouTubeLiveMetrics } from "@/lib/types";
 import BrandLogo from "./BrandLogo";
+import LanguageSelector from "./LanguageSelector";
 import {
   ArrowIcon,
   CheckIcon,
@@ -29,23 +31,35 @@ import {
 } from "./Icons";
 
 type SectionId = "automacao" | "configurar" | "processamento" | "cortes";
+type CaptionDraft = {
+  caption_position: "top" | "middle" | "bottom";
+  caption_margin_v: number;
+  caption_font_size: number;
+  subtitle_srt: string;
+};
+
+const captionPositions: Array<{ value: CaptionDraft["caption_position"]; label: string }> = [
+  { value: "bottom", label: "Base" },
+  { value: "middle", label: "Centro" },
+  { value: "top", label: "Topo" },
+];
 
 const pipeline = [
   "Preparando",
-  "Baixando video",
-  "Extraindo audio",
+  "Baixando vídeo",
+  "Extraindo áudio",
   "Transcrevendo",
   "Selecionando cortes",
-  "Renderizando 9:16",
+  "Renderizando em 9:16",
   "Gerando legendas",
-  "Pronto para revisar",
+  "Pronto para revisão",
 ];
 
 const sections: Array<{ id: SectionId; label: string; description: string }> = [
-  { id: "automacao", label: "Painel ao vivo", description: "Metricas, alertas e destaque do canal" },
-  { id: "configurar", label: "Criar Shorts", description: "Busca e configuracao de cortes" },
-  { id: "processamento", label: "Processamentos", description: "Fila e andamento dos jobs" },
-  { id: "cortes", label: "Publicacoes", description: "Revisao e envio ao YouTube" },
+  { id: "automacao", label: "Painel ao vivo", description: "Métricas, alertas e destaque do canal" },
+  { id: "configurar", label: "Criar Shorts", description: "Busca e configuração de cortes" },
+  { id: "processamento", label: "Processamentos", description: "Fila e andamento dos processamentos" },
+  { id: "cortes", label: "Publicações", description: "Revisão e envio ao YouTube" },
 ];
 
 const stageIndex: Record<string, number> = {
@@ -91,19 +105,19 @@ function statusLabel(status: string) {
   const labels: Record<string, string> = {
     queued: "Na fila",
     checking_ffmpeg: "Preparando",
-    downloading: "Baixando video",
-    extracting_audio: "Extraindo audio",
+    downloading: "Baixando vídeo",
+    extracting_audio: "Extraindo áudio",
     transcribing: "Transcrevendo",
     selecting_clips: "Selecionando cortes",
     rendering: "Renderizando",
-    ready_for_review: "Pronto para revisar",
+    ready_for_review: "Pronto para revisão",
     failed: "Falhou",
     ready: "Pronto",
     approved: "Aprovado",
-    upload_queued: "Na fila de upload",
+    upload_queued: "Na fila de envio",
     uploading: "Enviando ao YouTube",
     uploaded: "Publicado",
-    upload_failed: "Falha no upload",
+    upload_failed: "Falha no envio",
   };
   return labels[status] || status;
 }
@@ -111,15 +125,15 @@ function statusLabel(status: string) {
 function youtubeOauthErrorMessage(reason: string) {
   const normalized = reason.trim().toLowerCase();
   if (normalized === "access_denied") {
-    return "Google bloqueou o acesso desta conta. O app OAuth ainda esta em modo de teste/nao verificado para esse e-mail; adicione o e-mail em Test users no Google Cloud Console ou publique/verifique o app.";
+    return "Google bloqueou o acesso desta conta. O app OAuth ainda está em modo de teste/não verificado para esse e-mail; adicione o e-mail em usuários de teste no Google Cloud Console ou publique/verifique o app.";
   }
   if (normalized === "oauth_nao_concluido") {
-    return "Nao foi possivel concluir a conexao com o YouTube. Tente novamente escolhendo a conta Google que possui o canal.";
+    return "Não foi possível concluir a conexão com o YouTube. Tente novamente escolhendo a conta Google que possui o canal.";
   }
   if (normalized === "oauth_callback_incompleto") {
-    return "O Google retornou uma autorizacao incompleta. Inicie a conexao do YouTube novamente.";
+    return "O Google retornou uma autorização incompleta. Inicie a conexão do YouTube novamente.";
   }
-  return reason ? `Google nao autorizou a conexao do YouTube: ${reason}.` : "Google nao autorizou a conexao do YouTube.";
+  return reason ? `Google não autorizou a conexão do YouTube: ${reason}.` : "Google não autorizou a conexão do YouTube.";
 }
 
 function jobErrorMessage(error: string) {
@@ -129,10 +143,10 @@ function jobErrorMessage(error: string) {
     normalized.includes("tokens per min") ||
     normalized.includes("request too large")
   ) {
-    return "Este processamento foi criado antes da correcao para videos longos e excedeu o limite da OpenAI. Clique em Tentar novamente para recriar o job usando o transcript otimizado.";
+    return "Este processamento foi criado antes da correção para vídeos longos e excedeu o limite da OpenAI. Clique em Tentar novamente para recriar o processamento usando a transcrição otimizada.";
   }
   if (normalized.includes("sign in to confirm") || normalized.includes("cookies") || normalized.includes("not a bot")) {
-    return "O YouTube recusou a sessao de download usada neste processamento antigo. A autenticacao atual ja foi renovada; tente novamente para baixar com a configuracao corrigida.";
+    return "O YouTube recusou a sessão de download usada neste processamento antigo. A autenticação atual já foi renovada; tente novamente para baixar com a configuração corrigida.";
   }
   return error;
 }
@@ -189,6 +203,96 @@ function AlertCard({ alert }: { alert: YouTubeDashboardAlert }) {
   );
 }
 
+function captionDraftFromClip(clip: Clip): CaptionDraft {
+  const position = captionPositions.some((item) => item.value === clip.caption_position)
+    ? clip.caption_position as CaptionDraft["caption_position"]
+    : "bottom";
+  return {
+    caption_position: position,
+    caption_margin_v: Number.isFinite(clip.caption_margin_v) ? clip.caption_margin_v : 120,
+    caption_font_size: Number.isFinite(clip.caption_font_size) ? clip.caption_font_size : 18,
+    subtitle_srt: clip.subtitle_srt || "",
+  };
+}
+
+function CaptionControls({
+  clip,
+  draft,
+  busy,
+  onChange,
+  onSave,
+}: {
+  clip: Clip;
+  draft: CaptionDraft;
+  busy: boolean;
+  onChange: (patch: Partial<CaptionDraft>) => void;
+  onSave: () => void;
+}) {
+  const blocked = ["upload_queued", "uploading", "uploaded"].includes(clip.status);
+  return (
+    <details className="mt-3 rounded-lg border border-[#e8e8e8] bg-white">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-[#222]">Ajustar legenda</summary>
+      <div className="space-y-3 border-t border-[#ededed] p-3">
+        <div className="grid gap-2 sm:grid-cols-3">
+          {captionPositions.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => onChange({ caption_position: item.value })}
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${draft.caption_position === item.value ? "border-red-200 bg-red-50 text-red-700" : "border-[#e8e8e8] bg-[#f7f7f7] text-[#555]"}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <label className="block text-[11px] font-medium leading-5 text-[#555]">
+          Altura da legenda: {draft.caption_margin_v}px
+          <input
+            type="range"
+            min={40}
+            max={760}
+            step={20}
+            value={draft.caption_margin_v}
+            onChange={(event) => onChange({ caption_margin_v: Number(event.target.value) })}
+            className="mt-1 w-full accent-[#ff0000]"
+          />
+        </label>
+        <label className="block text-[11px] font-medium leading-5 text-[#555]">
+          Tamanho da fonte: {draft.caption_font_size}px
+          <input
+            type="range"
+            min={14}
+            max={32}
+            step={1}
+            value={draft.caption_font_size}
+            onChange={(event) => onChange({ caption_font_size: Number(event.target.value) })}
+            className="mt-1 w-full accent-[#ff0000]"
+          />
+        </label>
+        <label className="block text-[11px] font-medium leading-5 text-[#555]">
+          Texto da legenda
+          <textarea
+            value={draft.subtitle_srt}
+            onChange={(event) => onChange({ subtitle_srt: event.target.value })}
+            rows={5}
+            className="mt-1 w-full resize-y rounded-lg border border-[#d8d8d8] bg-[#fdfdfd] p-2 text-[11px] leading-5 text-[#333] outline-none focus:border-[#ff0000]"
+            placeholder="Edite o SRT ou escreva um texto simples para aparecer no corte inteiro."
+          />
+        </label>
+        {blocked && <p className="rounded-lg bg-amber-50 p-2 text-[11px] font-medium leading-5 text-amber-800">Ajustes ficam disponíveis antes do envio ao YouTube.</p>}
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={busy || blocked}
+          className="inline-flex w-full items-center justify-center rounded-lg bg-[#111] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40 sm:w-auto"
+        >
+          {busy ? "Aplicando..." : "Aplicar no vídeo"}
+        </button>
+      </div>
+    </details>
+  );
+}
+
 export default function Dashboard({ user }: { user: UserProfile }) {
   const [activeSection, setActiveSection] = useState<SectionId>("automacao");
   const [keyword, setKeyword] = useState("marketing digital");
@@ -203,6 +307,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const [youtubeConnected, setYoutubeConnected] = useState(false);
   const [youtubeChannelTitle, setYoutubeChannelTitle] = useState<string | null>(null);
   const [liveMetrics, setLiveMetrics] = useState<YouTubeLiveMetrics | null>(null);
+  const [captionDrafts, setCaptionDrafts] = useState<Record<number, CaptionDraft>>({});
   const [privacy, setPrivacy] = useState("private");
   const [loading, setLoading] = useState(false);
   const [liveLoading, setLiveLoading] = useState(false);
@@ -250,7 +355,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       setLiveMetrics(metrics);
     } catch (err) {
       setLiveMetrics(null);
-      if (!silent) setLiveError(err instanceof Error ? err.message : "Falha ao carregar metricas ao vivo do YouTube.");
+      if (!silent) setLiveError(err instanceof Error ? err.message : "Falha ao carregar métricas ao vivo do YouTube.");
     } finally {
       if (!silent) setLiveLoading(false);
     }
@@ -264,7 +369,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       setYoutubeConnected(yt.connected);
       setYoutubeChannelTitle(yt.channel_title ?? null);
     } catch (err) {
-      if (!silent) setError(err instanceof Error ? err.message : "Falha ao atualizar o dashboard");
+      if (!silent) setError(err instanceof Error ? err.message : "Falha ao atualizar o painel");
     }
   }
 
@@ -293,13 +398,13 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       const result = await getTrending(keyword, region, days);
       setVideos(result); setSelected(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao buscar videos");
+      setError(err instanceof Error ? err.message : "Falha ao buscar vídeos");
     } finally { setLoading(false); }
   }
 
   async function processSelected() {
-    if (!selected) return setError("Escolha um video para continuar.");
-    if (!rightsConfirmed) return setError("Confirme que voce possui direitos ou autorizacao para reutilizar o conteudo.");
+    if (!selected) return setError("Escolha um vídeo para continuar.");
+    if (!rightsConfirmed) return setError("Confirme que você possui direitos ou autorização para reutilizar o conteúdo.");
     setActionId(`video-${selected.video_id}`); setError(""); setMessage("");
     try {
       await createJob(selected, requestedClips);
@@ -307,7 +412,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       setMessage("Processamento iniciado. Acompanhe o andamento abaixo.");
       openSection("processamento");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao iniciar processamento");
+      setError(err instanceof Error ? err.message : "Falha ao iniciar o processamento");
     } finally { setActionId(null); }
   }
 
@@ -316,10 +421,10 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     try {
       await retryJob(id);
       await refresh();
-      setMessage("Novo processamento criado a partir do job falhado. Acompanhe o andamento abaixo.");
+      setMessage("Novo processamento criado a partir da falha anterior. Acompanhe o andamento abaixo.");
       openSection("processamento");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao reenviar processamento");
+      setError(err instanceof Error ? err.message : "Falha ao reenviar o processamento");
     } finally { setActionId(null); }
   }
 
@@ -329,7 +434,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       const result = await youtubeStart();
       window.location.href = result.authorization_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao iniciar OAuth do YouTube");
+      setError(err instanceof Error ? err.message : "Falha ao iniciar a conexão OAuth do YouTube");
       setActionId(null);
     }
   }
@@ -337,18 +442,42 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   async function approve(id: number) {
     setActionId(`approve-${id}`); setError("");
     try {
-      await approveClip(id); await refresh(); setMessage("Corte aprovado para publicacao.");
+      await approveClip(id); await refresh(); setMessage("Corte aprovado para publicação.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao aprovar corte");
+      setError(err instanceof Error ? err.message : "Falha ao aprovar o corte");
     } finally { setActionId(null); }
   }
 
   async function upload(id: number) {
     setActionId(`upload-${id}`); setError("");
     try {
-      await uploadClip(id, privacy); await refresh(); setMessage("Upload enviado para a fila do YouTube.");
+      await uploadClip(id, privacy); await refresh(); setMessage("Envio colocado na fila do YouTube.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao iniciar upload");
+      setError(err instanceof Error ? err.message : "Falha ao iniciar o envio");
+    } finally { setActionId(null); }
+  }
+
+  function updateCaptionDraft(id: number, clip: Clip, patch: Partial<CaptionDraft>) {
+    setCaptionDrafts((current) => ({
+      ...current,
+      [id]: { ...(current[id] ?? captionDraftFromClip(clip)), ...patch },
+    }));
+  }
+
+  async function applyCaptionSettings(clip: Clip) {
+    const draft = captionDrafts[clip.id] ?? captionDraftFromClip(clip);
+    setActionId(`caption-${clip.id}`); setError(""); setMessage("");
+    try {
+      await updateClipCaptions(clip.id, draft);
+      setCaptionDrafts((current) => {
+        const next = { ...current };
+        delete next[clip.id];
+        return next;
+      });
+      await refresh();
+      setMessage("Legenda atualizada e vídeo recriado com a nova posição.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao ajustar a legenda");
     } finally { setActionId(null); }
   }
 
@@ -360,7 +489,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             <BrandLogo size="md" className="max-w-[230px]" />
             <div className="hidden h-10 w-px bg-[#ececec] sm:block" />
             <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Workspace ao vivo</div>
+              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Área de trabalho ao vivo</div>
               <h1 className="mt-1 truncate text-2xl font-semibold leading-tight text-[#111]">Painel ShortsFlow</h1>
             </div>
           </div>
@@ -401,19 +530,19 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <MetricCard label="Inscritos" value={liveMetrics?.hidden_subscriber_count ? "Oculto" : fmtNumber(liveMetrics?.subscriber_count || 0)} detail={liveMetrics?.channel_title || "Canal conectado"} />
-                <MetricCard label="Visualizacoes" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
-                <MetricCard label="Videos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} jobs ativos`} />
-                <MetricCard label="Uso do plano" value={user.unlimited ? `${fmtExact(user.jobs_used)} jobs` : `${fmtExact(user.jobs_used)} / ${fmtExact(user.monthly_job_limit)}`} detail={user.unlimited ? `Ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · ${user.plan_code || "starter"}`} />
+                <MetricCard label="Visualizações" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
+                <MetricCard label="Vídeos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} processamentos ativos`} />
+                <MetricCard label="Uso do plano" value={user.unlimited ? `${fmtExact(user.jobs_used)} processamentos` : `${fmtExact(user.jobs_used)} / ${fmtExact(user.monthly_job_limit)}`} detail={user.unlimited ? `Ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · ${user.plan_code || "starter"}`} />
               </div>
 
               <div className="overflow-hidden rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-[#e8e8e8] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Video em destaque</div>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Vídeo em destaque</div>
                     <h2 className="mt-1 max-w-3xl text-xl font-semibold leading-tight text-[#111]">{topVideo?.title || "Conecte o canal para exibir o destaque ao vivo"}</h2>
                   </div>
                   <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} style={{ minWidth: 154 }} className="inline-flex w-fit items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222] shadow-sm disabled:opacity-50">
-                    <RefreshIcon className="h-3.5 w-3.5" />{liveLoading ? "Atualizando..." : "Atualizar metricas"}
+                    <RefreshIcon className="h-3.5 w-3.5" />{liveLoading ? "Atualizando..." : "Atualizar métricas"}
                   </button>
                 </div>
 
@@ -434,8 +563,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                         <div className="h-1.5 overflow-hidden rounded-full bg-white/25"><div className="h-full w-[42%] rounded-full bg-[#ff0000]" /></div>
                         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-semibold leading-5 text-white/90">
                           <span>{topVideo ? fmtDuration(topVideo.duration_seconds) : "0:00"}</span>
-                          <span>{topVideo ? fmtNumber(topVideo.view_count) : "0"} views</span>
-                          <span>{topVideo ? fmtNumber(topVideo.like_count) : "0"} likes</span>
+                          <span>{topVideo ? fmtNumber(topVideo.view_count) : "0"} visualizações</span>
+                          <span>{topVideo ? fmtNumber(topVideo.like_count) : "0"} curtidas</span>
                         </div>
                       </div>
                     </div>
@@ -452,9 +581,9 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                           <div className="mt-1 text-xs text-[#777]">Atualizado {liveMetrics?.refreshed_at ? fmtDate(liveMetrics.refreshed_at) : "agora"}</div>
                         </div>
                         <div className="grid gap-2 text-center sm:grid-cols-3">
-                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.view_count)}</div><div className="text-[10px] text-[#777]">views</div></div>
-                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.like_count)}</div><div className="text-[10px] text-[#777]">likes</div></div>
-                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.comment_count)}</div><div className="text-[10px] text-[#777]">comentarios</div></div>
+                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.view_count)}</div><div className="text-[10px] text-[#777]">visualizações</div></div>
+                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.like_count)}</div><div className="text-[10px] text-[#777]">curtidas</div></div>
+                          <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.comment_count)}</div><div className="text-[10px] text-[#777]">comentários</div></div>
                         </div>
                         <a href={topVideo.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg bg-[#ff0000] px-4 py-2.5 text-xs font-semibold text-white shadow-sm">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>
                       </div>
@@ -466,10 +595,10 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Videos recentes</div>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Vídeos recentes</div>
                     <h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Ranking do canal conectado</h2>
                   </div>
-                  <span className="text-xs text-[#777]">{liveMetrics?.recent_videos.length || 0} videos analisados</span>
+                  <span className="text-xs text-[#777]">{liveMetrics?.recent_videos.length || 0} vídeos analisados</span>
                 </div>
                 <div className="mt-4 divide-y divide-[#ededed]">
                   {(liveMetrics?.recent_videos || []).slice(0, 6).map((video, index) => (
@@ -481,14 +610,14 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                         <div className="mt-1 text-[11px] text-[#777]">{fmtDate(video.published_at)} · {fmtDuration(video.duration_seconds)}</div>
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-[#666] sm:justify-end sm:text-right">
-                        <span>{fmtNumber(video.view_count)} views</span>
-                        <span>{fmtNumber(video.like_count)} likes</span>
+                        <span>{fmtNumber(video.view_count)} visualizações</span>
+                        <span>{fmtNumber(video.like_count)} curtidas</span>
                         <span>{fmtNumber(video.comment_count)} com.</span>
                       </div>
                     </a>
                   ))}
-                  {youtubeConnected && !liveLoading && liveMetrics?.recent_videos.length === 0 && <div className="py-8 text-center text-sm text-[#777]">Nenhum video recente retornado pela API do YouTube.</div>}
-                  {liveLoading && <div className="py-8 text-center text-sm font-semibold text-[#777]">Carregando metricas ao vivo...</div>}
+                  {youtubeConnected && !liveLoading && liveMetrics?.recent_videos.length === 0 && <div className="py-8 text-center text-sm text-[#777]">Nenhum vídeo recente retornado pela API do YouTube.</div>}
+                  {liveLoading && <div className="py-8 text-center text-sm font-semibold text-[#777]">Carregando métricas ao vivo...</div>}
                 </div>
               </div>
             </div>
@@ -497,18 +626,18 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Monetizacao</div>
-                    <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">{monetization?.eligible_full_estimate ? "Pronto para YPP" : monetization?.near_monetization ? "Perto dos marcos" : "Em evolucao"}</h2>
+                    <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Monetização</div>
+                    <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">{monetization?.eligible_full_estimate ? "Pronto para o YPP" : monetization?.near_monetization ? "Perto dos marcos" : "Em evolução"}</h2>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-[10px] font-semibold ${monetization?.near_monetization ? "bg-red-50 text-red-700" : "bg-[#f1f1f1] text-[#666]"}`}>{monetization?.eligible_full_estimate ? "Elegivel" : monetization?.near_monetization ? "Alerta" : "Monitorando"}</span>
+                  <span className={`rounded-full px-3 py-1 text-[10px] font-semibold ${monetization?.near_monetization ? "bg-red-50 text-red-700" : "bg-[#f1f1f1] text-[#666]"}`}>{monetization?.eligible_full_estimate ? "Elegível" : monetization?.near_monetization ? "Alerta" : "Monitorando"}</span>
                 </div>
                 <div className="mt-5 space-y-5">
                   <ProgressBar label="Inscritos" value={liveMetrics?.hidden_subscriber_count ? "Oculto" : fmtExact(liveMetrics?.subscriber_count || 0)} target={fmtExact(monetization?.subscriber_target_full || 1000)} progress={monetization?.subscriber_progress_full || 0} />
                   <ProgressBar label="Horas assistidas" value={fmtExact(monetization?.watch_hours_last_365d || 0)} target={fmtExact(monetization?.watch_hours_target_full || 4000)} progress={monetization?.watch_hours_progress_full || 0} />
-                  <ProgressBar label="Shorts views 90d" value={fmtNumber(monetization?.shorts_views_90d_estimate || 0)} target={fmtNumber(monetization?.shorts_views_target_full || 10_000_000)} progress={monetization?.shorts_views_progress_full || 0} />
+                  <ProgressBar label="Visualizações de Shorts em 90 dias" value={fmtNumber(monetization?.shorts_views_90d_estimate || 0)} target={fmtNumber(monetization?.shorts_views_target_full || 10_000_000)} progress={monetization?.shorts_views_progress_full || 0} />
                 </div>
                 <div className="mt-5 rounded-lg bg-[#f7f7f7] p-3 text-xs leading-5 text-[#666]">
-                  {liveMetrics?.analytics_available ? "Watch hours carregadas pela API de Analytics do YouTube." : "Watch hours oficiais dependem do YouTube Analytics/Studio; o painel mantém estimativas com videos recentes."}
+                  {liveMetrics?.analytics_available ? "Horas assistidas carregadas pela API do YouTube Analytics." : "Horas assistidas oficiais dependem do YouTube Analytics/Studio; o painel mantém estimativas com vídeos recentes."}
                 </div>
               </div>
 
@@ -523,11 +652,11 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Perfis e limites</div>
                 <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Plano {user.plan_code || "starter"}</h2>
                 <div className="mt-4">
-                  <div className="flex items-center justify-between text-xs"><span className="font-semibold text-[#222]">Uso mensal</span><span className="text-[#666]">{user.unlimited ? `${fmtExact(user.jobs_used)} jobs` : `${fmtExact(user.jobs_used)} de ${fmtExact(user.monthly_job_limit)}`}</span></div>
+                  <div className="flex items-center justify-between text-xs"><span className="font-semibold text-[#222]">Uso mensal</span><span className="text-[#666]">{user.unlimited ? `${fmtExact(user.jobs_used)} processamentos` : `${fmtExact(user.jobs_used)} de ${fmtExact(user.monthly_job_limit)}`}</span></div>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#ececec]"><div className="h-full rounded-full bg-[#ff0000]" style={{ width: `${usagePercent}%` }} /></div>
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(jobs.length)}</div><div className="text-[#777]">jobs</div></div>
+                  <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(jobs.length)}</div><div className="text-[#777]">processamentos</div></div>
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(readyClips)}</div><div className="text-[#777]">cortes</div></div>
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{user.unlimited ? "∞" : fmtExact(user.jobs_remaining ?? 0)}</div><div className="text-[#777]">restantes</div></div>
                 </div>
@@ -542,28 +671,28 @@ export default function Dashboard({ user }: { user: UserProfile }) {
           <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
             <div>
               <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Criar Shorts</div>
-              <h2 className="mt-1 text-3xl font-semibold leading-tight text-[#111]">Pesquisa e corte automatico</h2>
-              <p className="mt-2 text-sm text-[#666]">Pesquise tendencias usando a YouTube Data API e gere cortes verticais.</p>
+              <h2 className="mt-1 text-3xl font-semibold leading-tight text-[#111]">Pesquisa e corte automático</h2>
+              <p className="mt-2 text-sm text-[#666]">Pesquise tendências usando a YouTube Data API e gere cortes verticais.</p>
             </div>
             <button onClick={() => openSection("automacao")} className="w-fit rounded-lg border border-[#d8d8d8] bg-white px-3.5 py-2 text-xs font-semibold text-[#222] shadow-sm">Voltar ao painel</button>
           </div>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
             <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-              <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteudo</h3><p className="mt-1 text-xs text-[#666]">Encontre videos com potencial para cortes.</p></div>
+              <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteúdo</h3><p className="mt-1 text-xs text-[#666]">Encontre vídeos com potencial para cortes.</p></div>
               <div className="p-5">
                 <div className="grid gap-3 md:grid-cols-[1fr_80px_110px_auto]">
-                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} className="min-w-0 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]" placeholder="Ex.: marketing digital, imoveis, vendas" />
+                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} className="min-w-0 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]" placeholder="Ex.: marketing digital, imóveis, vendas" />
                   <input value={region} onChange={(e) => setRegion(e.target.value.toUpperCase().slice(0, 2))} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-center text-sm font-medium outline-none" />
                   <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none"><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
                   <button onClick={search} disabled={loading} className="flex items-center justify-center gap-2 rounded-lg bg-[#111] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><SearchIcon className="h-4 w-4" />{loading ? "Buscando..." : "Buscar"}</button>
                 </div>
 
                 <div className="mt-5 max-h-[520px] divide-y divide-[#ededed] overflow-y-auto rounded-lg border border-[#e8e8e8]">
-                  {videos.length === 0 && <div className="p-10 text-center text-sm text-[#777]">Faça uma busca para encontrar videos.</div>}
+                  {videos.length === 0 && <div className="p-10 text-center text-sm text-[#777]">Faça uma busca para encontrar vídeos.</div>}
                   {videos.map((video) => (
                     <button key={video.video_id} onClick={() => setSelected(video)} className={`flex w-full items-center gap-4 p-3 text-left transition ${selected?.video_id === video.video_id ? "bg-red-50" : "bg-white hover:bg-[#f7f7f7]"}`}>
                       <div className="relative h-16 w-28 flex-none overflow-hidden rounded-md bg-[#111]"><img src={video.thumbnail_url} alt="" className="h-full w-full object-cover" /><span className="absolute inset-0 grid place-items-center bg-black/15"><span className="grid h-8 w-8 place-items-center rounded-full bg-white/95"><PlayIcon className="ml-0.5 h-3.5 w-3.5 text-[#111]" /></span></span></div>
-                      <div className="min-w-0 flex-1"><div className="line-clamp-2 text-sm font-semibold leading-5 text-[#222]">{video.title}</div><div className="mt-1 text-[11px] text-[#777]">{video.channel_title} · {fmtNumber(video.view_count)} views · {fmtDuration(video.duration_seconds)}</div></div>
+                      <div className="min-w-0 flex-1"><div className="line-clamp-2 text-sm font-semibold leading-5 text-[#222]">{video.title}</div><div className="mt-1 text-[11px] text-[#777]">{video.channel_title} · {fmtNumber(video.view_count)} visualizações · {fmtDuration(video.duration_seconds)}</div></div>
                       {selected?.video_id === video.video_id && <span className="grid h-6 w-6 flex-none place-items-center rounded-full bg-[#ff0000] text-white"><CheckIcon className="h-3.5 w-3.5" /></span>}
                     </button>
                   ))}
@@ -572,12 +701,13 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             </div>
 
             <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-              <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Configuracao</h3><p className="mt-1 text-xs text-[#666]">Defina a quantidade de cortes.</p></div>
+              <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Configuração</h3><p className="mt-1 text-xs text-[#666]">Defina a quantidade de cortes.</p></div>
               <div className="p-5">
                 <label className="text-xs font-medium text-[#222]">Quantidade de Shorts</label>
                 <div className="mt-2 grid grid-cols-5 gap-2">{[1, 2, 3, 5, 10].map((n) => <button key={n} onClick={() => setRequestedClips(n)} className={`rounded-lg border py-2.5 text-sm font-semibold ${requestedClips === n ? "border-red-200 bg-red-50 text-red-700" : "border-[#e8e8e8] bg-white text-[#555]"}`}>{n}</button>)}</div>
-                <div className="mt-5 divide-y divide-[#ededed] rounded-lg border border-[#e8e8e8] text-xs"><div className="flex justify-between p-3"><span className="text-[#777]">Formato</span><strong className="font-medium text-[#222]">9:16 vertical</strong></div><div className="flex justify-between p-3"><span className="text-[#777]">Duracao</span><strong className="font-medium text-[#222]">15-60s</strong></div><div className="flex justify-between p-3"><span className="text-[#777]">Legendas</span><strong className="font-medium text-[#222]">Automaticas</strong></div></div>
-                <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-[#666]"><input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#ff0000]" /><span>Confirmo que possuo direitos ou autorizacao para reutilizar o conteudo.</span></label>
+                <div className="mt-5 divide-y divide-[#ededed] rounded-lg border border-[#e8e8e8] text-xs"><div className="flex justify-between p-3"><span className="text-[#777]">Formato</span><strong className="font-medium text-[#222]">9:16 vertical</strong></div><div className="flex justify-between p-3"><span className="text-[#777]">Duração</span><strong className="font-medium text-[#222]">15-60s</strong></div><div className="flex justify-between p-3"><span className="text-[#777]">Legendas</span><strong className="font-medium text-[#222]">Automáticas</strong></div></div>
+                <div className="mt-5"><LanguageSelector /></div>
+                <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-[#666]"><input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#ff0000]" /><span>Confirmo que possuo direitos ou autorização para reutilizar o conteúdo.</span></label>
                 {selected && <div className="mt-4 rounded-lg bg-[#f7f7f7] p-3 text-xs"><div className="text-[#777]">Selecionado</div><div className="mt-1 line-clamp-2 font-medium text-[#222]">{selected.title}</div></div>}
                 <button onClick={processSelected} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="mt-5 w-full rounded-lg bg-[#ff0000] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
               </div>
@@ -589,11 +719,11 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       {activeSection === "processamento" && (
         <section id="processamento" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
           <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criacao dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} job(s) ativo(s). Atualizacao automatica a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
-            {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Seus processamentos aparecerao aqui.</div> : <div className="divide-y divide-[#ededed]">{jobs.map((job) => {
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criação dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} processamento(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
+            {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Seus processamentos aparecerão aqui.</div> : <div className="divide-y divide-[#ededed]">{jobs.map((job) => {
               const current = stageIndex[job.status] ?? 0;
               return <article key={job.id} className="p-5">
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center"><div className="flex min-w-0 items-center gap-4">{job.source_video.thumbnail_url ? <img src={job.source_video.thumbnail_url} alt="" className="h-14 w-24 rounded-md object-cover" /> : <div className="grid h-14 w-24 place-items-center rounded-md bg-[#111]"><YoutubeIcon className="h-7 w-7 text-red-500" /></div>}<div className="min-w-0"><div className="text-[10px] text-[#777]">Job #{job.id}</div><h3 className="line-clamp-2 text-sm font-semibold text-[#222]">{job.source_video.title}</h3><p className="mt-1 text-xs text-[#777]">{job.clips.length}/{job.requested_clips} cortes</p></div></div><div className="flex items-center gap-3"><StatusBadge status={job.status} /><span className="text-xs font-semibold text-[#222]">{job.progress}%</span></div></div>
+                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center"><div className="flex min-w-0 items-center gap-4">{job.source_video.thumbnail_url ? <img src={job.source_video.thumbnail_url} alt="" className="h-14 w-24 rounded-md object-cover" /> : <div className="grid h-14 w-24 place-items-center rounded-md bg-[#111]"><YoutubeIcon className="h-7 w-7 text-red-500" /></div>}<div className="min-w-0"><div className="text-[10px] text-[#777]">Processamento #{job.id}</div><h3 className="line-clamp-2 text-sm font-semibold text-[#222]">{job.source_video.title}</h3><p className="mt-1 text-xs text-[#777]">{job.clips.length}/{job.requested_clips} cortes</p></div></div><div className="flex items-center gap-3"><StatusBadge status={job.status} /><span className="text-xs font-semibold text-[#222]">{job.progress}%</span></div></div>
                 <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#ececec]"><div className={`h-full rounded-full transition-all duration-700 ${job.status === "failed" ? "bg-red-500" : "bg-[#ff0000]"}`} style={{ width: `${job.progress}%` }} /></div>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{pipeline.map((stage, index) => { const active = job.status !== "failed" && (current >= index || job.status === "ready_for_review"); return <div key={stage} className={`rounded-lg border px-3 py-2 ${active ? "border-red-100 bg-red-50" : "border-[#e8e8e8] bg-white"}`}><div className={`text-[9px] font-medium ${active ? "text-red-700" : "text-[#999]"}`}>{String(index + 1).padStart(2, "0")}</div><div className="mt-0.5 text-[11px] font-medium text-[#555]">{stage}</div></div>; })}</div>
                 {job.error && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700 sm:flex-row sm:items-center sm:justify-between">
@@ -609,13 +739,17 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       {activeSection === "cortes" && (
         <section id="cortes" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
           <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Publicacoes</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Cortes para revisao</h2><p className="mt-1 text-xs leading-5 text-[#777]">Aprove individualmente antes do upload.</p></div><label className="flex w-fit items-center gap-2 text-xs leading-5 text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="rounded-lg border border-[#d8d8d8] bg-white px-2.5 py-2 font-medium text-[#222] outline-none"><option value="private">Privado</option><option value="unlisted">Nao listado</option><option value="public">Publico</option></select></label></div>
-            {clips.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Os cortes gerados aparecerao aqui.</div> : <div className="grid gap-4 p-5 xl:grid-cols-2">{clips.map((clip) => (
-              <article key={clip.id} className="grid gap-4 rounded-xl border border-[#e8e8e8] bg-white p-4 sm:grid-cols-[160px_1fr]">
-                <div className="overflow-hidden rounded-lg bg-[#111]">{clip.media_url ? <video controls preload="metadata" className="aspect-[9/16] max-h-[340px] w-full object-contain" src={`${API_URL}${clip.media_url}`} /> : <div className="grid aspect-[9/16] place-items-center"><PlayIcon className="h-9 w-9 text-white/70" /></div>}</div>
-                <div className="min-w-0"><div className="flex flex-wrap items-center justify-between gap-2"><StatusBadge status={clip.status} /><span className="text-xs text-[#777]">{(clip.end_seconds - clip.start_seconds).toFixed(1)}s</span></div><h3 className="mt-3 text-base font-semibold leading-6 text-[#111]">{clip.title}</h3>{clip.hook && <p className="mt-2 text-sm font-medium text-[#444]">{clip.hook}</p>}<p className="mt-3 text-xs leading-5 text-[#666]">{clip.description}</p><div className="mt-3 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><CopyIcon className="h-4 w-4 flex-none text-[#ff0000]" />{clip.copy}</div><div className="mt-2 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><TagsIcon className="h-4 w-4 flex-none text-[#ff0000]" /><span>{clip.tags.slice(0, 8).map((tag) => `#${tag}`).join(" ")}</span></div>{clip.upload_error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700">{clip.upload_error}</p>}{clip.youtube_video_id && <a href={`https://www.youtube.com/watch?v=${clip.youtube_video_id}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-red-600">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>}<div className="mt-4 flex flex-wrap gap-2"><button onClick={() => approve(clip.id)} disabled={["approved", "upload_queued", "uploading", "uploaded"].includes(clip.status) || actionId === `approve-${clip.id}`} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{clip.status === "approved" ? "Aprovado" : "Aprovar"}</button><button onClick={() => upload(clip.id)} disabled={!youtubeConnected || clip.status !== "approved" || actionId === `upload-${clip.id}`} className="flex items-center gap-2 rounded-lg bg-[#ff0000] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"><UploadIcon className="h-3.5 w-3.5" />{clip.status === "uploading" ? "Enviando..." : clip.status === "uploaded" ? "Publicado" : "Enviar YouTube"}</button></div></div>
-              </article>
-            ))}</div>}
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Publicações</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Cortes para revisão</h2><p className="mt-1 text-xs leading-5 text-[#777]">Aprove individualmente antes do envio.</p></div><label className="flex w-fit items-center gap-2 text-xs leading-5 text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="rounded-lg border border-[#d8d8d8] bg-white px-2.5 py-2 font-medium text-[#222] outline-none"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></label></div>
+            {clips.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Os cortes gerados aparecerão aqui.</div> : <div className="grid gap-4 p-5 xl:grid-cols-2">{clips.map((clip) => {
+              const draft = captionDrafts[clip.id] ?? captionDraftFromClip(clip);
+              const mediaSrc = clip.media_url ? `${API_URL}${clip.media_url}?v=${encodeURIComponent(clip.updated_at || clip.created_at)}` : "";
+              return (
+                <article key={clip.id} className="grid gap-4 rounded-xl border border-[#e8e8e8] bg-white p-4 sm:grid-cols-[160px_1fr]">
+                  <div className="overflow-hidden rounded-lg bg-[#111]">{mediaSrc ? <video controls preload="metadata" className="aspect-[9/16] max-h-[340px] w-full object-contain" src={mediaSrc} /> : <div className="grid aspect-[9/16] place-items-center"><PlayIcon className="h-9 w-9 text-white/70" /></div>}</div>
+                  <div className="min-w-0"><div className="flex flex-wrap items-center justify-between gap-2"><StatusBadge status={clip.status} /><span className="text-xs text-[#777]">{(clip.end_seconds - clip.start_seconds).toFixed(1)}s</span></div><h3 className="mt-3 text-base font-semibold leading-6 text-[#111]">{clip.title}</h3>{clip.hook && <p className="mt-2 text-sm font-medium text-[#444]">{clip.hook}</p>}<p className="mt-3 text-xs leading-5 text-[#666]">{clip.description}</p><div className="mt-3 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><CopyIcon className="h-4 w-4 flex-none text-[#ff0000]" />{clip.copy}</div><div className="mt-2 flex gap-2 rounded-lg bg-[#f7f7f7] p-3 text-[11px] leading-5 text-[#555]"><TagsIcon className="h-4 w-4 flex-none text-[#ff0000]" /><span>{clip.tags.slice(0, 8).map((tag) => `#${tag}`).join(" ")}</span></div><CaptionControls clip={clip} draft={draft} busy={actionId === `caption-${clip.id}`} onChange={(patch) => updateCaptionDraft(clip.id, clip, patch)} onSave={() => void applyCaptionSettings(clip)} />{clip.upload_error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700">{clip.upload_error}</p>}{clip.youtube_video_id && <a href={`https://www.youtube.com/watch?v=${clip.youtube_video_id}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-red-600">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>}<div className="mt-4 flex flex-wrap gap-2"><button onClick={() => approve(clip.id)} disabled={["approved", "upload_queued", "uploading", "uploaded"].includes(clip.status) || actionId === `approve-${clip.id}`} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{clip.status === "approved" ? "Aprovado" : "Aprovar"}</button><button onClick={() => upload(clip.id)} disabled={!youtubeConnected || clip.status !== "approved" || actionId === `upload-${clip.id}`} className="flex items-center gap-2 rounded-lg bg-[#ff0000] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40"><UploadIcon className="h-3.5 w-3.5" />{clip.status === "uploading" ? "Enviando..." : clip.status === "uploaded" ? "Publicado" : "Enviar ao YouTube"}</button></div></div>
+                </article>
+              );
+            })}</div>}
           </div>
         </section>
       )}

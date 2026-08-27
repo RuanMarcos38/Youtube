@@ -168,10 +168,15 @@ export type Clip = {
   copy: string;
   tags: string[];
   media_url: string;
+  caption_position: "top" | "middle" | "bottom" | string;
+  caption_margin_v: number;
+  caption_font_size: number;
+  subtitle_srt: string;
   status: string;
   youtube_video_id?: string | null;
   upload_error?: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type Job = {

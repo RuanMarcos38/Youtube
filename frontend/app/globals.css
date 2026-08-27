@@ -52,6 +52,25 @@ p, h1, h2, h3 { overflow-wrap: break-word; }
 [class*="tracking-"] { letter-spacing: 0 !important; }
 ::selection { background: #ffd7d7; color: var(--text-strong); }
 
+#shortsflow-google-translate {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.goog-te-banner-frame,
+.goog-te-banner-frame.skiptranslate,
+body > .skiptranslate {
+  display: none !important;
+}
+
+body {
+  top: 0 !important;
+}
+
 .font-black { font-weight: 650 !important; }
 .font-bold { font-weight: 600 !important; }
 

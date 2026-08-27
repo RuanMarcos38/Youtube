@@ -231,14 +231,14 @@ def _alerts(channel_title: str, recent_videos: list[dict], monetization: dict, a
         alerts.append({
             "kind": "warning",
             "title": "Canal perto da monetização",
-            "detail": "O painel detectou avanço relevante rumo aos marcos de inscritos, horas ou Shorts views.",
+            "detail": "O painel detectou avanço relevante rumo aos marcos de inscritos, horas assistidas ou visualizações de Shorts.",
         })
 
     if not analytics.get("analytics_available"):
         alerts.append({
             "kind": "info",
             "title": "Analytics opcional pendente",
-            "detail": "Watch hours oficiais dependem do YouTube Analytics/Studio; o painel segue com metricas publicas e estimativas recentes.",
+            "detail": "Horas assistidas oficiais dependem do YouTube Analytics/Studio; o painel segue com métricas públicas e estimativas recentes.",
         })
 
     if not alerts:

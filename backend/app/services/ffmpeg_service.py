@@ -90,12 +90,38 @@ def _escape_filter_path(path: Path) -> str:
     return value
 
 
+def _subtitle_force_style(caption_position: str, caption_margin_v: int, caption_font_size: int) -> str:
+    alignment = {
+        "top": 8,
+        "middle": 5,
+        "bottom": 2,
+    }.get(caption_position, 2)
+    margin = max(40, min(760, int(caption_margin_v or 120)))
+    font_size = max(14, min(32, int(caption_font_size or 18)))
+    return (
+        "FontName=Arial,"
+        f"FontSize={font_size},"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BackColour=&H70000000,"
+        "BorderStyle=1,"
+        "Outline=3,"
+        "Shadow=1,"
+        f"Alignment={alignment},"
+        f"MarginV={margin}"
+    )
+
+
 def render_vertical_clip(
     source_path: Path,
     output_path: Path,
     start_seconds: float,
     end_seconds: float,
     subtitle_path: Path | None = None,
+    *,
+    caption_position: str = "bottom",
+    caption_margin_v: int = 120,
+    caption_font_size: int = 18,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(0.1, end_seconds - start_seconds)
@@ -106,9 +132,8 @@ def render_vertical_clip(
     ]
     if subtitle_path and subtitle_path.exists() and subtitle_path.stat().st_size > 0:
         escaped = _escape_filter_path(subtitle_path)
-        filters.append(
-            "subtitles='{}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=120'".format(escaped)
-        )
+        style = _subtitle_force_style(caption_position, caption_margin_v, caption_font_size)
+        filters.append(f"subtitles='{escaped}':force_style='{style}'")
 
     _run([
         settings.ffmpeg_binary, "-y",

@@ -11,6 +11,7 @@ def clip_to_dict(clip: Clip) -> dict:
         tags = []
 
     path = Path(clip.file_path)
+    subtitle_path = Path(clip.subtitle_path) if clip.subtitle_path else None
     user_root = settings.data_path / "users" / str(clip.user_id)
     try:
         relative = path.resolve().relative_to(user_root.resolve()).as_posix()
@@ -30,10 +31,15 @@ def clip_to_dict(clip: Clip) -> dict:
         "copy": clip.copy_text,
         "tags": tags,
         "media_url": media_url,
+        "caption_position": clip.caption_position or "bottom",
+        "caption_margin_v": clip.caption_margin_v or 120,
+        "caption_font_size": clip.caption_font_size or 18,
+        "subtitle_srt": subtitle_path.read_text(encoding="utf-8") if subtitle_path and subtitle_path.is_file() else "",
         "status": clip.status,
         "youtube_video_id": clip.youtube_video_id,
         "upload_error": clip.upload_error,
         "created_at": clip.created_at,
+        "updated_at": clip.updated_at,
     }
 
 

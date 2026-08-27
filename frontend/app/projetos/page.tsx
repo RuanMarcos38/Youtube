@@ -96,9 +96,9 @@ export default function ProjectsPage() {
       <header className="border-b border-[#e4e7ec] bg-white">
         <div className="mx-auto flex max-w-[1440px] flex-col justify-between gap-4 px-5 py-7 md:px-8 lg:flex-row lg:items-center">
           <div>
-            <div className="text-xs font-medium text-[#147d72]">Workspace</div>
+            <div className="text-xs font-medium text-[#147d72]">Área de trabalho</div>
             <h1 className="mt-1 text-3xl font-semibold tracking-[-.03em] text-[#101828]">Projetos</h1>
-            <p className="mt-2 text-sm text-[#667085]">Acompanhe edições, Shorts, exports e processamentos em um único lugar.</p>
+            <p className="mt-2 text-sm text-[#667085]">Acompanhe edições, Shorts, exportações e processamentos em um único lugar.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <a href="/#configurar" className="rounded-lg border border-[#d0d5dd] bg-white px-3.5 py-2 text-xs font-semibold text-[#344054] shadow-sm hover:bg-[#f9fafb]">Criar Shorts</a>
@@ -109,7 +109,7 @@ export default function ProjectsPage() {
 
       <section className="mx-auto max-w-[1440px] px-5 py-7 md:px-8">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[["Editor de vídeo", totals.editor], ["Shorts", totals.shorts], ["Prontos", totals.ready], ["Exports", totals.exports]].map(([label, value]) => (
+          {[["Editor de vídeo", totals.editor], ["Shorts", totals.shorts], ["Prontos", totals.ready], ["Exportações", totals.exports]].map(([label, value]) => (
             <div key={String(label)} className="rounded-xl border border-[#e4e7ec] bg-white p-4 shadow-sm">
               <div className="text-xs text-[#667085]">{label}</div>
               <div className="mt-2 text-2xl font-semibold tracking-[-.02em] text-[#101828]">{value}</div>
@@ -134,16 +134,16 @@ export default function ProjectsPage() {
                 {editorProjects.map((item) => (
                   <article key={item.id} className="grid gap-4 p-5 lg:grid-cols-[132px_minmax(0,1fr)_auto] lg:items-center">
                     <div className="grid min-h-[96px] place-items-center overflow-hidden rounded-lg border border-[#e4e7ec] bg-[#101828] text-white">
-                      {item.preview_url ? <video src={`${API_URL}${item.preview_url}`} controls playsInline className="h-full max-h-36 w-full object-contain" /> : <div className="text-center text-[10px] text-white/55">Preview<br/>{item.progress || 0}%</div>}
+                      {item.preview_url ? <video src={`${API_URL}${item.preview_url}`} controls playsInline className="h-full max-h-36 w-full object-contain" /> : <div className="text-center text-[10px] text-white/55">Prévia<br/>{item.progress || 0}%</div>}
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2"><h3 className="max-w-full truncate text-sm font-semibold text-[#101828]">{item.original_filename}</h3><StatusBadge status={item.status} /></div>
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#667085]"><span>Preset: {item.preset}</span><span>Destino: TikTok / Reels / Shorts</span>{item.analysis?.creative_finish?.mood && <span>Mood: {item.analysis.creative_finish.mood}</span>}</div>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#667085]"><span>Perfil: {item.preset}</span><span>Destino: TikTok / Reels / Shorts</span>{item.analysis?.creative_finish?.mood && <span>Clima: {item.analysis.creative_finish.mood}</span>}</div>
                       {item.analysis?.creative_finish?.hooks?.length ? <div className="mt-2 truncate text-xs text-[#667085]">Ganchos: {item.analysis.creative_finish.hooks.slice(0,3).join(" · ")}</div> : null}
                     </div>
                     <div className="flex flex-wrap gap-2 lg:justify-end">
                       <a href="/editor-ia" className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Abrir editor</a>
-                      {item.preview_url && <a href={`${API_URL}${item.preview_url}`} className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Preview</a>}
+                      {item.preview_url && <a href={`${API_URL}${item.preview_url}`} className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Prévia</a>}
                       {item.export_url && <a href={`${API_URL}${item.export_url}`} download className="rounded-lg bg-[#147d72] px-3 py-2 text-xs font-semibold text-white">Baixar</a>}
                     </div>
                   </article>
@@ -153,8 +153,8 @@ export default function ProjectsPage() {
           </section>
 
           <section className="mt-5 rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
-            <div className="border-b border-[#e4e7ec] px-5 py-4"><h2 className="text-sm font-semibold text-[#101828]">YouTube Shorts</h2><p className="mt-1 text-xs text-[#667085]">Jobs, cortes e status de publicação.</p></div>
-            {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#667085]">Nenhum job de Shorts ainda.</div> : (
+            <div className="border-b border-[#e4e7ec] px-5 py-4"><h2 className="text-sm font-semibold text-[#101828]">YouTube Shorts</h2><p className="mt-1 text-xs text-[#667085]">Processamentos, cortes e status de publicação.</p></div>
+            {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#667085]">Nenhum processamento de Shorts ainda.</div> : (
               <div className="divide-y divide-[#eef0f2]">
                 {jobs.map((job) => (
                   <article key={job.id} className="flex flex-col justify-between gap-4 px-5 py-4 md:flex-row md:items-center">

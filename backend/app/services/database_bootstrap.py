@@ -4,6 +4,7 @@ import logging
 import time
 from contextlib import contextmanager
 
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 
 from ..config import settings
@@ -46,6 +47,7 @@ def initialize_database(*, attempts: int = 12, delay_seconds: float = 1.0) -> No
         try:
             with _schema_lock():
                 Base.metadata.create_all(bind=engine)
+                _ensure_clip_caption_columns()
             return
         except OperationalError as exc:
             last_error = exc
@@ -55,3 +57,21 @@ def initialize_database(*, attempts: int = 12, delay_seconds: float = 1.0) -> No
 
     if last_error:
         raise last_error
+
+
+def _ensure_clip_caption_columns() -> None:
+    inspector = inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns("saas_clips")}
+    ddl = {
+        "caption_position": "caption_position VARCHAR(20) DEFAULT 'bottom' NOT NULL",
+        "caption_margin_v": "caption_margin_v INTEGER DEFAULT 120 NOT NULL",
+        "caption_font_size": "caption_font_size INTEGER DEFAULT 18 NOT NULL",
+    }
+    missing = [(column, statement) for column, statement in ddl.items() if column not in existing]
+    if not missing:
+        return
+
+    clause = "ADD COLUMN" if engine.url.get_backend_name() == "sqlite" else "ADD COLUMN IF NOT EXISTS"
+    with engine.begin() as connection:
+        for _, statement in missing:
+            connection.execute(text(f"ALTER TABLE saas_clips {clause} {statement}"))

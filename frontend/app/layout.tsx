@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
+import { LanguageRuntime } from "@/components/LanguageSelector";
 import PlatformNavigation from "@/components/PlatformNavigation";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ShortsFlow | Produção e distribuição de vídeo",
-  description: "Workspace para criar Shorts, editar vídeos, acompanhar processamentos e publicar conteúdo em uma única plataforma.",
+  description: "Área de trabalho para criar Shorts, editar vídeos, acompanhar processamentos e publicar conteúdo em uma única plataforma.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="pt-BR">
       <body>
+        <LanguageRuntime />
         {children}
         <PlatformNavigation />
         <YoutubeAccountSwitcher />

@@ -1,4 +1,6 @@
 from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 
@@ -101,10 +103,22 @@ class ClipOut(BaseModel):
     copy: str
     tags: list[str]
     media_url: str
+    caption_position: str = "bottom"
+    caption_margin_v: int = 120
+    caption_font_size: int = 18
+    subtitle_srt: str = ""
     status: str
     youtube_video_id: str | None = None
     upload_error: str | None = None
     created_at: datetime
+    updated_at: datetime
+
+
+class ClipCaptionUpdateRequest(BaseModel):
+    caption_position: Literal["top", "middle", "bottom"] = "bottom"
+    caption_margin_v: int = Field(default=120, ge=40, le=760)
+    caption_font_size: int = Field(default=18, ge=14, le=32)
+    subtitle_srt: str | None = Field(default=None, max_length=20000)
 
 
 class JobOut(BaseModel):

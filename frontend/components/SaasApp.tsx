@@ -188,7 +188,7 @@ export default function SaasApp() {
   }
 
   const billingActive = user.role === "superadmin" || ACTIVE_BILLING.has(user.billing_status);
-  const usageLabel = user.unlimited ? `${user.jobs_used} jobs • ilimitado` : `${user.jobs_used}/${user.monthly_job_limit} jobs`;
+  const usageLabel = user.unlimited ? `${user.jobs_used} processamentos • ilimitado` : `${user.jobs_used}/${user.monthly_job_limit} processamentos`;
 
   return (
     <div className="min-h-screen bg-[#f7f7f7]">
@@ -213,7 +213,7 @@ export default function SaasApp() {
         <section className="border-b border-[#e6e6e6] bg-white px-4 py-6 md:px-8">
           <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1fr_.8fr]">
             <div>
-              <h3 className="font-black">Perfis deste workspace</h3>
+              <h3 className="font-black">Perfis desta área de trabalho</h3>
               <p className="mt-1 text-xs text-[#6e7971]">Cada perfil entra com sua própria senha e conecta seu próprio canal do YouTube.</p>
               <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs font-bold text-red-700">Plano atual: {user.plan_code} · uso mensal: {usageLabel}</div>
               <div className="mt-4 grid gap-2">{team.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl border border-[#e6e6e6] bg-[#f7f7f7] p-3 text-xs"><div><strong>{member.display_name}</strong><div className="mt-1 text-[#6e7971]">{member.email} • {member.role}</div></div><span className={`rounded-full px-2.5 py-1 font-bold ${member.youtube_connected ? "bg-red-50 text-red-700" : "bg-[#eeeeee] text-[#666]"}`}>{member.youtube_connected ? member.youtube_channel_title || "YouTube conectado" : "Sem canal"}</span></div>)}</div>

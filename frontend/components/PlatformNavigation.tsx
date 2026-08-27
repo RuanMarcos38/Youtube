@@ -102,7 +102,7 @@ export default function PlatformNavigation() {
         </div>
 
         <nav className="flex-1 px-3 py-5">
-          <div className="mb-3 px-3 text-[10px] font-semibold uppercase leading-4 text-[#999]">Workspace</div>
+          <div className="mb-3 px-3 text-[10px] font-semibold uppercase leading-4 text-[#999]">Área de trabalho</div>
           <div className="space-y-1">
             {items.map((item) => {
               const active = activeHref === item.href;

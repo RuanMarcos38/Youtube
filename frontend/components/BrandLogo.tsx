@@ -38,19 +38,20 @@ export default function BrandLogo({ size = "md", className = "", markOnly = fals
       <img
         src="/Logo.png"
         alt="ShortsFlow AI"
+        translate="no"
         onError={() => setFailed(true)}
-        className={`${imageSize[size]} w-auto max-w-full object-contain ${className}`}
+        className={`notranslate ${imageSize[size]} w-auto max-w-full object-contain ${className}`}
       />
     );
   }
 
   return (
-    <span className={`inline-flex min-w-0 items-center gap-3 ${className}`} aria-label="ShortsFlow AI">
+    <span className={`notranslate inline-flex min-w-0 items-center gap-3 ${className}`} aria-label="ShortsFlow AI" translate="no">
       <YoutubeMark size={size} />
       {!markOnly && (
         <span className="min-w-0 leading-none">
           <span className="block whitespace-nowrap text-base font-semibold text-[#111]">ShortsFlow AI</span>
-          <span className="mt-1 block whitespace-nowrap text-[10px] font-semibold uppercase text-[#777]">Shorts automation</span>
+          <span className="mt-1 block whitespace-nowrap text-[10px] font-semibold uppercase text-[#777]">Automação de Shorts</span>
         </span>
       )}
     </span>
