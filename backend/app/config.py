@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     openai_transcription_model: str = "whisper-1"
     max_transcript_chars: int = 180000
 
+    ai_video_enabled: bool = True
+    gemini_api_key: str = Field(default="", validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_API_KEY"))
+    veo_fast_model: str = "veo-3.1-fast-generate-preview"
+    veo_quality_model: str = "veo-3.1-generate-preview"
+    ai_video_request_timeout_seconds: float = 30.0
+    ai_video_poll_seconds: float = 10.0
+    ai_video_max_poll_attempts: int = 90
+
     youtube_api_key: str = ""
     google_oauth_client_secrets_file: str = "client_secret.json"
     google_oauth_client_id: str = ""

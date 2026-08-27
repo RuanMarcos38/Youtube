@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -20,6 +23,18 @@ EARLY_SUBSCRIBERS_TARGET = 500
 EARLY_WATCH_HOURS_TARGET = 3000
 EARLY_SHORTS_VIEWS_TARGET = 3_000_000
 EARLY_UPLOADS_TARGET = 3
+LIVE_VIEWERS_CACHE_SECONDS = 30
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _LiveViewersCacheEntry:
+    expires_at: float
+    payload: dict
+
+
+_LIVE_VIEWERS_CACHE: dict[tuple[int, str | None], _LiveViewersCacheEntry] = {}
 
 
 def _to_int(value: Any) -> int:
@@ -77,6 +92,14 @@ def _normalize_video(item: dict) -> dict:
         "comment_count": _to_int(stats.get("commentCount")),
         "duration_seconds": _duration_seconds(content.get("duration")),
     }
+
+
+def _broadcast_count_label(count: int) -> str:
+    if count == 0:
+        return "Nenhuma transmissão ao vivo"
+    if count == 1:
+        return "1 transmissão ao vivo"
+    return f"{count} transmissões ao vivo"
 
 
 def _progress(value: float, target: float) -> float:
@@ -163,6 +186,135 @@ def _recent_uploads(youtube, uploads_playlist_id: str | None, max_results: int) 
     ).execute()
     normalized = [_normalize_video(item) for item in videos.get("items", [])]
     return sorted(normalized, key=lambda item: item["view_count"], reverse=True)
+
+
+def _empty_live_viewers_payload(*, status: str = "ok", detail: str | None = None, updated_at: datetime | None = None) -> dict:
+    now = updated_at or datetime.now(timezone.utc)
+    return {
+        "live_concurrent_viewers": 0 if status == "ok" else None,
+        "active_live_broadcasts": 0,
+        "live_viewers_status": status,
+        "live_viewers_detail": detail or _broadcast_count_label(0),
+        "live_viewers_updated_at": now,
+        "live_broadcasts": [],
+    }
+
+
+def _live_viewers_error_payload(user_id: int, channel_id: str | None, exc: Exception) -> dict:
+    status_code = getattr(getattr(exc, "resp", None), "status", None)
+    logger.warning(
+        "youtube_live_viewers_failed",
+        extra={
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "endpoint": "liveBroadcasts.list/videos.list",
+            "status": status_code,
+            "error_type": exc.__class__.__name__,
+        },
+    )
+    return _empty_live_viewers_payload(status="error", detail="Não foi possível atualizar")
+
+
+def _parse_concurrent_viewers(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, parsed)
+
+
+def _active_live_broadcasts(youtube) -> list[dict]:
+    response = youtube.liveBroadcasts().list(
+        part="id,snippet,status",
+        broadcastStatus="active",
+        broadcastType="all",
+        mine=True,
+        maxResults=50,
+    ).execute()
+    broadcasts: list[dict] = []
+    for item in response.get("items", []):
+        lifecycle = str(item.get("status", {}).get("lifeCycleStatus") or "").strip().lower()
+        # broadcastStatus=active already limits results to live broadcasts; this
+        # guard keeps scheduled/test/finished states from slipping into totals.
+        if lifecycle and lifecycle != "live":
+            continue
+        video_id = str(item.get("id") or "").strip()
+        if video_id:
+            broadcasts.append(item)
+    return broadcasts
+
+
+def _fetch_live_viewers(youtube, *, user_id: int, channel_id: str | None) -> dict:
+    try:
+        broadcasts = _active_live_broadcasts(youtube)
+        if not broadcasts:
+            return _empty_live_viewers_payload()
+
+        ids = [str(item.get("id")) for item in broadcasts if item.get("id")]
+        videos = youtube.videos().list(
+            part="snippet,liveStreamingDetails",
+            id=",".join(ids),
+            maxResults=len(ids),
+        ).execute()
+        video_by_id = {str(item.get("id")): item for item in videos.get("items", [])}
+    except Exception as exc:
+        return _live_viewers_error_payload(user_id, channel_id, exc)
+
+    total = 0
+    unavailable = 0
+    details: list[dict] = []
+    for broadcast in broadcasts:
+        video_id = str(broadcast.get("id") or "")
+        video = video_by_id.get(video_id) or {}
+        streaming = video.get("liveStreamingDetails") or {}
+        viewers = _parse_concurrent_viewers(streaming.get("concurrentViewers"))
+        if viewers is None:
+            unavailable += 1
+        else:
+            total += viewers
+        snippet = video.get("snippet") or broadcast.get("snippet") or {}
+        details.append(
+            {
+                "video_id": video_id,
+                "title": snippet.get("title") or "Transmissão ao vivo",
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "concurrent_viewers": viewers,
+            }
+        )
+
+    active_count = len(broadcasts)
+    if unavailable >= active_count:
+        return {
+            "live_concurrent_viewers": None,
+            "active_live_broadcasts": active_count,
+            "live_viewers_status": "unavailable",
+            "live_viewers_detail": "Contagem indisponível",
+            "live_viewers_updated_at": datetime.now(timezone.utc),
+            "live_broadcasts": details,
+        }
+
+    partial = unavailable > 0
+    return {
+        "live_concurrent_viewers": total,
+        "active_live_broadcasts": active_count,
+        "live_viewers_status": "partial" if partial else "ok",
+        "live_viewers_detail": f"{_broadcast_count_label(active_count)} · contagem parcial" if partial else _broadcast_count_label(active_count),
+        "live_viewers_updated_at": datetime.now(timezone.utc),
+        "live_broadcasts": details,
+    }
+
+
+def _live_viewers_with_cache(youtube, *, user_id: int, channel_id: str | None) -> dict:
+    key = (user_id, channel_id)
+    now = time.monotonic()
+    cached = _LIVE_VIEWERS_CACHE.get(key)
+    if cached and cached.expires_at > now:
+        return cached.payload
+    payload = _fetch_live_viewers(youtube, user_id=user_id, channel_id=channel_id)
+    _LIVE_VIEWERS_CACHE[key] = _LiveViewersCacheEntry(now + LIVE_VIEWERS_CACHE_SECONDS, payload)
+    return payload
 
 
 def _monetization_payload(subscribers: int, recent_videos: list[dict], analytics: dict) -> dict:
@@ -285,9 +437,11 @@ def get_live_channel_metrics(db: Session, user_id: int, max_results: int = 12) -
     subscriber_count = 0 if stats.get("hiddenSubscriberCount") else _to_int(stats.get("subscriberCount"))
     monetization = _monetization_payload(subscriber_count, recent_videos, analytics)
     top_video = recent_videos[0] if recent_videos else None
+    channel_id = channel.get("id")
+    live_viewers = _live_viewers_with_cache(youtube, user_id=user_id, channel_id=channel_id)
 
     return {
-        "channel_id": channel.get("id"),
+        "channel_id": channel_id,
         "channel_title": snippet.get("title") or connection.channel_title,
         "channel_thumbnail_url": _thumbnail(snippet),
         "channel_custom_url": snippet.get("customUrl"),
@@ -306,4 +460,5 @@ def get_live_channel_metrics(db: Session, user_id: int, max_results: int = 12) -
         "views_last_90d": analytics["views_last_90d"],
         "watch_hours_last_365d": analytics["watch_hours_last_365d"],
         "refreshed_at": datetime.now(timezone.utc),
+        **live_viewers,
     }

@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import {
   API_URL,
+  aiVideoGenerate,
+  aiVideoImprovePrompt,
+  aiVideoOptions,
+  aiVideoProject,
   approveClip,
   createEditorProjectFromClip,
   createJob,
@@ -16,7 +20,7 @@ import {
   youtubeStart,
   youtubeStatus,
 } from "@/lib/api";
-import type { Clip, Job, TrendingVideo, UserProfile, YouTubeDashboardAlert, YouTubeLiveMetrics } from "@/lib/types";
+import type { AiVideoOptions, Clip, EditorProject, Job, TrendingVideo, UserProfile, YouTubeDashboardAlert, YouTubeLiveMetrics } from "@/lib/types";
 import BrandLogo from "./BrandLogo";
 import LanguageSelector from "./LanguageSelector";
 import {
@@ -32,6 +36,7 @@ import {
 } from "./Icons";
 
 type SectionId = "automacao" | "configurar" | "processamento" | "cortes";
+type VideoSource = "youtube" | "upload" | "ai";
 type CaptionDraft = {
   caption_position: "top" | "middle" | "bottom";
   caption_margin_v: number;
@@ -136,6 +141,28 @@ function jobErrorMessage(error: string) {
   return error;
 }
 
+function aiVideoStatusLabel(status?: string | null) {
+  const labels: Record<string, string> = {
+    ai_video_queued: "Preparando geração...",
+    ai_video_submitted: "Geração enviada ao Veo...",
+    ai_video_processing: "Gerando vídeo com IA...",
+    ai_video_downloading: "Salvando vídeo gerado...",
+    uploaded: "Vídeo gerado",
+    failed: "Falha na geração",
+    cancelled: "Cancelado",
+  };
+  return labels[status || ""] || "Aguardando geração";
+}
+
+function isAiVideoWorking(project: EditorProject | null) {
+  return Boolean(project && ["ai_video_queued", "ai_video_submitted", "ai_video_processing", "ai_video_downloading"].includes(project.status));
+}
+
+function requestId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const ready = ["ready_for_review", "ready", "approved", "uploaded"].includes(status);
   const failed = ["failed", "upload_failed"].includes(status);
@@ -147,7 +174,7 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-medium ${cls}`}>{statusLabel(status)}</span>;
 }
 
-function MetricCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+function MetricCard({ label, value, detail }: { label: string; value: string; detail?: ReactNode }) {
   return (
     <div className="sf-card-soft flex min-h-[156px] min-w-0 flex-col justify-between p-4 sm:p-5">
       <div className="sf-label">{label}</div>
@@ -156,6 +183,18 @@ function MetricCard({ label, value, detail }: { label: string; value: string; de
         {detail && <div className="mt-2 text-xs leading-5 text-[#666]">{detail}</div>}
       </div>
     </div>
+  );
+}
+
+function LiveMetricDetail({ metrics, fallback }: { metrics: YouTubeLiveMetrics | null; fallback: string }) {
+  const detail = metrics?.live_viewers_detail || fallback;
+  const isLive = (metrics?.live_concurrent_viewers ?? 0) > 0 && (metrics?.active_live_broadcasts ?? 0) > 0;
+  if (!isLive) return <>{detail}</>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-1.5 w-1.5 rounded-full bg-[#ff0000]" aria-hidden="true" />
+      <span>AO VIVO · {detail}</span>
+    </span>
   );
 }
 
@@ -507,11 +546,19 @@ function ClipPreview({ clip, mediaSrc, draft }: { clip: Clip; mediaSrc: string; 
 
 export default function Dashboard({ user }: { user: UserProfile }) {
   const [activeSection, setActiveSection] = useState<SectionId>("automacao");
+  const [videoSource, setVideoSource] = useState<VideoSource>("youtube");
   const [keyword, setKeyword] = useState("marketing digital");
   const [region, setRegion] = useState("BR");
   const [days, setDays] = useState(14);
   const [requestedClips, setRequestedClips] = useState(3);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AiVideoOptions | null>(null);
+  const [aiVideoPrompt, setAiVideoPrompt] = useState("");
+  const [aiAspectRatio, setAiAspectRatio] = useState<"9:16" | "16:9">("9:16");
+  const [aiResolution, setAiResolution] = useState<"720p" | "1080p">("1080p");
+  const [aiMode, setAiMode] = useState<"fast" | "quality">("fast");
+  const [aiStyle, setAiStyle] = useState<"cinematic" | "creative" | "ugc" | "product">("cinematic");
+  const [aiProject, setAiProject] = useState<EditorProject | null>(null);
   const [videos, setVideos] = useState<TrendingVideo[]>([]);
   const [selected, setSelected] = useState<TrendingVideo | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -533,6 +580,9 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const usagePercent = user.unlimited ? 100 : Math.min(100, Math.round((user.jobs_used / Math.max(1, user.monthly_job_limit)) * 100));
   const topVideo = liveMetrics?.top_video;
   const monetization = liveMetrics?.monetization;
+  const liveViewersValue = liveMetrics?.live_concurrent_viewers == null ? "—" : fmtNumber(liveMetrics.live_concurrent_viewers);
+  const liveViewersFallback = liveLoading ? "Atualizando..." : youtubeConnected ? "Não foi possível atualizar" : "Conecte o canal";
+  const aiWorking = isAiVideoWorking(aiProject);
 
   useEffect(() => {
     const syncSection = () => setActiveSection(sectionFromHash());
@@ -566,7 +616,16 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       const metrics = await youtubeLiveMetrics();
       setLiveMetrics(metrics);
     } catch (err) {
-      setLiveMetrics(null);
+      setLiveMetrics((current) => {
+        if (!silent || !current) return null;
+        return {
+          ...current,
+          live_concurrent_viewers: null,
+          live_viewers_status: "error",
+          live_viewers_detail: "Não foi possível atualizar",
+          live_viewers_updated_at: new Date().toISOString(),
+        };
+      });
       if (!silent) setLiveError(err instanceof Error ? err.message : "Falha ao carregar métricas ao vivo do YouTube.");
     } finally {
       if (!silent) setLiveLoading(false);
@@ -598,6 +657,34 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     return () => window.clearInterval(timer);
   }, [youtubeConnected]);
 
+  useEffect(() => {
+    let cancelled = false;
+    aiVideoOptions()
+      .then((options) => {
+        if (cancelled) return;
+        setAiConfig(options);
+        setAiAspectRatio(options.defaults.aspect_ratio);
+        setAiResolution(options.defaults.resolution);
+        setAiMode(options.defaults.mode);
+        setAiStyle(options.defaults.style);
+      })
+      .catch(() => {
+        if (!cancelled) setAiConfig(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!aiProject?.id || !aiWorking) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const fresh = await aiVideoProject(aiProject.id);
+        setAiProject(fresh);
+      } catch {}
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [aiProject?.id, aiWorking]);
+
   function openSection(id: SectionId) {
     setActiveSection(id);
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${id}`);
@@ -625,6 +712,40 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       openSection("processamento");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao iniciar o processamento");
+    } finally { setActionId(null); }
+  }
+
+  async function improveAiPrompt() {
+    const prompt = aiVideoPrompt.trim();
+    if (!prompt) return setError("Descreva o vídeo antes de melhorar o prompt.");
+    setActionId("ai-prompt"); setError(""); setMessage("");
+    try {
+      const result = await aiVideoImprovePrompt(prompt);
+      setAiVideoPrompt(result.prompt);
+      setMessage("Prompt melhorado. Revise antes de enviar para geração.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível melhorar o prompt agora.");
+    } finally { setActionId(null); }
+  }
+
+  async function generateAiVideo() {
+    const prompt = aiVideoPrompt.trim();
+    if (!aiConfig?.available) return setError(aiConfig?.unavailable_reason || "Geração de vídeo IA indisponível.");
+    if (prompt.length < 10) return setError("Descreva melhor o vídeo que deseja gerar.");
+    setActionId("ai-video"); setError(""); setMessage("");
+    try {
+      const created = await aiVideoGenerate({
+        prompt,
+        aspect_ratio: aiAspectRatio,
+        resolution: aiResolution,
+        mode: aiMode,
+        style: aiStyle,
+        request_id: requestId(),
+      });
+      setAiProject(created);
+      setMessage("Geração de vídeo com IA iniciada. Você pode continuar usando a plataforma.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao iniciar geração de vídeo IA.");
     } finally { setActionId(null); }
   }
 
@@ -768,6 +889,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <MetricCard label="Visualizações" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
                 <MetricCard label="Vídeos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} processamentos ativos`} />
                 <MetricCard label="Uso do plano" value={fmtExact(user.jobs_used)} detail={user.unlimited ? `Processamentos usados · ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · limite ${fmtExact(user.monthly_job_limit)}`} />
+                <MetricCard label="Assistindo agora" value={liveViewersValue} detail={<LiveMetricDetail metrics={liveMetrics} fallback={liveViewersFallback} />} />
               </div>
 
               <div className="sf-card overflow-hidden">
@@ -911,7 +1033,30 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             </div>
             <button onClick={() => openSection("automacao")} className="sf-button sf-button-outline w-fit">Voltar ao painel</button>
           </div>
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
+          <div className="mb-5">
+            <div className="sf-label mb-2">Fonte do vídeo</div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[
+                { id: "youtube" as const, label: "YouTube", detail: "Pesquisar e cortar", icon: YoutubeIcon },
+                { id: "upload" as const, label: "Upload", detail: "Usar arquivo próprio", icon: UploadIcon },
+                { id: "ai" as const, label: "Gerar com IA", detail: "Google Veo", icon: PlayIcon },
+              ].map(({ id, label, detail, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setVideoSource(id)}
+                  className={`flex min-h-[68px] items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${videoSource === id ? "border-red-200 bg-red-50 text-red-700" : "border-[#e8e8e8] bg-white text-[#333] hover:border-[#d0d5dd]"}`}
+                >
+                  <span className={`grid h-9 w-9 flex-none place-items-center rounded-lg ${videoSource === id ? "bg-[#ff0000] text-white" : "bg-[#f7f7f7] text-[#555]"}`}><Icon className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold leading-5">{label}</span>
+                    <span className="block text-[11px] leading-4 opacity-70">{detail}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {videoSource === "youtube" && <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
             <div className="sf-card overflow-hidden">
               <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteúdo</h3><p className="mt-1 text-xs text-[#666]">Encontre vídeos com potencial para cortes.</p></div>
               <div className="p-5">
@@ -947,7 +1092,139 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <button onClick={processSelected} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="sf-button sf-button-youtube mt-5 w-full disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
               </div>
             </div>
-          </div>
+          </div>}
+          {videoSource === "upload" && (
+            <div className="sf-card overflow-hidden">
+              <div className="border-b border-[#e8e8e8] px-5 py-4">
+                <h3 className="text-sm font-semibold text-[#111]">Upload do computador</h3>
+                <p className="mt-1 text-xs text-[#666]">Use o editor de vídeo existente para enviar um arquivo próprio e continuar o acabamento.</p>
+              </div>
+              <div className="grid gap-4 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div className="rounded-lg border border-[#e8e8e8] bg-[#f7f7f7] p-4 text-sm leading-6 text-[#555]">
+                  O fluxo de upload permanece no Editor de vídeo para reaproveitar os controles de legenda, música, timeline e exportação.
+                </div>
+                <a href="/editor-ia?return=%2F%23configurar" className="sf-button sf-button-primary w-fit"><UploadIcon className="h-4 w-4" />Abrir upload</a>
+              </div>
+            </div>
+          )}
+
+          {videoSource === "ai" && (
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_380px]">
+              <div className="sf-card overflow-hidden">
+                <div className="border-b border-[#e8e8e8] px-5 py-4">
+                  <h3 className="text-sm font-semibold text-[#111]">Gerar vídeo com IA</h3>
+                  <p className="mt-1 text-xs text-[#666]">Crie um vídeo original e continue a edição normalmente no ShortsFlow AI.</p>
+                </div>
+                <div className="p-5">
+                  {!aiConfig?.available && (
+                    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">
+                      {aiConfig?.unavailable_reason || "Verificando configuração do Veo..."}
+                    </div>
+                  )}
+
+                  <label className="block text-xs font-medium text-[#222]">
+                    Descreva o vídeo que deseja criar
+                    <textarea
+                      value={aiVideoPrompt}
+                      onChange={(event) => setAiVideoPrompt(event.target.value)}
+                      rows={6}
+                      className="sf-input mt-2 w-full resize-y px-3 py-2.5 text-sm leading-6"
+                      placeholder="Ex.: Crie uma cena cinematográfica vertical mostrando um empreendedor trabalhando em um escritório moderno, iluminação natural, câmera suave e aparência realista."
+                    />
+                  </label>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={improveAiPrompt}
+                      disabled={actionId === "ai-prompt" || !aiConfig?.prompt_improvement_available || !aiVideoPrompt.trim()}
+                      className="sf-button sf-button-outline min-h-9 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {actionId === "ai-prompt" ? "Melhorando..." : "Melhorar prompt"}
+                    </button>
+                    {aiConfig?.audio_supported && <span className="sf-pill">Áudio nativo do Veo</span>}
+                  </div>
+
+                  <div className="mt-5 grid gap-3 md:grid-cols-2">
+                    <label className="text-xs font-medium text-[#222]">Formato
+                      <select value={aiAspectRatio} onChange={(event) => setAiAspectRatio(event.target.value as "9:16" | "16:9")} className="sf-input mt-2 w-full px-3 py-2.5">
+                        {(aiConfig?.aspect_ratios || [{ id: "9:16", label: "9:16 - Shorts / TikTok" }, { id: "16:9", label: "16:9 - Horizontal" }]).map((item) => <option key={String(item.id)} value={String(item.id)}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-[#222]">Qualidade
+                      <select value={aiResolution} onChange={(event) => setAiResolution(event.target.value as "720p" | "1080p")} className="sf-input mt-2 w-full px-3 py-2.5">
+                        {(aiConfig?.resolutions || [{ id: "720p", label: "720p" }, { id: "1080p", label: "1080p" }]).map((item) => <option key={String(item.id)} value={String(item.id)}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-[#222]">Modo
+                      <select value={aiMode} onChange={(event) => setAiMode(event.target.value as "fast" | "quality")} className="sf-input mt-2 w-full px-3 py-2.5">
+                        {(aiConfig?.modes || [{ id: "fast", label: "Rápido" }, { id: "quality", label: "Alta qualidade" }]).map((item) => <option key={String(item.id)} value={String(item.id)}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-[#222]">Estilo
+                      <select value={aiStyle} onChange={(event) => setAiStyle(event.target.value as "cinematic" | "creative" | "ugc" | "product")} className="sf-input mt-2 w-full px-3 py-2.5">
+                        {(aiConfig?.styles || [{ id: "cinematic", label: "Cinematográfico" }, { id: "creative", label: "Social criativo" }]).map((item) => <option key={String(item.id)} value={String(item.id)}>{item.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={generateAiVideo}
+                    disabled={actionId === "ai-video" || aiWorking || !aiConfig?.available}
+                    className="sf-button sf-button-youtube mt-5 w-full disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {actionId === "ai-video" ? "Enviando..." : aiWorking ? "Gerando..." : "Gerar vídeo"}
+                  </button>
+                </div>
+              </div>
+
+              <aside className="sf-card overflow-hidden">
+                <div className="border-b border-[#e8e8e8] px-5 py-4">
+                  <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Resultado IA</div>
+                  <h3 className="mt-1 text-base font-semibold leading-tight text-[#111]">{aiVideoStatusLabel(aiProject?.status)}</h3>
+                </div>
+                <div className="p-5">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[#ececec]">
+                    <div className="h-full rounded-full bg-[#ff0000] transition-all duration-700" style={{ width: `${aiProject?.progress || 0}%` }} />
+                  </div>
+
+                  {!aiProject && <div className="mt-4 rounded-lg border border-[#e8e8e8] bg-[#f7f7f7] p-5 text-center text-sm text-[#777]">O preview aparecerá aqui depois que a geração for iniciada.</div>}
+                  {aiProject?.error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold leading-5 text-red-700">{aiProject.error}</div>}
+                  {aiProject?.preview_url && (
+                    <div className="mt-4 overflow-hidden rounded-lg border border-[#111] bg-[#080808]">
+                      <video controls playsInline src={`${API_URL}${aiProject.preview_url}`} className="max-h-[460px] w-full object-contain" />
+                    </div>
+                  )}
+                  {aiProject && (
+                    <div className="mt-4 space-y-2 text-xs leading-5 text-[#666]">
+                      <div className="rounded-lg bg-[#f7f7f7] p-3">
+                        <div className="font-semibold text-[#222]">{aiProject.original_filename}</div>
+                        <div className="mt-1">
+                          {aiProject.ai_video_generation?.aspect_ratio || aiAspectRatio} · {aiProject.ai_video_generation?.resolution || aiResolution} · {fmtDuration(aiProject.ai_video_generation?.duration_seconds || aiConfig?.defaults.duration_seconds || 8)}
+                        </div>
+                      </div>
+                      {aiProject.ai_video_generation?.prompt && (
+                        <div className="rounded-lg bg-[#f7f7f7] p-3">
+                          <div className="font-semibold text-[#222]">Prompt utilizado</div>
+                          <p className="mt-1 line-clamp-4">{aiProject.ai_video_generation.prompt}</p>
+                        </div>
+                      )}
+                      {aiWorking && <div className="rounded-lg bg-red-50 p-3 font-medium text-red-700">Você pode continuar utilizando a plataforma.</div>}
+                    </div>
+                  )}
+                  {aiProject?.status === "uploaded" && (
+                    <div className="mt-4 grid gap-2">
+                      {aiProject.preview_url && <a href={`${API_URL}${aiProject.preview_url}`} target="_blank" rel="noreferrer" className="sf-button sf-button-outline w-full">Assistir</a>}
+                      <a href="/projetos" className="sf-button sf-button-outline w-full">Adicionar ao projeto</a>
+                      <a href={`/editor-ia?project=${encodeURIComponent(aiProject.id)}&return=%2F%23configurar`} className="sf-button sf-button-primary w-full">Abrir no Editor</a>
+                      <button type="button" onClick={() => setAiProject(null)} className="sf-button sf-button-outline w-full">Gerar novamente</button>
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          )}
         </section>
       )}
 

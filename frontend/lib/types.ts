@@ -191,6 +191,62 @@ export type Job = {
   clips: Clip[];
 };
 
+export type EditorProject = {
+  id: string;
+  original_filename: string;
+  preset: string;
+  target_platform: string;
+  status: string;
+  progress: number;
+  error?: string | null;
+  preview_url?: string | null;
+  export_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  ai_video_generation?: {
+    provider?: string;
+    status?: string;
+    prompt?: string;
+    model_mode?: string;
+    aspect_ratio?: string;
+    resolution?: string;
+    duration_seconds?: number;
+    style?: string;
+    error_code?: string | null;
+    error_message?: string | null;
+    created_at?: string;
+    submitted_at?: string | null;
+    completed_at?: string | null;
+  } | null;
+};
+
+export type AiVideoOption = {
+  id: string | number;
+  label: string;
+  configured?: boolean;
+};
+
+export type AiVideoOptions = {
+  enabled: boolean;
+  configured: boolean;
+  available: boolean;
+  unavailable_reason: string;
+  prompt_improvement_available: boolean;
+  audio_supported: boolean;
+  defaults: {
+    aspect_ratio: "9:16" | "16:9";
+    resolution: "720p" | "1080p";
+    duration_seconds: number;
+    mode: "fast" | "quality";
+    style: "cinematic" | "creative" | "ugc" | "product";
+  };
+  aspect_ratios: AiVideoOption[];
+  resolutions: AiVideoOption[];
+  modes: AiVideoOption[];
+  styles: AiVideoOption[];
+  durations: AiVideoOption[];
+};
+
 export type YouTubeVideoMetric = {
   video_id: string;
   title: string;
@@ -201,6 +257,13 @@ export type YouTubeVideoMetric = {
   like_count: number;
   comment_count: number;
   duration_seconds: number;
+};
+
+export type YouTubeLiveBroadcastMetric = {
+  video_id: string;
+  title: string;
+  url: string;
+  concurrent_viewers?: number | null;
 };
 
 export type YouTubeDashboardAlert = {
@@ -248,4 +311,10 @@ export type YouTubeLiveMetrics = {
   views_last_90d?: number | null;
   watch_hours_last_365d?: number | null;
   refreshed_at: string;
+  live_concurrent_viewers?: number | null;
+  active_live_broadcasts: number;
+  live_viewers_status: string;
+  live_viewers_detail: string;
+  live_viewers_updated_at?: string | null;
+  live_broadcasts: YouTubeLiveBroadcastMetric[];
 };

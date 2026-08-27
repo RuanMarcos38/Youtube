@@ -18,6 +18,12 @@ from .transcription import transcribe_chunks
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mpeg", ".mpg", ".webm"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+AI_VIDEO_QUEUED_STATUS = "ai_video_queued"
+AI_VIDEO_WORKING_STATUSES = {
+    "ai_video_submitted",
+    "ai_video_processing",
+    "ai_video_downloading",
+}
 
 PRESETS: dict[str, dict[str, Any]] = {
     "tiktok_shop_sales": {
@@ -217,13 +223,22 @@ def claim_next_editor_task() -> tuple[int, str, str] | None:
         try:
             project = json.loads(path.read_text(encoding="utf-8"))
             current_status = project.get("status")
-            if current_status not in {"queued", "export_queued"}:
+            if current_status not in {"queued", "export_queued", AI_VIDEO_QUEUED_STATUS, *AI_VIDEO_WORKING_STATUSES}:
                 continue
             user_id = int(project["user_id"])
             project_id = str(project["id"])
-            mode = "export" if current_status == "export_queued" else "edit"
-            project["status"] = "exporting" if mode == "export" else "analyzing"
-            project["progress"] = 96 if mode == "export" else 5
+            if current_status == "export_queued":
+                mode = "export"
+                project["status"] = "exporting"
+                project["progress"] = 96
+            elif current_status in {AI_VIDEO_QUEUED_STATUS, *AI_VIDEO_WORKING_STATUSES}:
+                mode = "ai_video"
+                project["status"] = "ai_video_processing"
+                project["progress"] = max(5, int(project.get("progress") or 1))
+            else:
+                mode = "edit"
+                project["status"] = "analyzing"
+                project["progress"] = 5
             project["error"] = None
             _write_json(path, project)
             return user_id, project_id, mode
@@ -734,6 +749,11 @@ def recover_interrupted_editor_tasks() -> None:
             if current_status in {"analyzing", "transcribing", "ai_editing", "rendering"}:
                 project["status"] = "queued"
                 project["progress"] = 1
+                project["error"] = "Recovered after worker restart"
+                _write_json(path, project)
+            elif current_status in AI_VIDEO_WORKING_STATUSES:
+                project["status"] = AI_VIDEO_QUEUED_STATUS
+                project["progress"] = max(1, int(project.get("progress") or 1))
                 project["error"] = "Recovered after worker restart"
                 _write_json(path, project)
             elif current_status == "exporting":
