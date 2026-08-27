@@ -8,6 +8,7 @@ import {
   getTrending,
   listClips,
   listJobs,
+  retryJob,
   uploadClip,
   youtubeStart,
   youtubeStatus,
@@ -94,6 +95,21 @@ function youtubeOauthErrorMessage(reason: string) {
   return reason ? `Google não autorizou a conexão do YouTube: ${reason}.` : "Google não autorizou a conexão do YouTube.";
 }
 
+function jobErrorMessage(error: string) {
+  const normalized = error.toLowerCase();
+  if (
+    normalized.includes("rate_limit_exceeded") ||
+    normalized.includes("tokens per min") ||
+    normalized.includes("request too large")
+  ) {
+    return "Este processamento foi criado antes da correção para vídeos longos e excedeu o limite da OpenAI. Clique em Tentar novamente para recriar o job usando o transcript otimizado.";
+  }
+  if (normalized.includes("sign in to confirm") || normalized.includes("cookies") || normalized.includes("not a bot")) {
+    return "O YouTube recusou a sessão de download usada neste processamento antigo. A autenticação atual já foi renovada; tente novamente para baixar com a configuração corrigida.";
+  }
+  return error;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const ready = ["ready_for_review", "ready", "approved", "uploaded"].includes(status);
   const failed = ["failed", "upload_failed"].includes(status);
@@ -177,6 +193,18 @@ export default function Dashboard() {
       document.getElementById("processamento")?.scrollIntoView({ behavior: "smooth" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao iniciar processamento");
+    } finally { setActionId(null); }
+  }
+
+  async function retryFailedJob(id: number) {
+    setActionId(`retry-${id}`); setError(""); setMessage("");
+    try {
+      await retryJob(id);
+      await refresh();
+      setMessage("Novo processamento criado a partir do job falhado. Acompanhe o andamento abaixo.");
+      document.getElementById("processamento")?.scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao reenviar processamento");
     } finally { setActionId(null); }
   }
 
@@ -291,7 +319,10 @@ export default function Dashboard() {
               <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center"><div className="flex min-w-0 items-center gap-4">{job.source_video.thumbnail_url ? <img src={job.source_video.thumbnail_url} alt="" className="h-14 w-24 rounded-md object-cover" /> : <div className="grid h-14 w-24 place-items-center rounded-md bg-[#101828]"><YoutubeIcon className="h-7 w-7 text-red-500" /></div>}<div className="min-w-0"><div className="text-[10px] text-[#667085]">Job #{job.id}</div><h3 className="line-clamp-2 text-sm font-semibold text-[#344054]">{job.source_video.title}</h3><p className="mt-1 text-xs text-[#667085]">{job.clips.length}/{job.requested_clips} cortes</p></div></div><div className="flex items-center gap-3"><StatusBadge status={job.status} /><span className="text-xs font-semibold text-[#344054]">{job.progress}%</span></div></div>
               <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#eef2f6]"><div className={`h-full rounded-full transition-all duration-700 ${job.status === "failed" ? "bg-red-500" : "bg-[#147d72]"}`} style={{ width: `${job.progress}%` }} /></div>
               <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{pipeline.map((stage, index) => { const active = job.status !== "failed" && (current >= index || job.status === "ready_for_review"); return <div key={stage} className={`rounded-lg border px-3 py-2 ${active ? "border-[#b7d8d3] bg-[#f6fbfa]" : "border-[#e4e7ec] bg-white"}`}><div className={`text-[9px] font-medium ${active ? "text-[#147d72]" : "text-[#98a2b3]"}`}>{String(index + 1).padStart(2, "0")}</div><div className="mt-0.5 text-[11px] font-medium text-[#475467]">{stage}</div></div>; })}</div>
-              {job.error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700">{job.error}</p>}
+              {job.error && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700 sm:flex-row sm:items-center sm:justify-between">
+                <p className="leading-5">{jobErrorMessage(job.error)}</p>
+                {job.status === "failed" && <button onClick={() => retryFailedJob(job.id)} disabled={actionId === `retry-${job.id}`} className="inline-flex w-fit flex-none items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><RefreshIcon className="h-3.5 w-3.5" />{actionId === `retry-${job.id}` ? "Recriando..." : "Tentar novamente"}</button>}
+              </div>}
             </article>;
           })}</div>}
         </div>

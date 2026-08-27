@@ -13,14 +13,7 @@ from ..services.serializers import job_to_dict
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.post("", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not payload.rights_confirmed:
-        raise HTTPException(
-            status_code=400,
-            detail="Confirme que você possui direitos, licença ou autorização para reutilizar o conteúdo.",
-        )
-
+def _ensure_job_can_be_queued(user: User, db: Session) -> None:
     allowed, reason = can_use_tool(db, user)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
@@ -30,6 +23,40 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="O download do YouTube ainda não está autenticado no servidor. O administrador precisa renovar a sessão de download.",
         )
+
+
+def _create_queued_job(db: Session, user: User, source: SourceVideo, requested_clips: int) -> dict:
+    source.rights_confirmed = True
+    job = Job(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        source_video_id=source.id,
+        requested_clips=max(1, min(10, requested_clips)),
+        status="queued",
+        progress=0,
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+
+    job = (
+        db.query(Job)
+        .options(joinedload(Job.source_video), joinedload(Job.clips))
+        .filter(Job.id == job_id, Job.user_id == user.id)
+        .first()
+    )
+    return job_to_dict(job)
+
+
+@router.post("", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not payload.rights_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirme que você possui direitos, licença ou autorização para reutilizar o conteúdo.",
+        )
+
+    _ensure_job_can_be_queued(user, db)
 
     source = (
         db.query(SourceVideo)
@@ -55,24 +82,7 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
         source.thumbnail_url = payload.thumbnail_url
         source.rights_confirmed = True
 
-    job = Job(
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        source_video_id=source.id,
-        requested_clips=payload.requested_clips,
-        status="queued",
-        progress=0,
-    )
-    db.add(job)
-    db.commit()
-
-    job = (
-        db.query(Job)
-        .options(joinedload(Job.source_video), joinedload(Job.clips))
-        .filter(Job.id == job.id, Job.user_id == user.id)
-        .first()
-    )
-    return job_to_dict(job)
+    return _create_queued_job(db, user, source, payload.requested_clips)
 
 
 @router.get("", response_model=list[JobOut])
@@ -86,6 +96,25 @@ def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_
         .all()
     )
     return [job_to_dict(job) for job in jobs]
+
+
+@router.post("/{job_id}/retry", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    original = (
+        db.query(Job)
+        .options(joinedload(Job.source_video))
+        .filter(Job.id == job_id, Job.user_id == user.id)
+        .first()
+    )
+    if not original:
+        raise HTTPException(status_code=404, detail="Job não encontrado para este perfil.")
+    if original.status != "failed":
+        raise HTTPException(status_code=409, detail="Apenas processamentos falhados podem ser reenviados.")
+    if not original.source_video:
+        raise HTTPException(status_code=409, detail="O vídeo de origem deste processamento não foi encontrado.")
+
+    _ensure_job_can_be_queued(user, db)
+    return _create_queued_job(db, user, original.source_video, original.requested_clips)
 
 
 @router.get("/{job_id}", response_model=JobOut)
