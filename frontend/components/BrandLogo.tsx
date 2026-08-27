@@ -9,15 +9,15 @@ type BrandLogoProps = {
 };
 
 const imageSize = {
-  sm: "h-10",
-  md: "h-12",
-  lg: "h-14",
+  sm: "h-9 max-w-[150px]",
+  md: "h-10 max-w-[176px]",
+  lg: "h-12 max-w-[212px]",
 };
 
 const markSize = {
-  sm: "h-10 w-10",
-  md: "h-12 w-12",
-  lg: "h-14 w-14",
+  sm: "h-9 w-9",
+  md: "h-10 w-10",
+  lg: "h-12 w-12",
 };
 
 function YoutubeMark({ size = "md" }: { size?: BrandLogoProps["size"] }) {
@@ -39,8 +39,10 @@ export default function BrandLogo({ size = "md", className = "", markOnly = fals
         src="/Logo.png"
         alt="ShortsFlow AI"
         translate="no"
+        decoding="async"
+        draggable={false}
         onError={() => setFailed(true)}
-        className={`notranslate ${imageSize[size]} w-auto max-w-full object-contain ${className}`}
+        className={`notranslate block ${imageSize[size]} w-auto object-contain ${className}`}
       />
     );
   }

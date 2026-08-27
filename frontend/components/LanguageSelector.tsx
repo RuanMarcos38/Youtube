@@ -212,7 +212,7 @@ export default function LanguageSelector() {
         id="platform-language"
         value={language}
         onChange={(event) => changeLanguage(event.target.value)}
-        className="mt-2 w-full rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]"
+        className="sf-input mt-2 w-full px-3 py-2.5"
       >
         {languages.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
       </select>

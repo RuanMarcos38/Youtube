@@ -44,11 +44,11 @@ export default function YoutubeAccountSwitcher() {
   if (!configured) return null;
 
   return (
-    <div className="fixed bottom-[70px] left-3 right-3 z-[80] rounded-xl border border-[#e4e7ec] bg-white p-3 shadow-[0_8px_24px_rgba(16,24,40,.10)] xl:bottom-4 xl:left-4 xl:right-auto xl:w-[216px]">
+    <div className="fixed bottom-[70px] left-3 right-3 z-[80] rounded-xl border border-[#e6e6e6] bg-white p-3 shadow-[0_14px_34px_rgba(17,17,17,.10)] xl:bottom-4 xl:left-4 xl:right-auto xl:w-[216px]">
       <div className="flex items-center gap-2">
         <YoutubeIcon />
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-medium text-[#98a2b3]">Canal do YouTube</div>
+          <div className="text-[10px] font-medium text-[#888]">Canal do YouTube</div>
           <div className="mt-0.5 truncate text-xs font-semibold text-[#344054]">
             {connected ? channelTitle || "YouTube conectado" : "Nenhum canal conectado"}
           </div>
@@ -58,7 +58,7 @@ export default function YoutubeAccountSwitcher() {
         type="button"
         onClick={chooseAccount}
         disabled={loading}
-        className="mt-3 w-full rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-[11px] font-semibold text-[#344054] transition hover:bg-[#f9fafb] disabled:cursor-wait disabled:opacity-60"
+        className="sf-button sf-button-outline mt-3 w-full text-[11px] disabled:cursor-wait disabled:opacity-60"
       >
         {loading ? "Abrindo Google..." : connected ? "Trocar conta" : "Conectar canal"}
       </button>

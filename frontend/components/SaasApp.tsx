@@ -135,13 +135,13 @@ export default function SaasApp() {
   }
 
   if (checking) {
-    return <main className="grid min-h-screen place-items-center bg-[#f8faf5] font-sans text-[#111815]"><div className="text-sm font-bold">Carregando {config.brand_name}...</div></main>;
+    return <main className="grid min-h-screen place-items-center bg-[#f7f7f7] font-sans text-[#111]"><div className="text-sm font-semibold">Carregando {config.brand_name}...</div></main>;
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-[#f7f7f7] px-4 py-10 text-[#111815] md:py-16">
-        <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] border border-[#e6e6e6] bg-white shadow-[0_24px_90px_rgba(17,17,17,.08)] lg:grid-cols-[1.05fr_.95fr]">
+      <main className="min-h-screen bg-[#f7f7f7] px-4 py-10 text-[#111] md:py-16">
+        <div className="mx-auto grid max-w-6xl overflow-hidden rounded-2xl border border-[#e6e6e6] bg-white shadow-[0_24px_90px_rgba(17,17,17,.08)] lg:grid-cols-[1.05fr_.95fr]">
           <section className="border-b border-[#e6e6e6] bg-white p-8 text-[#111] md:p-12 lg:border-b-0 lg:border-r">
             <BrandLogo size="lg" className="max-w-[230px]" />
             <div className="mt-8 text-xs font-bold uppercase leading-5 text-[#ff0000]">{config.marketing_badge}</div>
@@ -150,7 +150,7 @@ export default function SaasApp() {
             <div className="mt-8 grid gap-3 text-sm font-bold text-[#333]">
               {config.benefits.slice(0, 4).map((benefit) => <div key={benefit}>✓ {benefit}</div>)}
             </div>
-            <a href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-10 inline-flex rounded-xl bg-[#ff0000] px-6 py-3.5 text-sm font-black text-white">Assine já</a>
+            <a href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube mt-10">Assine já</a>
           </section>
 
           <section className="p-8 md:p-12">
@@ -162,12 +162,12 @@ export default function SaasApp() {
               <label className="block text-xs font-black">E-mail<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-[#91c51d]" /></label>
               <label className="block text-xs font-black">Senha<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="mt-2 w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-[#91c51d]" /></label>
               {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{error}</div>}
-              <button disabled={loading} className="w-full rounded-xl bg-[#111815] px-5 py-3.5 text-sm font-black text-white disabled:opacity-50">{loading ? "Aguarde..." : "Entrar no ShortsFlow"}</button>
+              <button disabled={loading} className="sf-button sf-button-primary w-full disabled:opacity-50">{loading ? "Aguarde..." : "Entrar no ShortsFlow"}</button>
             </form>
 
             <div className="mt-6 grid gap-2 sm:grid-cols-2">
-              <a className="rounded-xl bg-[#b8f238] px-5 py-3 text-center text-sm font-black text-[#111815]" href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer">Assine já</a>
-              <button onClick={() => setActivationOpen((value) => !value)} className="rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-black">Já pagou? Ativar acesso</button>
+              <a className="sf-button sf-button-youtube" href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer">Assine já</a>
+              <button onClick={() => setActivationOpen((value) => !value)} className="sf-button sf-button-outline">Já pagou? Ativar acesso</button>
             </div>
 
             {activationOpen && <form onSubmit={activate} className="mt-5 rounded-2xl border border-[#ddecbb] bg-[#f8faf5] p-5">
@@ -195,14 +195,14 @@ export default function SaasApp() {
       <div className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white px-4 py-2.5 text-[#111] shadow-sm md:px-8">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs">
           <a href="/#automacao" className="flex items-center">
-            <BrandLogo size="sm" className="max-w-[190px]" />
+            <BrandLogo size="sm" />
           </a>
           <div className="flex items-center gap-2">
-            {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#ff0000] px-3 py-2 font-black text-white">Assine já</a>}
-            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="rounded-lg bg-[#ff0000] px-3 py-2 font-black text-white">Upgrade ilimitado</a>}
-            {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="rounded-lg bg-[#111] px-3 py-2 font-black text-white">Administrador</button>}
-            {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 font-black text-[#222]">Perfis e limites</button>}
-            <button onClick={logout} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 font-black text-[#222]">Sair</button>
+            {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube min-h-9 px-3 py-2">Assine já</a>}
+            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube min-h-9 px-3 py-2">Upgrade ilimitado</a>}
+            {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="sf-button sf-button-primary min-h-9 px-3 py-2">Administrador</button>}
+            {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="sf-button sf-button-outline min-h-9 px-3 py-2">Perfis e limites</button>}
+            <button onClick={logout} className="sf-button sf-button-outline min-h-9 px-3 py-2">Sair</button>
           </div>
         </div>
       </div>
@@ -218,7 +218,7 @@ export default function SaasApp() {
               <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs font-bold text-red-700">Plano atual: {user.plan_code} · uso mensal: {usageLabel}</div>
               <div className="mt-4 grid gap-2">{team.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl border border-[#e6e6e6] bg-[#f7f7f7] p-3 text-xs"><div><strong>{member.display_name}</strong><div className="mt-1 text-[#6e7971]">{member.email} • {member.role}</div></div><span className={`rounded-full px-2.5 py-1 font-bold ${member.youtube_connected ? "bg-red-50 text-red-700" : "bg-[#eeeeee] text-[#666]"}`}>{member.youtube_connected ? member.youtube_channel_title || "YouTube conectado" : "Sem canal"}</span></div>)}</div>
             </div>
-            <form onSubmit={addProfile} className="rounded-2xl border border-[#e6e6e6] bg-white p-5 text-[#111] shadow-sm"><h3 className="font-black">Criar novo perfil</h3><div className="mt-4 grid gap-3"><input required placeholder="Nome" value={teamName} onChange={(e) => setTeamName(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" /><input required type="email" placeholder="E-mail" value={teamEmail} onChange={(e) => setTeamEmail(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" /><input required minLength={8} type="password" placeholder="Senha inicial" value={teamPassword} onChange={(e) => setTeamPassword(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" />{teamError && <div className="rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{teamError}</div>}<button className="rounded-xl bg-[#ff0000] px-4 py-3 text-sm font-black text-white">Adicionar perfil</button></div></form>
+            <form onSubmit={addProfile} className="sf-card p-5 text-[#111]"><h3 className="font-black">Criar novo perfil</h3><div className="mt-4 grid gap-3"><input required placeholder="Nome" value={teamName} onChange={(e) => setTeamName(e.target.value)} className="sf-input px-3 py-2.5" /><input required type="email" placeholder="E-mail" value={teamEmail} onChange={(e) => setTeamEmail(e.target.value)} className="sf-input px-3 py-2.5" /><input required minLength={8} type="password" placeholder="Senha inicial" value={teamPassword} onChange={(e) => setTeamPassword(e.target.value)} className="sf-input px-3 py-2.5" />{teamError && <div className="rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{teamError}</div>}<button className="sf-button sf-button-youtube">Adicionar perfil</button></div></form>
           </div>
         </section>
       )}

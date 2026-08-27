@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { LanguageRuntime } from "@/components/LanguageSelector";
 import PlatformNavigation from "@/components/PlatformNavigation";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "ShortsFlow | Produção e distribuição de vídeo",
@@ -11,7 +18,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" className={inter.variable}>
       <body>
         <LanguageRuntime />
         {children}

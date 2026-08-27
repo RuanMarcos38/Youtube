@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import BrandLogo from "@/components/BrandLogo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -238,26 +239,27 @@ export default function EditorIAPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] pb-24 text-[#17202a] xl:pb-10">
+    <main className="sf-page-main pb-24 xl:pb-10">
       <header className="sticky top-0 z-40 border-b border-[#e4e7ec] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-4 px-5 md:px-8">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#b8f238] text-[#111815] shadow-[0_10px_24px_rgba(184,255,32,.22)]"><FilmIcon className="h-5 w-5" /></div>
-            <div><div className="text-sm font-semibold tracking-[-.01em] text-[#101828]">ShortsFlow AI</div><div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#667085]">Editor de vídeo</div></div>
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandLogo size="sm" />
+            <div className="hidden h-8 w-px bg-[#ececec] sm:block" />
+            <div className="min-w-0"><div className="text-sm font-semibold text-[#101828]">Editor de vídeo</div><div className="text-[10px] font-semibold uppercase text-[#667085]">Produção inteligente</div></div>
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5 text-[11px] text-[#667085] sm:inline-flex"><TikTokIcon /> TikTok</span>
             <span className="hidden items-center gap-1.5 rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5 text-[11px] text-[#667085] sm:inline-flex"><YoutubeIcon /> YouTube</span>
-            <a href="/" className="rounded-lg border border-[#d0d5dd] bg-white px-3.5 py-2 text-xs font-semibold text-[#344054] shadow-sm hover:bg-[#f9fafb]">Voltar ao painel</a>
+            <a href="/" className="sf-button sf-button-outline min-h-9 px-3 py-2">Voltar ao painel</a>
           </div>
         </div>
       </header>
 
-      <section className="mx-auto max-w-[1440px] px-5 py-7 md:px-8">
+      <section className="sf-container py-7">
         <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <div className="text-xs font-medium text-[#147d72]">Produção de vídeo</div>
-            <h1 className="mt-1 text-3xl font-semibold tracking-[-.035em] text-[#101828] md:text-[36px]">Editor automático</h1>
+            <div className="sf-kicker">Produção de vídeo</div>
+            <h1 className="mt-1 text-[30px] font-semibold leading-tight text-[#101828] md:text-[36px]">Editor automático</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">A IA faz a edição completa: seleção de cortes, ritmo, punch-ins, reenquadramento, legendas, voz, música, mixagem e acabamento vertical pronto para publicar.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-[11px] text-[#475467]">
@@ -271,7 +273,7 @@ export default function EditorIAPage() {
         {message && <div className="mb-5 rounded-lg border border-[#b7d8d3] bg-[#e8f3f1] px-4 py-3 text-sm font-medium text-[#10665e]">{message}</div>}
 
         <div className="grid gap-5 lg:grid-cols-[420px_minmax(0,1fr)]">
-          <section className="rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
+          <section className="sf-card overflow-hidden">
             <div className="border-b border-[#e4e7ec] px-5 py-4"><h2 className="text-sm font-semibold text-[#101828]">Novo projeto</h2><p className="mt-1 text-xs text-[#667085]">Configure o material e deixe a IA finalizar o vídeo.</p></div>
             <div className="p-5">
               <label htmlFor="video-upload" className="block cursor-pointer rounded-lg border border-dashed border-[#cfd5dc] bg-[#fafbfc] p-5 transition hover:border-[#88bdb7] hover:bg-[#f6fbfa]">
@@ -300,12 +302,12 @@ export default function EditorIAPage() {
 
               <div className="mt-5 border-t border-[#eef0f2] pt-4"><label className="flex items-start gap-3 text-xs leading-5 text-[#667085]"><input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[#147d72]" /><span>Confirmo que sou proprietário dos materiais ou tenho autorização para editar e publicar.</span></label></div>
 
-              <button onClick={upload} disabled={busy || !file} className="mt-5 w-full rounded-lg bg-[#101828] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1d2939] disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Processando..." : "Anexar vídeo"}</button>
-              {project && <button onClick={autoEdit} disabled={busy || workingStatuses.has(project.status)} className="mt-2.5 w-full rounded-lg bg-[#147d72] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#10665e] disabled:cursor-not-allowed disabled:opacity-40">Iniciar edição profissional com IA</button>}
+              <button onClick={upload} disabled={busy || !file} className="sf-button sf-button-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Processando..." : "Anexar vídeo"}</button>
+              {project && <button onClick={autoEdit} disabled={busy || workingStatuses.has(project.status)} className="sf-button sf-button-youtube mt-2.5 w-full disabled:cursor-not-allowed disabled:opacity-40">Iniciar edição profissional com IA</button>}
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
+          <section className="sf-card overflow-hidden">
             <div className="flex flex-col gap-3 border-b border-[#e4e7ec] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-[11px] font-medium text-[#667085]">Status do projeto</div><h2 className="mt-0.5 text-base font-semibold text-[#101828]">{project ? statusLabels[project.status] || project.status : "Aguardando arquivo"}</h2></div>{project && <span className="inline-flex self-start rounded-md bg-[#f2f4f7] px-2.5 py-1.5 text-xs font-semibold text-[#344054] sm:self-auto">{project.progress || 0}%</span>}</div>
             <div className="px-5 pt-5"><div className="h-1.5 overflow-hidden rounded-full bg-[#eef2f6]"><div className="h-full rounded-full bg-[#147d72] transition-all" style={{ width: `${project?.progress || 0}%` }} /></div></div>
 
@@ -321,8 +323,8 @@ export default function EditorIAPage() {
                 </>}
 
                 {hookVariants.length > 0 && <div className="rounded-lg border border-[#e4e7ec] p-4"><div className="text-xs font-semibold text-[#344054]">Variações de gancho</div><div className="mt-3 divide-y divide-[#eef0f2]">{hookVariants.map((item) => <a key={item.variant} href={`${API_URL}${item.media_url}`} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 py-2.5 text-xs"><span className="min-w-0 truncate text-[#475467]"><strong className="mr-2 text-[#101828]">{item.variant}</strong>{item.text}</span><span className="shrink-0 font-semibold text-[#147d72]">Abrir</span></a>)}</div></div>}
-                {(project.status === "ready" || project.status === "exported") && <button onClick={exportFinal} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#101828] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"><TikTokIcon /> Exportar pronto para TikTok · Reels · Shorts</button>}
-                {project.export_url && <a href={`${API_URL}${project.export_url}`} className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#147d72] bg-[#e8f3f1] px-4 py-2.5 text-center text-sm font-semibold text-[#10665e]" download>Baixar MP4 final</a>}
+                {(project.status === "ready" || project.status === "exported") && <button onClick={exportFinal} disabled={busy} className="sf-button sf-button-primary w-full disabled:opacity-40"><TikTokIcon /> Exportar pronto para TikTok · Reels · Shorts</button>}
+                {project.export_url && <a href={`${API_URL}${project.export_url}`} className="sf-button sf-button-outline w-full" download>Baixar MP4 final</a>}
               </div>
             )}
 
@@ -330,7 +332,7 @@ export default function EditorIAPage() {
           </section>
         </div>
 
-        {timeline && videoItems.length > 0 && <section className="mt-5 rounded-xl border border-[#e4e7ec] bg-white shadow-sm"><div className="flex flex-col justify-between gap-3 border-b border-[#e4e7ec] px-5 py-4 md:flex-row md:items-center"><div><h2 className="text-sm font-semibold text-[#101828]">Linha do tempo editável</h2><p className="mt-1 text-xs text-[#667085]">Ative ou desative trechos; a IA refaz o acabamento mantendo as configurações profissionais.</p></div><button onClick={saveTimeline} disabled={busy} className="rounded-lg bg-[#101828] px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">Salvar e renderizar</button></div><div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{videoItems.map((item, index) => <button key={item.id} onClick={() => toggleClip(item.id)} className={`rounded-lg border p-4 text-left transition ${item.enabled === false ? "border-[#e4e7ec] bg-[#f9fafb] opacity-55" : "border-[#b7d8d3] bg-[#f6fbfa]"}`}><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-[#344054]">Corte {index + 1}</span><span className={`text-[10px] font-medium ${item.enabled === false ? "text-[#98a2b3]" : "text-[#147d72]"}`}>{item.enabled === false ? "Desativado" : "Ativo"}</span></div><div className="mt-2 text-xs text-[#667085]">{item.source_in.toFixed(1)}s → {item.source_out.toFixed(1)}s</div></button>)}</div></section>}
+        {timeline && videoItems.length > 0 && <section className="sf-card mt-5 overflow-hidden"><div className="flex flex-col justify-between gap-3 border-b border-[#e4e7ec] px-5 py-4 md:flex-row md:items-center"><div><h2 className="text-sm font-semibold text-[#101828]">Linha do tempo editável</h2><p className="mt-1 text-xs text-[#667085]">Ative ou desative trechos; a IA refaz o acabamento mantendo as configurações profissionais.</p></div><button onClick={saveTimeline} disabled={busy} className="sf-button sf-button-primary disabled:opacity-40">Salvar e renderizar</button></div><div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{videoItems.map((item, index) => <button key={item.id} onClick={() => toggleClip(item.id)} className={`rounded-lg border p-4 text-left transition ${item.enabled === false ? "border-[#e4e7ec] bg-[#f9fafb] opacity-55" : "border-red-100 bg-red-50"}`}><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-[#344054]">Corte {index + 1}</span><span className={`text-[10px] font-medium ${item.enabled === false ? "text-[#98a2b3]" : "text-red-700"}`}>{item.enabled === false ? "Desativado" : "Ativo"}</span></div><div className="mt-2 text-xs text-[#667085]">{item.source_in.toFixed(1)}s → {item.source_out.toFixed(1)}s</div></button>)}</div></section>}
       </section>
     </main>
   );

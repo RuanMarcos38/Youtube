@@ -164,11 +164,11 @@ function StatusBadge({ status }: { status: string }) {
 
 function MetricCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <div className="flex min-h-[142px] flex-col justify-between rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-sm">
-      <div className="text-[11px] font-semibold uppercase leading-4 text-[#777]">{label}</div>
+    <div className="sf-card-soft flex min-h-[156px] min-w-0 flex-col justify-between p-4 sm:p-5">
+      <div className="sf-label">{label}</div>
       <div>
-        <div className="mt-3 break-words text-[26px] font-semibold leading-[1.08] text-[#111]">{value}</div>
-        {detail && <div className="mt-2 break-words text-xs leading-5 text-[#666]">{detail}</div>}
+        <div className="metric-value sf-metric-number mt-3">{value}</div>
+        {detail && <div className="mt-2 text-xs leading-5 text-[#666]">{detail}</div>}
       </div>
     </div>
   );
@@ -482,33 +482,33 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f7] pb-24 text-[#171717] xl:pb-10">
+    <main className="sf-page-main pb-24 xl:pb-10">
       <section className="border-b border-[#e6e6e6] bg-white">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-5 md:px-8 lg:flex-row lg:items-center lg:justify-between">
+        <div className="sf-container flex flex-col gap-4 py-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-4">
-            <BrandLogo size="md" className="max-w-[230px]" />
+            <BrandLogo size="md" />
             <div className="hidden h-10 w-px bg-[#ececec] sm:block" />
             <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Área de trabalho ao vivo</div>
-              <h1 className="mt-1 truncate text-2xl font-semibold leading-tight text-[#111]">Painel ShortsFlow</h1>
+              <div className="sf-kicker">Área de trabalho ao vivo</div>
+              <h1 className="mt-1 truncate text-[26px] font-semibold leading-tight text-[#111]">Painel ShortsFlow</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={connectYoutube} disabled={actionId === "youtube"} className={`inline-flex max-w-full items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold leading-5 shadow-sm ${youtubeConnected ? "border-red-100 bg-red-50 text-red-700" : "border-[#d8d8d8] bg-white text-[#222] hover:bg-[#f4f4f4]"}`}>
+            <button onClick={connectYoutube} disabled={actionId === "youtube"} className={`sf-button max-w-full ${youtubeConnected ? "border-red-100 bg-red-50 text-red-700" : "sf-button-outline"}`}>
               <YoutubeIcon className="h-4 w-4 text-[#ff0000]" />
               <span className="min-w-0 truncate">{youtubeConnected ? youtubeChannelTitle || "YouTube conectado" : actionId === "youtube" ? "Conectando..." : "Conectar YouTube"}</span>
             </button>
-            <button onClick={() => openSection("configurar")} className="rounded-lg bg-[#111] px-3.5 py-2 text-xs font-semibold leading-5 text-white shadow-sm">Novo processamento</button>
+            <button onClick={() => openSection("configurar")} className="sf-button sf-button-primary">Novo processamento</button>
           </div>
         </div>
       </section>
 
       <section className="border-b border-[#e6e6e6] bg-white/95 backdrop-blur">
-        <div className="mx-auto grid max-w-[1440px] gap-2 px-5 py-3 md:px-8 lg:grid-cols-4">
+        <div className="sf-container grid gap-2 py-3 md:grid-cols-2 xl:grid-cols-4">
           {sections.map((item) => {
             const active = activeSection === item.id;
             return (
-              <button key={item.id} onClick={() => openSection(item.id)} className={`rounded-xl border px-4 py-3 text-left transition ${active ? "border-red-200 bg-red-50 shadow-sm" : "border-[#ededed] bg-white hover:border-[#d8d8d8]"}`}>
+              <button key={item.id} onClick={() => openSection(item.id)} className={`min-h-[66px] rounded-xl border px-4 py-3 text-left transition ${active ? "border-red-200 bg-red-50 shadow-sm" : "border-[#ededed] bg-white hover:border-[#d8d8d8] hover:shadow-sm"}`}>
                 <span className={`block text-sm font-semibold ${active ? "text-[#e00000]" : "text-[#222]"}`}>{item.label}</span>
                 <span className="mt-1 block text-[11px] leading-4 text-[#777]">{item.description}</span>
               </button>
@@ -518,30 +518,30 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       </section>
 
       {(error || message) && (
-        <section className="mx-auto max-w-[1440px] px-5 pt-5 md:px-8">
+        <section className="sf-container pt-5">
           {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</div>}
           {message && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{message}</div>}
         </section>
       )}
 
       {activeSection === "automacao" && (
-        <section id="automacao" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
+        <section id="automacao" className="sf-container py-6">
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_420px]">
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="sf-metric-grid">
                 <MetricCard label="Inscritos" value={liveMetrics?.hidden_subscriber_count ? "Oculto" : fmtNumber(liveMetrics?.subscriber_count || 0)} detail={liveMetrics?.channel_title || "Canal conectado"} />
                 <MetricCard label="Visualizações" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
                 <MetricCard label="Vídeos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} processamentos ativos`} />
-                <MetricCard label="Uso do plano" value={user.unlimited ? `${fmtExact(user.jobs_used)} processamentos` : `${fmtExact(user.jobs_used)} / ${fmtExact(user.monthly_job_limit)}`} detail={user.unlimited ? `Ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · ${user.plan_code || "starter"}`} />
+                <MetricCard label="Uso do plano" value={fmtExact(user.jobs_used)} detail={user.unlimited ? `Processamentos usados · ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · limite ${fmtExact(user.monthly_job_limit)}`} />
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
+              <div className="sf-card overflow-hidden">
                 <div className="flex flex-col gap-3 border-b border-[#e8e8e8] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Vídeo em destaque</div>
                     <h2 className="mt-1 max-w-3xl text-xl font-semibold leading-tight text-[#111]">{topVideo?.title || "Conecte o canal para exibir o destaque ao vivo"}</h2>
                   </div>
-                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} style={{ minWidth: 154 }} className="inline-flex w-fit items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222] shadow-sm disabled:opacity-50">
+                  <button onClick={() => void refreshLive()} disabled={!youtubeConnected || liveLoading} style={{ minWidth: 154 }} className="sf-button sf-button-outline w-fit disabled:opacity-50">
                     <RefreshIcon className="h-3.5 w-3.5" />{liveLoading ? "Atualizando..." : "Atualizar métricas"}
                   </button>
                 </div>
@@ -585,14 +585,14 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                           <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.like_count)}</div><div className="text-[10px] text-[#777]">curtidas</div></div>
                           <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold">{fmtNumber(topVideo.comment_count)}</div><div className="text-[10px] text-[#777]">comentários</div></div>
                         </div>
-                        <a href={topVideo.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg bg-[#ff0000] px-4 py-2.5 text-xs font-semibold text-white shadow-sm">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>
+                        <a href={topVideo.url} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube w-fit">Abrir no YouTube <ArrowIcon className="h-3.5 w-3.5" /></a>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
+              <div className="sf-card p-5">
                 <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
                   <div>
                     <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Vídeos recentes</div>
@@ -623,7 +623,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             </div>
 
             <aside className="space-y-5">
-              <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
+              <div className="sf-card p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Monetização</div>
@@ -641,14 +641,14 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
+              <div className="sf-card p-5">
                 <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Alertas</div>
                 <div className="mt-4 grid gap-3">
                   {(liveMetrics?.alerts || [{ kind: "info", title: "Aguardando YouTube", detail: "Conecte ou atualize o canal para receber alertas ao vivo." }]).map((alert) => <AlertCard key={`${alert.title}-${alert.detail}`} alert={alert} />)}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#e8e8e8] bg-white p-5 shadow-sm">
+              <div className="sf-card p-5">
                 <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Perfis e limites</div>
                 <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Plano {user.plan_code || "starter"}</h2>
                 <div className="mt-4">
@@ -667,24 +667,24 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       )}
 
       {activeSection === "configurar" && (
-        <section id="configurar" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
+        <section id="configurar" className="sf-container py-6">
           <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
             <div>
-              <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Criar Shorts</div>
-              <h2 className="mt-1 text-3xl font-semibold leading-tight text-[#111]">Pesquisa e corte automático</h2>
+              <div className="sf-kicker">Criar Shorts</div>
+              <h2 className="mt-1 text-[28px] font-semibold leading-tight text-[#111]">Pesquisa e corte automático</h2>
               <p className="mt-2 text-sm text-[#666]">Pesquise tendências usando a YouTube Data API e gere cortes verticais.</p>
             </div>
-            <button onClick={() => openSection("automacao")} className="w-fit rounded-lg border border-[#d8d8d8] bg-white px-3.5 py-2 text-xs font-semibold text-[#222] shadow-sm">Voltar ao painel</button>
+            <button onClick={() => openSection("automacao")} className="sf-button sf-button-outline w-fit">Voltar ao painel</button>
           </div>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
-            <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
+            <div className="sf-card overflow-hidden">
               <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteúdo</h3><p className="mt-1 text-xs text-[#666]">Encontre vídeos com potencial para cortes.</p></div>
               <div className="p-5">
                 <div className="grid gap-3 md:grid-cols-[1fr_80px_110px_auto]">
-                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} className="min-w-0 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]" placeholder="Ex.: marketing digital, imóveis, vendas" />
-                  <input value={region} onChange={(e) => setRegion(e.target.value.toUpperCase().slice(0, 2))} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-center text-sm font-medium outline-none" />
-                  <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm outline-none"><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
-                  <button onClick={search} disabled={loading} className="flex items-center justify-center gap-2 rounded-lg bg-[#111] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><SearchIcon className="h-4 w-4" />{loading ? "Buscando..." : "Buscar"}</button>
+                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} className="sf-input min-w-0 px-3 py-2.5" placeholder="Ex.: marketing digital, imóveis, vendas" />
+                  <input value={region} onChange={(e) => setRegion(e.target.value.toUpperCase().slice(0, 2))} className="sf-input px-3 py-2.5 text-center font-medium" />
+                  <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="sf-input px-3 py-2.5"><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
+                  <button onClick={search} disabled={loading} className="sf-button sf-button-primary disabled:opacity-50"><SearchIcon className="h-4 w-4" />{loading ? "Buscando..." : "Buscar"}</button>
                 </div>
 
                 <div className="mt-5 max-h-[520px] divide-y divide-[#ededed] overflow-y-auto rounded-lg border border-[#e8e8e8]">
@@ -700,7 +700,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               </div>
             </div>
 
-            <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
+            <div className="sf-card overflow-hidden">
               <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Configuração</h3><p className="mt-1 text-xs text-[#666]">Defina a quantidade de cortes.</p></div>
               <div className="p-5">
                 <label className="text-xs font-medium text-[#222]">Quantidade de Shorts</label>
@@ -709,7 +709,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <div className="mt-5"><LanguageSelector /></div>
                 <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-[#666]"><input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#ff0000]" /><span>Confirmo que possuo direitos ou autorização para reutilizar o conteúdo.</span></label>
                 {selected && <div className="mt-4 rounded-lg bg-[#f7f7f7] p-3 text-xs"><div className="text-[#777]">Selecionado</div><div className="mt-1 line-clamp-2 font-medium text-[#222]">{selected.title}</div></div>}
-                <button onClick={processSelected} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="mt-5 w-full rounded-lg bg-[#ff0000] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
+                <button onClick={processSelected} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="sf-button sf-button-youtube mt-5 w-full disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
               </div>
             </div>
           </div>
@@ -717,9 +717,9 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       )}
 
       {activeSection === "processamento" && (
-        <section id="processamento" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
-          <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criação dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} processamento(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="flex w-fit items-center gap-2 rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 text-xs font-semibold leading-5 text-[#222]"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
+        <section id="processamento" className="sf-container py-6">
+          <div className="sf-card overflow-hidden">
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="sf-kicker">Processamentos</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Fila de criação dos Shorts</h2><p className="mt-1 text-xs leading-5 text-[#777]">{activeJobs} processamento(s) ativo(s). Atualização automática a cada 3 segundos.</p></div><button onClick={() => void refresh()} className="sf-button sf-button-outline w-fit"><RefreshIcon className="h-3.5 w-3.5" />Atualizar</button></div>
             {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Seus processamentos aparecerão aqui.</div> : <div className="divide-y divide-[#ededed]">{jobs.map((job) => {
               const current = stageIndex[job.status] ?? 0;
               return <article key={job.id} className="p-5">
@@ -737,9 +737,9 @@ export default function Dashboard({ user }: { user: UserProfile }) {
       )}
 
       {activeSection === "cortes" && (
-        <section id="cortes" className="mx-auto max-w-[1440px] px-5 py-6 md:px-8">
-          <div className="rounded-xl border border-[#e8e8e8] bg-white shadow-sm">
-            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Publicações</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Cortes para revisão</h2><p className="mt-1 text-xs leading-5 text-[#777]">Aprove individualmente antes do envio.</p></div><label className="flex w-fit items-center gap-2 text-xs leading-5 text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="rounded-lg border border-[#d8d8d8] bg-white px-2.5 py-2 font-medium text-[#222] outline-none"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></label></div>
+        <section id="cortes" className="sf-container py-6">
+          <div className="sf-card overflow-hidden">
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e8e8e8] px-5 py-4 md:flex-row md:items-center"><div><div className="sf-kicker">Publicações</div><h2 className="mt-1 text-xl font-semibold leading-tight text-[#111]">Cortes para revisão</h2><p className="mt-1 text-xs leading-5 text-[#777]">Aprove individualmente antes do envio.</p></div><label className="flex w-fit items-center gap-2 text-xs leading-5 text-[#777]">Privacidade<select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="sf-input px-2.5 py-2 font-medium"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></label></div>
             {clips.length === 0 ? <div className="p-10 text-center text-sm text-[#777]">Os cortes gerados aparecerão aqui.</div> : <div className="grid gap-4 p-5 xl:grid-cols-2">{clips.map((clip) => {
               const draft = captionDrafts[clip.id] ?? captionDraftFromClip(clip);
               const mediaSrc = clip.media_url ? `${API_URL}${clip.media_url}?v=${encodeURIComponent(clip.updated_at || clip.created_at)}` : "";

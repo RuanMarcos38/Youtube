@@ -92,27 +92,27 @@ export default function ProjectsPage() {
   }), [editorProjects, jobs]);
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] pb-24 text-[#17202a] xl:pb-10">
+    <main className="sf-page-main pb-24 xl:pb-10">
       <header className="border-b border-[#e4e7ec] bg-white">
-        <div className="mx-auto flex max-w-[1440px] flex-col justify-between gap-4 px-5 py-7 md:px-8 lg:flex-row lg:items-center">
+        <div className="sf-container flex flex-col justify-between gap-4 py-7 lg:flex-row lg:items-center">
           <div>
-            <div className="text-xs font-medium text-[#147d72]">Área de trabalho</div>
-            <h1 className="mt-1 text-3xl font-semibold tracking-[-.03em] text-[#101828]">Projetos</h1>
+            <div className="sf-kicker">Área de trabalho</div>
+            <h1 className="mt-1 text-[28px] font-semibold leading-tight text-[#101828]">Projetos</h1>
             <p className="mt-2 text-sm text-[#667085]">Acompanhe edições, Shorts, exportações e processamentos em um único lugar.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href="/#configurar" className="rounded-lg border border-[#d0d5dd] bg-white px-3.5 py-2 text-xs font-semibold text-[#344054] shadow-sm hover:bg-[#f9fafb]">Criar Shorts</a>
-            <a href="/editor-ia" className="rounded-lg bg-[#101828] px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#1d2939]">Novo projeto de vídeo</a>
+            <a href="/#configurar" className="sf-button sf-button-outline">Criar Shorts</a>
+            <a href="/editor-ia" className="sf-button sf-button-primary">Novo projeto de vídeo</a>
           </div>
         </div>
       </header>
 
-      <section className="mx-auto max-w-[1440px] px-5 py-7 md:px-8">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="sf-container py-7">
+        <div className="sf-metric-grid">
           {[["Editor de vídeo", totals.editor], ["Shorts", totals.shorts], ["Prontos", totals.ready], ["Exportações", totals.exports]].map(([label, value]) => (
-            <div key={String(label)} className="rounded-xl border border-[#e4e7ec] bg-white p-4 shadow-sm">
-              <div className="text-xs text-[#667085]">{label}</div>
-              <div className="mt-2 text-2xl font-semibold tracking-[-.02em] text-[#101828]">{value}</div>
+            <div key={String(label)} className="sf-card-soft p-4">
+              <div className="sf-label">{label}</div>
+              <div className="metric-value sf-metric-number mt-3">{value}</div>
             </div>
           ))}
         </div>
@@ -121,14 +121,14 @@ export default function ProjectsPage() {
         {loading && <div className="mt-5 rounded-xl border border-[#e4e7ec] bg-white p-8 text-center text-sm text-[#667085]">Carregando projetos...</div>}
 
         {!loading && !error && <>
-          <section className="mt-7 rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
+          <section className="sf-card mt-7 overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#e4e7ec] px-5 py-4">
               <div><h2 className="text-sm font-semibold text-[#101828]">Editor de vídeo</h2><p className="mt-1 text-xs text-[#667085]">Projetos para TikTok Shop, Reels e Shorts.</p></div>
-              <a href="/editor-ia" className="text-xs font-semibold text-[#147d72]">Novo projeto</a>
+              <a href="/editor-ia" className="text-xs font-semibold text-[#ff0000]">Novo projeto</a>
             </div>
 
             {editorProjects.length === 0 ? (
-              <div className="p-10 text-center"><p className="text-sm text-[#667085]">Nenhum projeto de vídeo criado ainda.</p><a href="/editor-ia" className="mt-4 inline-flex rounded-lg bg-[#101828] px-4 py-2.5 text-xs font-semibold text-white">Criar primeiro projeto</a></div>
+              <div className="p-10 text-center"><p className="text-sm text-[#667085]">Nenhum projeto de vídeo criado ainda.</p><a href="/editor-ia" className="sf-button sf-button-primary mt-4">Criar primeiro projeto</a></div>
             ) : (
               <div className="divide-y divide-[#eef0f2]">
                 {editorProjects.map((item) => (
@@ -142,9 +142,9 @@ export default function ProjectsPage() {
                       {item.analysis?.creative_finish?.hooks?.length ? <div className="mt-2 truncate text-xs text-[#667085]">Ganchos: {item.analysis.creative_finish.hooks.slice(0,3).join(" · ")}</div> : null}
                     </div>
                     <div className="flex flex-wrap gap-2 lg:justify-end">
-                      <a href="/editor-ia" className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Abrir editor</a>
-                      {item.preview_url && <a href={`${API_URL}${item.preview_url}`} className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Prévia</a>}
-                      {item.export_url && <a href={`${API_URL}${item.export_url}`} download className="rounded-lg bg-[#147d72] px-3 py-2 text-xs font-semibold text-white">Baixar</a>}
+                      <a href="/editor-ia" className="sf-button sf-button-outline min-h-9 px-3 py-2">Abrir editor</a>
+                      {item.preview_url && <a href={`${API_URL}${item.preview_url}`} className="sf-button sf-button-outline min-h-9 px-3 py-2">Prévia</a>}
+                      {item.export_url && <a href={`${API_URL}${item.export_url}`} download className="sf-button sf-button-youtube min-h-9 px-3 py-2">Baixar</a>}
                     </div>
                   </article>
                 ))}
@@ -152,14 +152,14 @@ export default function ProjectsPage() {
             )}
           </section>
 
-          <section className="mt-5 rounded-xl border border-[#e4e7ec] bg-white shadow-sm">
+          <section className="sf-card mt-5 overflow-hidden">
             <div className="border-b border-[#e4e7ec] px-5 py-4"><h2 className="text-sm font-semibold text-[#101828]">YouTube Shorts</h2><p className="mt-1 text-xs text-[#667085]">Processamentos, cortes e status de publicação.</p></div>
             {jobs.length === 0 ? <div className="p-10 text-center text-sm text-[#667085]">Nenhum processamento de Shorts ainda.</div> : (
               <div className="divide-y divide-[#eef0f2]">
                 {jobs.map((job) => (
                   <article key={job.id} className="flex flex-col justify-between gap-4 px-5 py-4 md:flex-row md:items-center">
                     <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="truncate text-sm font-semibold text-[#101828]">#{job.id} · {job.source_video.title}</div><StatusBadge status={job.status} /></div><div className="mt-1 text-xs text-[#667085]">{job.progress}% · {job.clips.length}/{job.requested_clips} cortes</div></div>
-                    <div className="flex gap-2"><a href="/#processamento" className="rounded-lg border border-[#d0d5dd] px-3 py-2 text-xs font-semibold text-[#344054]">Acompanhar</a><a href="/#cortes" className="rounded-lg bg-[#101828] px-3 py-2 text-xs font-semibold text-white">Revisar</a></div>
+                    <div className="flex gap-2"><a href="/#processamento" className="sf-button sf-button-outline min-h-9 px-3 py-2">Acompanhar</a><a href="/#cortes" className="sf-button sf-button-primary min-h-9 px-3 py-2">Revisar</a></div>
                   </article>
                 ))}
               </div>
