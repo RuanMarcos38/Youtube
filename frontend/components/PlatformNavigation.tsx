@@ -40,7 +40,7 @@ function YoutubeIcon({ className = "h-4 w-4" }: IconProps) {
 }
 
 const items = [
-  { href: "/#automacao", label: "Visão geral", icon: HomeIcon },
+  { href: "/#automacao", label: "Painel ao vivo", icon: HomeIcon },
   { href: "/#configurar", label: "Criar Shorts", icon: ShortsIcon },
   { href: "/editor-ia", label: "Editor de vídeo", icon: EditIcon },
   { href: "/projetos", label: "Projetos", icon: ProjectsIcon },
@@ -93,21 +93,15 @@ export default function PlatformNavigation() {
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-[70] hidden w-[248px] flex-col border-r border-white/10 bg-[#101828] text-white xl:flex" aria-label="Menu principal da plataforma">
-        <div className="border-b border-white/10 px-6 py-5">
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#b8f238] text-[#111815] shadow-[0_10px_24px_rgba(184,255,32,.22)]">
-              <ShortsIcon className="h-5 w-5" />
-            </span>
-            <div>
-              <div className="text-[15px] font-semibold tracking-[-.01em]">ShortsFlow</div>
-              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[.16em] text-white/45">Shorts automation</div>
-            </div>
-          </div>
+      <aside className="fixed inset-y-0 left-0 z-[70] hidden w-[248px] flex-col border-r border-[#e6e6e6] bg-white text-[#111] xl:flex" aria-label="Menu principal da plataforma">
+        <div className="border-b border-[#e6e6e6] px-5 py-5">
+          <a href="/#automacao" className="flex items-center">
+            <img src="/Logo.png" alt="ShortsFlow AI" className="h-12 w-auto object-contain" />
+          </a>
         </div>
 
         <nav className="flex-1 px-3 py-5">
-          <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[.12em] text-white/35">Workspace</div>
+          <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[.12em] text-[#999]">Workspace</div>
           <div className="space-y-1">
             {items.map((item) => {
               const active = activeHref === item.href;
@@ -116,10 +110,10 @@ export default function PlatformNavigation() {
                 <a
                   key={item.href}
                   href={item.href}
-                  className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors ${active ? "bg-[#b8f238] text-[#111815] shadow-[0_10px_22px_rgba(184,255,32,.16)]" : "text-white/65 hover:bg-white/[.07] hover:text-white"}`}
+                  className={`relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors ${active ? "bg-red-50 text-[#e00000] shadow-sm" : "text-[#555] hover:bg-[#f6f6f6] hover:text-[#111]"}`}
                 >
-                  {active && <span className="absolute -left-3 h-6 w-[3px] rounded-r bg-[#b8f238]" />}
-                  <Icon className={`h-[18px] w-[18px] ${active ? "text-[#111815]" : "text-white/50"}`} />
+                  {active && <span className="absolute -left-3 h-6 w-[3px] rounded-r bg-[#ff0000]" />}
+                  <Icon className={`h-[18px] w-[18px] ${active ? "text-[#ff0000]" : "text-[#999]"}`} />
                   <span className={active ? "font-semibold" : "font-medium"}>{item.label}</span>
                 </a>
               );
@@ -127,9 +121,9 @@ export default function PlatformNavigation() {
           </div>
         </nav>
 
-        <div className="mb-[154px] border-t border-white/10 px-5 py-4">
-          <div className="flex items-center gap-2 text-[11px] text-white/45">
-            <TikTokIcon className="h-4 w-4 text-white/60" />
+        <div className="mb-[154px] border-t border-[#e6e6e6] px-5 py-4">
+          <div className="flex items-center gap-2 text-[11px] text-[#777]">
+            <TikTokIcon className="h-4 w-4 text-[#111]" />
             <YoutubeIcon className="h-4 w-4" />
             <span>TikTok · YouTube</span>
           </div>
@@ -142,9 +136,9 @@ export default function PlatformNavigation() {
             const active = activeHref === item.href;
             const Icon = item.icon;
             return (
-              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-medium ${active ? "bg-[#efffce] text-[#62a900]" : "text-[#667085]"}`}>
+              <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-medium ${active ? "bg-red-50 text-[#e00000]" : "text-[#667085]"}`}>
                 <Icon className="h-[18px] w-[18px]" />
-                <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Visão geral", "Início").replace("Editor de vídeo", "Editor")}</span>
+                <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Painel ao vivo", "Painel").replace("Editor de vídeo", "Editor")}</span>
               </a>
             );
           })}

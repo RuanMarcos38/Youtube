@@ -139,21 +139,21 @@ export default function SaasApp() {
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-[#f8faf5] px-4 py-10 text-[#111815] md:py-16">
-        <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] border border-black/5 bg-white shadow-[0_24px_90px_rgba(25,44,31,.12)] lg:grid-cols-[1.05fr_.95fr]">
-          <section className="bg-[#0d241d] p-8 text-white md:p-12">
-            <div className="text-2xl font-black">{config.brand_name}</div>
-            <div className="mt-2 text-xs font-bold uppercase tracking-[.18em] text-[#b8f238]">{config.marketing_badge}</div>
+      <main className="min-h-screen bg-[#f7f7f7] px-4 py-10 text-[#111815] md:py-16">
+        <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[32px] border border-[#e6e6e6] bg-white shadow-[0_24px_90px_rgba(17,17,17,.08)] lg:grid-cols-[1.05fr_.95fr]">
+          <section className="border-b border-[#e6e6e6] bg-white p-8 text-[#111] md:p-12 lg:border-b-0 lg:border-r">
+            <img src="/Logo.png" alt="ShortsFlow AI" className="h-14 w-auto object-contain" />
+            <div className="mt-8 text-xs font-bold uppercase tracking-[.18em] text-[#ff0000]">{config.marketing_badge}</div>
             <h1 className="mt-12 max-w-lg text-4xl font-black leading-tight md:text-5xl"><MarketingHeadline text={config.marketing_headline} /></h1>
-            <p className="mt-5 max-w-lg text-sm leading-7 text-white/70">{config.marketing_description}</p>
-            <div className="mt-8 grid gap-3 text-sm font-bold text-white/85">
+            <p className="mt-5 max-w-lg text-sm leading-7 text-[#5f5f5f]">{config.marketing_description}</p>
+            <div className="mt-8 grid gap-3 text-sm font-bold text-[#333]">
               {config.benefits.slice(0, 4).map((benefit) => <div key={benefit}>✓ {benefit}</div>)}
             </div>
-            <a href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-10 inline-flex rounded-xl bg-[#b8f238] px-6 py-3.5 text-sm font-black text-[#111815]">Assine já</a>
+            <a href={config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-10 inline-flex rounded-xl bg-[#ff0000] px-6 py-3.5 text-sm font-black text-white">Assine já</a>
           </section>
 
           <section className="p-8 md:p-12">
-            <div className="mb-8 inline-flex rounded-full bg-[#edf6d9] px-3 py-1 text-[11px] font-black uppercase tracking-[.12em] text-[#5f8500]">Área do assinante</div>
+            <div className="mb-8 inline-flex rounded-full bg-red-50 px-3 py-1 text-[11px] font-black uppercase tracking-[.12em] text-red-700">Área do assinante</div>
             <h2 className="text-2xl font-black">{config.login_title}</h2>
             <p className="mt-2 text-sm leading-6 text-[#6e7971]">{config.login_description}</p>
 
@@ -177,7 +177,7 @@ export default function SaasApp() {
                 <input required placeholder="Código do pedido" value={activationOrder} onChange={(e) => setActivationOrder(e.target.value)} className="rounded-xl border border-black/10 bg-white px-3 py-3 text-sm outline-none focus:border-[#91c51d]" />
                 <input required minLength={8} type="password" placeholder="Crie sua senha (mín. 8 caracteres)" value={activationPassword} onChange={(e) => setActivationPassword(e.target.value)} className="rounded-xl border border-black/10 bg-white px-3 py-3 text-sm outline-none focus:border-[#91c51d]" />
                 {activationError && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{activationError}</div>}
-                <button disabled={activationLoading} className="rounded-xl bg-[#0d241d] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{activationLoading ? "Validando pagamento..." : "Ativar meu acesso"}</button>
+                <button disabled={activationLoading} className="rounded-xl bg-[#111] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{activationLoading ? "Validando pagamento..." : "Ativar meu acesso"}</button>
               </div>
             </form>}
           </section>
@@ -190,16 +190,18 @@ export default function SaasApp() {
   const usageLabel = user.unlimited ? `${user.jobs_used} jobs • ilimitado` : `${user.jobs_used}/${user.monthly_job_limit} jobs`;
 
   return (
-    <div className="min-h-screen bg-[#f8faf5]">
-      <div className="sticky top-0 z-50 border-b border-black/5 bg-[#0d241d] px-4 py-2.5 text-white shadow-sm md:px-8">
+    <div className="min-h-screen bg-[#f7f7f7]">
+      <div className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white px-4 py-2.5 text-[#111] shadow-sm md:px-8">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3"><strong>{user.display_name}</strong><span className="rounded-full bg-white/10 px-2.5 py-1 text-white/70">{user.role}</span><span className="hidden text-white/50 sm:inline">{user.email}</span><span className="rounded-full bg-[#b8f238]/15 px-2.5 py-1 font-bold text-[#d9ff7d]">{usageLabel}</span></div>
+          <a href="/#automacao" className="flex items-center">
+            <img src="/Logo.png" alt="ShortsFlow AI" className="h-10 w-auto object-contain" />
+          </a>
           <div className="flex items-center gap-2">
-            {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Assine já</a>}
-            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Upgrade ilimitado</a>}
-            {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="rounded-lg bg-[#b8f238] px-3 py-2 font-black text-[#111815]">Administrador</button>}
-            {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="rounded-lg bg-white/10 px-3 py-2 font-black">Perfis</button>}
-            <button onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 font-black">Sair</button>
+            {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="rounded-lg bg-[#ff0000] px-3 py-2 font-black text-white">Assine já</a>}
+            {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="rounded-lg bg-[#ff0000] px-3 py-2 font-black text-white">Upgrade ilimitado</a>}
+            {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="rounded-lg bg-[#111] px-3 py-2 font-black text-white">Administrador</button>}
+            {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 font-black text-[#222]">Perfis e limites</button>}
+            <button onClick={logout} className="rounded-lg border border-[#d8d8d8] bg-white px-3 py-2 font-black text-[#222]">Sair</button>
           </div>
         </div>
       </div>
@@ -207,10 +209,15 @@ export default function SaasApp() {
       {adminOpen && user.role === "superadmin" && <AdminPanel onClose={() => setAdminOpen(false)} />}
 
       {profilesOpen && ["owner", "admin", "superadmin"].includes(user.role) && (
-        <section className="border-b border-black/5 bg-white px-4 py-6 md:px-8">
+        <section className="border-b border-[#e6e6e6] bg-white px-4 py-6 md:px-8">
           <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1fr_.8fr]">
-            <div><h3 className="font-black">Perfis deste workspace</h3><p className="mt-1 text-xs text-[#6e7971]">Cada perfil entra com sua própria senha e conecta seu próprio canal do YouTube.</p><div className="mt-4 grid gap-2">{team.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl border border-black/5 bg-[#f8faf5] p-3 text-xs"><div><strong>{member.display_name}</strong><div className="mt-1 text-[#6e7971]">{member.email} • {member.role}</div></div><span className={`rounded-full px-2.5 py-1 font-bold ${member.youtube_connected ? "bg-[#eaf8c8] text-[#4b6a00]" : "bg-[#eef0ec] text-[#667068]"}`}>{member.youtube_connected ? member.youtube_channel_title || "YouTube conectado" : "Sem canal"}</span></div>)}</div></div>
-            <form onSubmit={addProfile} className="rounded-2xl bg-[#0d241d] p-5 text-white"><h3 className="font-black">Criar novo perfil</h3><div className="mt-4 grid gap-3"><input required placeholder="Nome" value={teamName} onChange={(e) => setTeamName(e.target.value)} className="rounded-xl bg-white px-3 py-2.5 text-sm text-[#111815]" /><input required type="email" placeholder="E-mail" value={teamEmail} onChange={(e) => setTeamEmail(e.target.value)} className="rounded-xl bg-white px-3 py-2.5 text-sm text-[#111815]" /><input required minLength={8} type="password" placeholder="Senha inicial" value={teamPassword} onChange={(e) => setTeamPassword(e.target.value)} className="rounded-xl bg-white px-3 py-2.5 text-sm text-[#111815]" />{teamError && <div className="rounded-xl bg-red-500/15 p-3 text-xs font-bold text-red-100">{teamError}</div>}<button className="rounded-xl bg-[#b8f238] px-4 py-3 text-sm font-black text-[#111815]">Adicionar perfil</button></div></form>
+            <div>
+              <h3 className="font-black">Perfis deste workspace</h3>
+              <p className="mt-1 text-xs text-[#6e7971]">Cada perfil entra com sua própria senha e conecta seu próprio canal do YouTube.</p>
+              <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs font-bold text-red-700">Plano atual: {user.plan_code} · uso mensal: {usageLabel}</div>
+              <div className="mt-4 grid gap-2">{team.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl border border-[#e6e6e6] bg-[#f7f7f7] p-3 text-xs"><div><strong>{member.display_name}</strong><div className="mt-1 text-[#6e7971]">{member.email} • {member.role}</div></div><span className={`rounded-full px-2.5 py-1 font-bold ${member.youtube_connected ? "bg-red-50 text-red-700" : "bg-[#eeeeee] text-[#666]"}`}>{member.youtube_connected ? member.youtube_channel_title || "YouTube conectado" : "Sem canal"}</span></div>)}</div>
+            </div>
+            <form onSubmit={addProfile} className="rounded-2xl border border-[#e6e6e6] bg-white p-5 text-[#111] shadow-sm"><h3 className="font-black">Criar novo perfil</h3><div className="mt-4 grid gap-3"><input required placeholder="Nome" value={teamName} onChange={(e) => setTeamName(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" /><input required type="email" placeholder="E-mail" value={teamEmail} onChange={(e) => setTeamEmail(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" /><input required minLength={8} type="password" placeholder="Senha inicial" value={teamPassword} onChange={(e) => setTeamPassword(e.target.value)} className="rounded-xl border border-[#d8d8d8] bg-white px-3 py-2.5 text-sm text-[#111]" />{teamError && <div className="rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{teamError}</div>}<button className="rounded-xl bg-[#ff0000] px-4 py-3 text-sm font-black text-white">Adicionar perfil</button></div></form>
           </div>
         </section>
       )}
@@ -219,7 +226,7 @@ export default function SaasApp() {
         <main className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8">
           <div className="rounded-[28px] border border-[#ddecbb] bg-white p-10 shadow-sm"><div className="text-xs font-black uppercase tracking-[.18em] text-[#6f9700]">Assinatura necessária</div><h1 className="mt-3 text-3xl font-black">Seu acesso será liberado após a confirmação do pagamento.</h1><p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#6e7971]">Assim que o pagamento for confirmado, a conta fica ativa. Se você já pagou e recebeu o código do pedido, saia e use “Já pagou? Ativar acesso”.</p><a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="mt-7 inline-flex rounded-xl bg-[#b8f238] px-7 py-3.5 text-sm font-black">Assine já</a></div>
         </main>
-      ) : <Dashboard />}
+      ) : <Dashboard user={user} />}
     </div>
   );
 }

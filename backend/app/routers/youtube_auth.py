@@ -8,7 +8,9 @@ from ..auth import get_current_user
 from ..config import settings
 from ..database import get_db
 from ..models import User
-from ..schemas import OAuthStartResponse, OAuthStatusResponse
+from ..errors import YouTubeAuthError, YouTubeQuotaError
+from ..schemas import OAuthStartResponse, OAuthStatusResponse, YouTubeLiveMetrics
+from ..services.youtube_metrics import get_live_channel_metrics
 from ..services.youtube_oauth import build_authorization_url, complete_oauth, disconnect, get_connection_status
 
 router = APIRouter(prefix="/youtube", tags=["youtube"])
@@ -17,6 +19,18 @@ router = APIRouter(prefix="/youtube", tags=["youtube"])
 @router.get("/oauth/status", response_model=OAuthStatusResponse)
 def oauth_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return get_connection_status(db, user.id)
+
+
+@router.get("/live-metrics", response_model=YouTubeLiveMetrics)
+def live_metrics(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return get_live_channel_metrics(db, user.id)
+    except YouTubeQuotaError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except YouTubeAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/oauth/start", response_model=OAuthStartResponse)

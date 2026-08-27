@@ -2,25 +2,25 @@
 
 :root {
   color-scheme: light;
-  --background: #fbfdf7;
+  --background: #f7f7f7;
   --surface: #ffffff;
-  --surface-2: #f6f8f1;
-  --surface-3: #edf1e6;
-  --text: #20261f;
-  --text-strong: #0b120e;
-  --muted: #667064;
-  --muted-2: #929c90;
-  --accent: #b8ff20;
-  --accent-hover: #a4ef12;
-  --accent-text: #62a900;
-  --accent-soft: #efffce;
-  --accent-border: #d4f98b;
-  --nav: #0b120e;
-  --nav-soft: #161f18;
-  --border: #e4e9dc;
-  --border-strong: #cfd8c6;
+  --surface-2: #f4f4f4;
+  --surface-3: #eeeeee;
+  --text: #272727;
+  --text-strong: #111111;
+  --muted: #666666;
+  --muted-2: #9a9a9a;
+  --accent: #ff0000;
+  --accent-hover: #d90000;
+  --accent-text: #e00000;
+  --accent-soft: #fff1f1;
+  --accent-border: #ffc7c7;
+  --nav: #111111;
+  --nav-soft: #222222;
+  --border: #e6e6e6;
+  --border-strong: #d8d8d8;
   --danger: #b42318;
-  --youtube: #ff0033;
+  --youtube: #ff0000;
   --tiktok-cyan: #25f4ee;
   --tiktok-pink: #fe2c55;
   --shadow-sm: 0 1px 2px rgba(16, 22, 14, 0.05);
@@ -32,8 +32,8 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 88% 12%, rgba(184, 255, 32, .12), transparent 30%),
-    linear-gradient(180deg, #fefff9 0%, var(--background) 42%, #f7faf1 100%);
+    radial-gradient(circle at 88% 12%, rgba(255, 0, 0, .05), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, var(--background) 56%, #f2f2f2 100%);
   color: var(--text);
   font-family: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
@@ -45,13 +45,13 @@ body {
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
-::selection { background: #dfff86; color: var(--text-strong); }
+::selection { background: #ffd7d7; color: var(--text-strong); }
 
 .font-black { font-weight: 650 !important; }
 .font-bold { font-weight: 600 !important; }
 
 :where(button, a, input, select, textarea):focus-visible {
-  outline: 2px solid rgba(184, 255, 32, .55);
+  outline: 2px solid rgba(255, 0, 0, .42);
   outline-offset: 2px;
 }
 
@@ -65,14 +65,14 @@ aside[aria-label="Menu principal da plataforma"]::after {
   position: absolute;
   inset: 0 0 auto 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--tiktok-cyan) 0 33.33%, var(--tiktok-pink) 33.33% 66.66%, var(--youtube) 66.66% 100%);
+  background: var(--youtube);
   pointer-events: none;
 }
 
 main {
   background:
-    radial-gradient(circle at 92% 8%, rgba(184, 255, 32, .10), transparent 32%),
-    linear-gradient(180deg, #fefff9 0%, var(--background) 60%, #f7faf1 100%);
+    radial-gradient(circle at 92% 8%, rgba(255, 0, 0, .04), transparent 32%),
+    linear-gradient(180deg, #ffffff 0%, var(--background) 60%, #f2f2f2 100%);
 }
 
 :where(button, a)[class*="bg-[#101828]"],
@@ -83,13 +83,13 @@ main {
 
 :where(button, a)[class*="bg-[#147d72]"],
 :where(button, a)[class*="bg-[#b8f238]"] {
-  color: var(--text-strong) !important;
-  box-shadow: 0 14px 30px rgba(117, 189, 0, .18);
+  color: #ffffff !important;
+  box-shadow: 0 14px 30px rgba(255, 0, 0, .18);
 }
 
 span[class*="bg-[#147d72]"],
 span[class*="bg-[#b8f238]"] {
-  color: var(--text-strong) !important;
+  color: #ffffff !important;
 }
 
 :where(button, a)[class*="bg-[#147d72]"]:hover,
@@ -103,7 +103,7 @@ span[class*="bg-[#b8f238]"] {
 
 :where(section, article, div)[class*="bg-white"][class*="border"] {
   border-color: var(--border) !important;
-  box-shadow: 0 18px 44px rgba(15, 24, 12, .06);
+  box-shadow: 0 18px 44px rgba(17, 17, 17, .05);
 }
 
 :where(video, img) {
@@ -159,6 +159,13 @@ a[href="/editor-ia"]::before {
 
 [class*="accent-[#147d72]"] {
   accent-color: var(--accent-text) !important;
+}
+
+:where(button, a, span)[class*="bg-[#147d72]"],
+:where(button, a, span)[class*="bg-[#2aa198]"],
+:where(button, a, span)[class*="bg-[#b8f238]"],
+:where(button, a, span)[class*="bg-[#ff0000]"] {
+  color: #ffffff !important;
 }
 
 [class*="rounded-[32px]"] { border-radius: 18px !important; }

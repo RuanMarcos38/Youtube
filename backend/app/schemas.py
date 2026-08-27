@@ -133,3 +133,62 @@ class OAuthStatusResponse(BaseModel):
     channel_id: str | None = None
     channel_title: str | None = None
     redirect_uri: str
+
+
+class YouTubeVideoMetric(BaseModel):
+    video_id: str
+    title: str
+    thumbnail_url: str = ""
+    url: str
+    published_at: str | None = None
+    view_count: int = 0
+    like_count: int = 0
+    comment_count: int = 0
+    duration_seconds: int = 0
+
+
+class YouTubeDashboardAlert(BaseModel):
+    kind: str
+    title: str
+    detail: str
+
+
+class YouTubeMonetizationStatus(BaseModel):
+    subscriber_target_early: int
+    subscriber_target_full: int
+    watch_hours_target_early: int
+    watch_hours_target_full: int
+    shorts_views_target_early: int
+    shorts_views_target_full: int
+    uploads_target_early: int
+    recent_public_uploads_90d: int
+    shorts_views_90d_estimate: int
+    watch_hours_last_365d: float | None = None
+    subscriber_progress_full: float
+    watch_hours_progress_full: float
+    shorts_views_progress_full: float
+    eligible_early_estimate: bool
+    eligible_full_estimate: bool
+    near_monetization: bool
+
+
+class YouTubeLiveMetrics(BaseModel):
+    channel_id: str | None = None
+    channel_title: str | None = None
+    channel_thumbnail_url: str = ""
+    channel_custom_url: str | None = None
+    published_at: str | None = None
+    subscriber_count: int = 0
+    hidden_subscriber_count: bool = False
+    view_count: int = 0
+    video_count: int = 0
+    recent_videos: list[YouTubeVideoMetric]
+    top_video: YouTubeVideoMetric | None = None
+    alerts: list[YouTubeDashboardAlert]
+    monetization: YouTubeMonetizationStatus
+    analytics_available: bool = False
+    analytics_note: str | None = None
+    views_last_28d: int | None = None
+    views_last_90d: int | None = None
+    watch_hours_last_365d: float | None = None
+    refreshed_at: datetime

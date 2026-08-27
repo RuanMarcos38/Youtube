@@ -12,6 +12,7 @@ import type {
   TeamUser,
   TrendingVideo,
   UserProfile,
+  YouTubeLiveMetrics,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -146,3 +147,4 @@ export const uploadClip = (id: number, privacyStatus: string) =>
   api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
 export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");
+export const youtubeLiveMetrics = () => api<YouTubeLiveMetrics>("/api/youtube/live-metrics");

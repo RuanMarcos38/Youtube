@@ -134,6 +134,13 @@ def get_credentials(user_id: int) -> Credentials:
         db.close()
 
 
+def get_credentials_for_user(db: Session, user_id: int) -> Credentials:
+    connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()
+    if not connection:
+        raise RuntimeError("YouTube não está conectado para este perfil.")
+    return _credentials_from_connection(connection, db)
+
+
 def get_connection_status(db: Session, user_id: int) -> dict:
     configured = oauth_configured()
     connection = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user_id).first()

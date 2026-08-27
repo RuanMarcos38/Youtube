@@ -185,3 +185,62 @@ export type Job = {
   source_video: SourceVideo;
   clips: Clip[];
 };
+
+export type YouTubeVideoMetric = {
+  video_id: string;
+  title: string;
+  thumbnail_url: string;
+  url: string;
+  published_at?: string | null;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  duration_seconds: number;
+};
+
+export type YouTubeDashboardAlert = {
+  kind: "success" | "warning" | "info" | string;
+  title: string;
+  detail: string;
+};
+
+export type YouTubeMonetizationStatus = {
+  subscriber_target_early: number;
+  subscriber_target_full: number;
+  watch_hours_target_early: number;
+  watch_hours_target_full: number;
+  shorts_views_target_early: number;
+  shorts_views_target_full: number;
+  uploads_target_early: number;
+  recent_public_uploads_90d: number;
+  shorts_views_90d_estimate: number;
+  watch_hours_last_365d?: number | null;
+  subscriber_progress_full: number;
+  watch_hours_progress_full: number;
+  shorts_views_progress_full: number;
+  eligible_early_estimate: boolean;
+  eligible_full_estimate: boolean;
+  near_monetization: boolean;
+};
+
+export type YouTubeLiveMetrics = {
+  channel_id?: string | null;
+  channel_title?: string | null;
+  channel_thumbnail_url: string;
+  channel_custom_url?: string | null;
+  published_at?: string | null;
+  subscriber_count: number;
+  hidden_subscriber_count: boolean;
+  view_count: number;
+  video_count: number;
+  recent_videos: YouTubeVideoMetric[];
+  top_video?: YouTubeVideoMetric | null;
+  alerts: YouTubeDashboardAlert[];
+  monetization: YouTubeMonetizationStatus;
+  analytics_available: boolean;
+  analytics_note?: string | null;
+  views_last_28d?: number | null;
+  views_last_90d?: number | null;
+  watch_hours_last_365d?: number | null;
+  refreshed_at: string;
+};
