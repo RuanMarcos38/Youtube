@@ -382,7 +382,7 @@ function CaptionControls({
           Texto, posição e tamanho
         </span>
       </summary>
-      <div className="grid gap-3 border-t border-[#ededed] p-3.5 2xl:grid-cols-[170px_minmax(0,1fr)]">
+      <div className="grid max-h-[440px] gap-3 overflow-y-auto border-t border-[#ededed] p-3.5 2xl:max-h-none 2xl:grid-cols-[170px_minmax(0,1fr)] 2xl:overflow-visible">
         <CaptionLivePreview draft={draft} blocked={blocked} onChange={onChange} />
         <div className="min-w-0 space-y-3">
           <div>
