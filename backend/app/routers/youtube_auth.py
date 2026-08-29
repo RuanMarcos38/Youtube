@@ -9,7 +9,8 @@ from ..config import settings
 from ..database import get_db
 from ..models import User
 from ..errors import YouTubeAuthError, YouTubeQuotaError
-from ..schemas import OAuthStartResponse, OAuthStatusResponse, YouTubeLiveMetrics
+from ..schemas import OAuthStartResponse, OAuthStatusResponse, YouTubeLiveAudience, YouTubeLiveMetrics
+from ..services.youtube_live_audience import get_live_audience
 from ..services.youtube_metrics import get_live_channel_metrics
 from ..services.youtube_oauth import build_authorization_url, complete_oauth, disconnect, get_connection_status
 
@@ -25,6 +26,18 @@ def oauth_status(user: User = Depends(get_current_user), db: Session = Depends(g
 def live_metrics(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         return get_live_channel_metrics(db, user.id)
+    except YouTubeQuotaError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except YouTubeAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/live-audience", response_model=YouTubeLiveAudience)
+def live_audience(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return get_live_audience(db, user.id)
     except YouTubeQuotaError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except YouTubeAuthError as exc:

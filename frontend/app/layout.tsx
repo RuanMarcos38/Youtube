@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { LanguageRuntime } from "@/components/LanguageSelector";
+import LiveAudienceCard from "@/components/LiveAudienceCard";
 import PlatformNavigation from "@/components/PlatformNavigation";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <LanguageRuntime />
         {children}
+        <LiveAudienceCard />
         <PlatformNavigation />
         <YoutubeAccountSwitcher />
         <footer className="border-t border-[#e4e7ec] bg-white px-6 py-5 pb-24 text-center text-[11px] text-[#667085] xl:pb-5">

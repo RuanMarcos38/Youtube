@@ -186,6 +186,13 @@ class YouTubeMonetizationStatus(BaseModel):
     near_monetization: bool
 
 
+class YouTubeLiveAudience(BaseModel):
+    concurrent_viewers: int = 0
+    active_live_broadcasts: int = 0
+    available: bool = True
+    refreshed_at: datetime
+
+
 class YouTubeLiveMetrics(BaseModel):
     channel_id: str | None = None
     channel_title: str | None = None
