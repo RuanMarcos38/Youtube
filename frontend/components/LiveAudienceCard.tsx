@@ -26,10 +26,12 @@ async function loadLiveAudience(): Promise<LiveAudience> {
 function audienceDetail(audience: LiveAudience | null, failed: boolean) {
   if (failed) return "Não foi possível atualizar agora. Nova tentativa automática em instantes.";
   if (!audience) return "Atualizando a audiência ao vivo...";
-  if (!audience.available) return "Disponível quando o canal estiver habilitado para transmissões ao vivo.";
-  if (audience.active_live_broadcasts === 0) return "Nenhuma transmissão ao vivo no canal agora.";
+  if (!audience.available) return "Sem permissão para consultar a audiência das transmissões ao vivo deste canal.";
+  if (audience.active_live_broadcasts === 0) {
+    return "Nenhuma transmissão ao vivo agora. O YouTube não fornece audiência simultânea dos vídeos gravados.";
+  }
   const lives = audience.active_live_broadcasts === 1 ? "1 transmissão ao vivo" : `${audience.active_live_broadcasts} transmissões ao vivo`;
-  return `${lives} · atualização automática a cada 15s`;
+  return `${lives} · soma de espectadores simultâneos · atualização automática a cada 15s`;
 }
 
 export default function LiveAudienceCard() {
