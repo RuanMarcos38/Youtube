@@ -16,7 +16,13 @@ router = APIRouter(prefix="/clips", tags=["clips"])
 
 @router.get("", response_model=list[ClipOut])
 def list_clips(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    clips = db.query(Clip).filter(Clip.user_id == user.id).order_by(Clip.id.desc()).limit(100).all()
+    clips = (
+        db.query(Clip)
+        .filter(Clip.user_id == user.id, Clip.status != "uploaded")
+        .order_by(Clip.id.desc())
+        .limit(100)
+        .all()
+    )
     return [clip_to_dict(clip) for clip in clips]
 
 
