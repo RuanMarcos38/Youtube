@@ -11,8 +11,8 @@ type LiveAudience = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const ACTIVE_REFRESH_MS = 15_000;
-const IDLE_REFRESH_MS = 60_000;
+const ACTIVE_REFRESH_MS = 60_000;
+const IDLE_REFRESH_MS = 300_000;
 
 async function loadLiveAudience(): Promise<LiveAudience> {
   const response = await fetch(`${API_URL}/api/youtube/live-audience`, {
@@ -31,7 +31,7 @@ function audienceDetail(audience: LiveAudience | null, failed: boolean) {
     return "Nenhuma transmissão ao vivo agora.";
   }
   const lives = audience.active_live_broadcasts === 1 ? "1 transmissão ao vivo" : `${audience.active_live_broadcasts} transmissões ao vivo`;
-  return `${lives} · soma de espectadores simultâneos · atualização automática a cada 15s`;
+  return `${lives} · soma de espectadores simultâneos · atualização automática a cada 1 min`;
 }
 
 export default function LiveAudienceCard() {
