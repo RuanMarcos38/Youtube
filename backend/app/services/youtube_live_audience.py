@@ -12,8 +12,11 @@ from ..models import YouTubeConnection
 from .youtube_oauth import get_credentials_for_user
 
 
-LIVE_AUDIENCE_UNAVAILABLE_REASONS = {
+LIVE_AUDIENCE_ZERO_REASONS = {
     "liveStreamingNotEnabled",
+}
+
+LIVE_AUDIENCE_UNAVAILABLE_REASONS = {
     "insufficientLivePermissions",
 }
 
@@ -63,6 +66,11 @@ def get_live_audience(db: Session, user_id: int) -> dict:
         ).execute()
     except HttpError as exc:
         reason, _ = google_error_reason(exc)
+        if reason in LIVE_AUDIENCE_ZERO_REASONS:
+            # A channel without live-streaming enabled cannot have an active
+            # broadcast, so the truthful current live audience is zero rather
+            # than an unavailable/blank metric.
+            return _payload()
         if reason in LIVE_AUDIENCE_UNAVAILABLE_REASONS:
             return _payload(available=False)
         raise_for_youtube_error(exc)
