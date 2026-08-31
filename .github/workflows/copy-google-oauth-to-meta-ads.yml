@@ -28,24 +28,65 @@ jobs:
           test -n "${EASYPANEL_API_KEY:-}"
           echo "EasyPanel credential available. Secrets will not be printed."
 
-      - name: Inspect source and target without changing them
+      - name: Resolve EasyPanel API and inspect source safely
         shell: bash
         run: |
           set -euo pipefail
-          for service in "$SOURCE_SERVICE" "$TARGET_SERVICE"; do
-            status="$(curl -sS --max-time 30 -o "/tmp/${service}.json" -w '%{http_code}' --get \
+          found=""
+          for prefix in /api/v1 /api/v2 /api ''; do
+            body="/tmp/probe-body"
+            headers="/tmp/probe-headers"
+            status="$(curl -sS --max-time 30 -o "$body" -D "$headers" -w '%{http_code}' --get \
               -H "Authorization: Bearer $EASYPANEL_API_KEY" \
               -H "Accept: application/json" \
               --data-urlencode "projectName=$PROJECT_NAME" \
-              --data-urlencode "serviceName=$service" \
-              "$EASYPANEL_URL/inspectAppService")"
-            if [ "$status" != "200" ]; then
-              echo "Service $PROJECT_NAME/$service was not inspected (HTTP $status). No changes made."
-              exit 1
+              --data-urlencode "serviceName=$SOURCE_SERVICE" \
+              "$EASYPANEL_URL${prefix}/inspectAppService" || true)"
+            content_type="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="content-type" {print tolower($2)}' | tail -1)"
+            json_ok="no"
+            if [ -s "$body" ]; then
+              if python3 - "$body" <<'PY'
+          import json, pathlib, sys
+          try:
+              json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          except Exception:
+              raise SystemExit(1)
+          raise SystemExit(0)
+          PY
+              then json_ok="yes"; fi
             fi
-            test -s "/tmp/${service}.json"
-            echo "Service $PROJECT_NAME/$service located."
+            echo "EasyPanel probe prefix='${prefix:-root}' HTTP=$status JSON=$json_ok content-type=${content_type:-unknown}"
+            if [ "$status" = "200" ] && [ "$json_ok" = "yes" ]; then
+              found="$prefix"
+              cp "$body" "/tmp/${SOURCE_SERVICE}.json"
+              break
+            fi
           done
+          rm -f /tmp/probe-body /tmp/probe-headers
+          if [ -z "${found+x}" ]; then found=""; fi
+          if [ ! -s "/tmp/${SOURCE_SERVICE}.json" ]; then
+            echo "No authenticated JSON EasyPanel API endpoint was found. No changes made."
+            exit 1
+          fi
+          echo "EASYPANEL_API_PREFIX=$found" >> "$GITHUB_ENV"
+          echo "Authenticated EasyPanel JSON API resolved safely."
+
+      - name: Inspect target with resolved API
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --max-time 30 -o "/tmp/${TARGET_SERVICE}.json" -w '%{http_code}' --get \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            --data-urlencode "projectName=$PROJECT_NAME" \
+            --data-urlencode "serviceName=$TARGET_SERVICE" \
+            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/inspectAppService")"
+          test "$status" = "200"
+          python3 - "/tmp/${TARGET_SERVICE}.json" <<'PY'
+          import json, pathlib, sys
+          json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          print('Target service inspected as JSON; contents not printed.')
+          PY
 
       - name: Build target environment preserving all existing variables
         shell: bash
@@ -83,15 +124,15 @@ jobs:
           source_env = find_env(source)
           target_env = find_env(target)
           if source_env is None:
-              raise SystemExit('Source environment not found; no changes made.')
+              raise SystemExit('Source environment was not exposed by the authenticated inspect endpoint; no changes made.')
           if target_env is None:
-              raise SystemExit('Target environment not found; no changes made.')
+              raise SystemExit('Target environment was not exposed by the authenticated inspect endpoint; no changes made.')
 
           source_values = values(source_env)
           source_client = source_values.get('GOOGLE_OAUTH_CLIENT_ID', '').strip()
           source_secret = source_values.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
-          if not source_client or not source_secret:
-              raise SystemExit('Google OAuth credentials are not configured in shortsia; no changes made.')
+          if not source_client or not source_secret or source_secret in {'***','********','[REDACTED]'}:
+              raise SystemExit('Google OAuth secret is not available through this safe EasyPanel inspection; no changes made.')
 
           provided = os.environ.get('PROVIDED_CLIENT_ID', '').strip()
           print('Source Google OAuth client present: yes')
@@ -136,7 +177,7 @@ jobs:
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             --data-binary @/tmp/update-env.json \
-            "$EASYPANEL_URL/updateAppEnv")"
+            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/updateAppEnv")"
           if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
             echo "EasyPanel rejected environment update with HTTP $status. ShortsFlow was not changed."
             exit 1
@@ -153,7 +194,7 @@ jobs:
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
-            "$EASYPANEL_URL/deployAppService" \
+            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/deployAppService" \
             -d '{"projectName":"r2rmarketingdigital","serviceName":"gestao2r"}')"
           if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
             echo "EasyPanel rejected Gestao Ads deploy with HTTP $status."
@@ -201,5 +242,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f /tmp/shortsia.json /tmp/gestao2r.json /tmp/update-env.json /tmp/update-response.json /tmp/deploy-response.json /tmp/health.json /tmp/ga.json
+          rm -f /tmp/shortsia.json /tmp/gestao2r.json /tmp/update-env.json /tmp/update-response.json /tmp/deploy-response.json /tmp/health.json /tmp/ga.json /tmp/probe-body /tmp/probe-headers
           echo "Temporary environment files removed from the runner."
