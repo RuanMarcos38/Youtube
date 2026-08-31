@@ -1,4 +1,4 @@
-name: Discover Gestao Ads EasyPanel Target
+name: Copy Google OAuth to Gestao Ads
 
 on:
   push:
@@ -8,58 +8,175 @@ permissions:
   contents: read
 
 jobs:
-  discover:
+  copy-google-oauth:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       EASYPANEL_URL: https://ke4n49.easypanel.host
       EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+      PROJECT_NAME: r2rmarketingdigital
+      SOURCE_SERVICE: shortsia
+      TARGET_SERVICE: gestaor2r
+      ANALYTICS_REDIRECT_URI: https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback
+      PROVIDED_CLIENT_ID: 867831062581-olhhbjp9ot89tb0smtj88qsn0peap7c6.apps.googleusercontent.com
+
     steps:
-      - name: List project and service names only
+      - name: Validate protected EasyPanel access
         shell: bash
         run: |
           set -euo pipefail
           test -n "${EASYPANEL_API_KEY:-}"
-          status="$(curl -sS --max-time 30 -o /tmp/services.json -w '%{http_code}' \
+          echo "EasyPanel access available; secrets will not be printed."
+
+      - name: Inspect only source and target services
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in "$SOURCE_SERVICE" "$TARGET_SERVICE"; do
+            status="$(curl -sS --max-time 30 -o "/tmp/${service}.json" -w '%{http_code}' --get \
+              -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+              -H "Accept: application/json" \
+              --data-urlencode "projectName=$PROJECT_NAME" \
+              --data-urlencode "serviceName=$service" \
+              "$EASYPANEL_URL/api/inspectAppService")"
+            if [ "$status" != "200" ]; then
+              echo "Could not inspect $PROJECT_NAME/$service (HTTP $status). No changes made."
+              exit 1
+            fi
+            python3 - "/tmp/${service}.json" <<'PY'
+          import json, pathlib, sys
+          json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          PY
+            echo "Service $PROJECT_NAME/$service confirmed."
+          done
+
+      - name: Prepare safe environment copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+
+          def find_env(node):
+              if isinstance(node, dict):
+                  if isinstance(node.get('env'), str):
+                      return node['env']
+                  for v in node.values():
+                      found=find_env(v)
+                      if found is not None: return found
+              elif isinstance(node, list):
+                  for v in node:
+                      found=find_env(v)
+                      if found is not None: return found
+              return None
+
+          def parse_env(text):
+              values={}
+              for raw in (text or '').splitlines():
+                  if '=' not in raw or raw.lstrip().startswith('#'): continue
+                  k,v=raw.split('=',1)
+                  values[k.strip()]=v
+              return values
+
+          source=json.loads(pathlib.Path('/tmp/shortsia.json').read_text(encoding='utf-8'))
+          target=json.loads(pathlib.Path('/tmp/gestaor2r.json').read_text(encoding='utf-8'))
+          source_env=find_env(source)
+          target_env=find_env(target)
+          if source_env is None:
+              raise SystemExit('Source environment is not available through authenticated inspection; no changes made.')
+          if target_env is None:
+              raise SystemExit('Target environment is not available through authenticated inspection; no changes made.')
+
+          src=parse_env(source_env)
+          client=src.get('GOOGLE_OAUTH_CLIENT_ID','').strip()
+          secret=src.get('GOOGLE_OAUTH_CLIENT_SECRET','').strip()
+          if not client:
+              raise SystemExit('GOOGLE_OAUTH_CLIENT_ID is not configured in ShortsFlow; no changes made.')
+          if not secret or secret in {'***','********','[REDACTED]'}:
+              raise SystemExit('GOOGLE_OAUTH_CLIENT_SECRET is not readable through authenticated EasyPanel API; no changes made.')
+
+          provided=os.environ.get('PROVIDED_CLIENT_ID','').strip()
+          print('ShortsFlow Google OAuth client configured: yes')
+          print('Matches the client ID supplied by the user:', 'yes' if client == provided else 'no')
+          print('ShortsFlow Google OAuth secret configured: yes')
+
+          keys={'GOOGLE_ANALYTICS_CLIENT_ID','GOOGLE_ANALYTICS_CLIENT_SECRET','GOOGLE_ANALYTICS_REDIRECT_URI'}
+          preserved=[]
+          for raw in target_env.splitlines():
+              if '=' in raw and raw.split('=',1)[0].strip() in keys:
+                  continue
+              preserved.append(raw.rstrip('\r'))
+          preserved.extend([
+              f'GOOGLE_ANALYTICS_CLIENT_ID={client}',
+              f'GOOGLE_ANALYTICS_CLIENT_SECRET={secret}',
+              f"GOOGLE_ANALYTICS_REDIRECT_URI={os.environ['ANALYTICS_REDIRECT_URI']}",
+          ])
+          new_env='\n'.join(preserved).strip()+'\n'
+          payload={'projectName':os.environ['PROJECT_NAME'],'serviceName':os.environ['TARGET_SERVICE'],'env':new_env}
+          pathlib.Path('/tmp/update-env.json').write_text(json.dumps(payload),encoding='utf-8')
+          print('Gestao Ads environment prepared; every unrelated variable is preserved.')
+          PY
+
+      - name: Update only Gestao Ads Google Analytics variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --max-time 30 -o /tmp/update-result.json -w '%{http_code}' \
+            -X POST \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
-            "$EASYPANEL_URL/api/listProjectsAndServices")"
-          test "$status" = "200"
-          python3 - <<'PY'
-          import json, pathlib
-          data=json.loads(pathlib.Path('/tmp/services.json').read_text(encoding='utf-8'))
-          rows=[]
-          def walk(node, project=None):
-              if isinstance(node, dict):
-                  p=project
-                  for key in ('projectName','project','name'):
-                      v=node.get(key)
-                      if key in ('projectName','project') and isinstance(v,str): p=v
-                  service=None
-                  for key in ('serviceName','service'):
-                      v=node.get(key)
-                      if isinstance(v,str): service=v
-                  if service:
-                      rows.append((p or '?',service))
-                  for v in node.values(): walk(v,p)
-              elif isinstance(node,list):
-                  for v in node: walk(v,project)
-          walk(data)
-          seen=set()
-          for p,s in rows:
-              if (p,s) in seen: continue
-              seen.add((p,s))
-              print(f'PROJECT={p} SERVICE={s}')
-          if not seen:
-              # fallback sanitized traversal: print only scalar values under keys that look like names
-              def names(node,path=''):
-                  if isinstance(node,dict):
-                      for k,v in node.items():
-                          if isinstance(v,str) and k.lower() in {'name','projectname','servicename','project','service'}:
-                              print(f'{path}/{k}={v}')
-                          else: names(v,path+'/'+k)
-                  elif isinstance(node,list):
-                      for i,v in enumerate(node): names(v,path+f'[{i}]')
-              names(data)
-          PY
-          rm -f /tmp/services.json
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/update-env.json \
+            "$EASYPANEL_URL/api/updateAppEnv")"
+          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "EasyPanel rejected target environment update (HTTP $status). ShortsFlow was not changed."
+            exit 1
+          fi
+          rm -f /tmp/update-env.json /tmp/update-result.json
+          echo "Only gestaor2r environment was updated; shortsia remains untouched."
+
+      - name: Deploy only Gestao Ads service
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --max-time 600 -o /tmp/deploy-result.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "$EASYPANEL_URL/api/deployAppService" \
+            -d '{"projectName":"r2rmarketingdigital","serviceName":"gestaor2r"}')"
+          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "Gestao Ads deploy request failed (HTTP $status)."
+            exit 1
+          fi
+          rm -f /tmp/deploy-result.json
+          echo "Only gestaor2r deployment requested; shortsia was not deployed."
+
+      - name: Verify Gestao Ads backend and Analytics route
+        shell: bash
+        run: |
+          set -euo pipefail
+          healthy=false
+          for i in $(seq 1 60); do
+            body="$(curl -fsS --connect-timeout 10 --max-time 20 https://api-gestao.r2rmarketingdigital.com.br/health 2>/dev/null || true)"
+            if printf '%s' "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("success") is True and (d.get("data") or {}).get("status")=="ok" else 1)' 2>/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 10
+          done
+          test "$healthy" = "true"
+          code="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/ga-status -w '%{http_code}' https://api-gestao.r2rmarketingdigital.com.br/google-analytics/status || true)"
+          if [ "$code" != "401" ] && [ "$code" != "200" ]; then
+            echo "Analytics route is not ready (HTTP $code)."
+            exit 1
+          fi
+          echo "Gestao Ads backend healthy; Google Analytics route present."
+
+      - name: Security cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -f /tmp/shortsia.json /tmp/gestaor2r.json /tmp/update-env.json /tmp/update-result.json /tmp/deploy-result.json /tmp/ga-status
+          echo "Temporary files that could contain environment data were removed."
