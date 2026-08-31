@@ -1,4 +1,4 @@
-name: Copy Google OAuth to Gestao Ads
+name: Discover Gestao Ads EasyPanel Target
 
 on:
   push:
@@ -8,239 +8,58 @@ permissions:
   contents: read
 
 jobs:
-  copy-google-oauth:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     env:
       EASYPANEL_URL: https://ke4n49.easypanel.host
       EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
-      PROJECT_NAME: r2rmarketingdigital
-      SOURCE_SERVICE: shortsia
-      TARGET_SERVICE: gestao2r
-      ANALYTICS_REDIRECT_URI: https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback
-      PROVIDED_CLIENT_ID: 867831062581-olhhbjp9ot89tb0smtj88qsn0peap7c6.apps.googleusercontent.com
-
     steps:
-      - name: Validate EasyPanel access
+      - name: List project and service names only
         shell: bash
         run: |
           set -euo pipefail
           test -n "${EASYPANEL_API_KEY:-}"
-          echo "EasyPanel credential available. Secrets will not be printed."
-
-      - name: Resolve EasyPanel API and inspect source safely
-        shell: bash
-        run: |
-          set -euo pipefail
-          found=""
-          for prefix in /api/v1 /api/v2 /api ''; do
-            body="/tmp/probe-body"
-            headers="/tmp/probe-headers"
-            status="$(curl -sS --max-time 30 -o "$body" -D "$headers" -w '%{http_code}' --get \
-              -H "Authorization: Bearer $EASYPANEL_API_KEY" \
-              -H "Accept: application/json" \
-              --data-urlencode "projectName=$PROJECT_NAME" \
-              --data-urlencode "serviceName=$SOURCE_SERVICE" \
-              "$EASYPANEL_URL${prefix}/inspectAppService" || true)"
-            content_type="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="content-type" {print tolower($2)}' | tail -1)"
-            json_ok="no"
-            if [ -s "$body" ]; then
-              if python3 - "$body" <<'PY'
-          import json, pathlib, sys
-          try:
-              json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-          except Exception:
-              raise SystemExit(1)
-          raise SystemExit(0)
-          PY
-              then json_ok="yes"; fi
-            fi
-            echo "EasyPanel probe prefix='${prefix:-root}' HTTP=$status JSON=$json_ok content-type=${content_type:-unknown}"
-            if [ "$status" = "200" ] && [ "$json_ok" = "yes" ]; then
-              found="$prefix"
-              cp "$body" "/tmp/${SOURCE_SERVICE}.json"
-              break
-            fi
-          done
-          rm -f /tmp/probe-body /tmp/probe-headers
-          if [ -z "${found+x}" ]; then found=""; fi
-          if [ ! -s "/tmp/${SOURCE_SERVICE}.json" ]; then
-            echo "No authenticated JSON EasyPanel API endpoint was found. No changes made."
-            exit 1
-          fi
-          echo "EASYPANEL_API_PREFIX=$found" >> "$GITHUB_ENV"
-          echo "Authenticated EasyPanel JSON API resolved safely."
-
-      - name: Inspect target with resolved API
-        shell: bash
-        run: |
-          set -euo pipefail
-          status="$(curl -sS --max-time 30 -o "/tmp/${TARGET_SERVICE}.json" -w '%{http_code}' --get \
+          status="$(curl -sS --max-time 30 -o /tmp/services.json -w '%{http_code}' \
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
-            --data-urlencode "projectName=$PROJECT_NAME" \
-            --data-urlencode "serviceName=$TARGET_SERVICE" \
-            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/inspectAppService")"
+            "$EASYPANEL_URL/api/listProjectsAndServices")"
           test "$status" = "200"
-          python3 - "/tmp/${TARGET_SERVICE}.json" <<'PY'
-          import json, pathlib, sys
-          json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-          print('Target service inspected as JSON; contents not printed.')
-          PY
-
-      - name: Build target environment preserving all existing variables
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
-          import json, os, pathlib
-
-          def find_env(node):
+          import json, pathlib
+          data=json.loads(pathlib.Path('/tmp/services.json').read_text(encoding='utf-8'))
+          rows=[]
+          def walk(node, project=None):
               if isinstance(node, dict):
-                  if isinstance(node.get('env'), str):
-                      return node['env']
-                  for value in node.values():
-                      found = find_env(value)
-                      if found is not None:
-                          return found
-              elif isinstance(node, list):
-                  for value in node:
-                      found = find_env(value)
-                      if found is not None:
-                          return found
-              return None
-
-          def values(text):
-              out = {}
-              for raw in (text or '').splitlines():
-                  if '=' not in raw or raw.lstrip().startswith('#'):
-                      continue
-                  key, value = raw.split('=', 1)
-                  out[key.strip()] = value
-              return out
-
-          source = json.loads(pathlib.Path('/tmp/shortsia.json').read_text())
-          target = json.loads(pathlib.Path('/tmp/gestao2r.json').read_text())
-          source_env = find_env(source)
-          target_env = find_env(target)
-          if source_env is None:
-              raise SystemExit('Source environment was not exposed by the authenticated inspect endpoint; no changes made.')
-          if target_env is None:
-              raise SystemExit('Target environment was not exposed by the authenticated inspect endpoint; no changes made.')
-
-          source_values = values(source_env)
-          source_client = source_values.get('GOOGLE_OAUTH_CLIENT_ID', '').strip()
-          source_secret = source_values.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
-          if not source_client or not source_secret or source_secret in {'***','********','[REDACTED]'}:
-              raise SystemExit('Google OAuth secret is not available through this safe EasyPanel inspection; no changes made.')
-
-          provided = os.environ.get('PROVIDED_CLIENT_ID', '').strip()
-          print('Source Google OAuth client present: yes')
-          print('Source client matches the client ID informed in chat:', 'yes' if source_client == provided else 'no')
-
-          replacement_keys = {
-              'GOOGLE_ANALYTICS_CLIENT_ID',
-              'GOOGLE_ANALYTICS_CLIENT_SECRET',
-              'GOOGLE_ANALYTICS_REDIRECT_URI',
-          }
-          preserved = []
-          for raw in target_env.splitlines():
-              if '=' in raw:
-                  key = raw.split('=', 1)[0].strip()
-                  if key in replacement_keys:
-                      continue
-              preserved.append(raw.rstrip('\r'))
-
-          preserved.extend([
-              f'GOOGLE_ANALYTICS_CLIENT_ID={source_client}',
-              f'GOOGLE_ANALYTICS_CLIENT_SECRET={source_secret}',
-              f"GOOGLE_ANALYTICS_REDIRECT_URI={os.environ['ANALYTICS_REDIRECT_URI']}",
-          ])
-          new_env = '\n'.join(preserved).strip() + '\n'
-
-          payload = {
-              'projectName': os.environ['PROJECT_NAME'],
-              'serviceName': os.environ['TARGET_SERVICE'],
-              'env': new_env,
-          }
-          pathlib.Path('/tmp/update-env.json').write_text(json.dumps(payload), encoding='utf-8')
-          print('Target environment prepared with existing variables preserved.')
+                  p=project
+                  for key in ('projectName','project','name'):
+                      v=node.get(key)
+                      if key in ('projectName','project') and isinstance(v,str): p=v
+                  service=None
+                  for key in ('serviceName','service'):
+                      v=node.get(key)
+                      if isinstance(v,str): service=v
+                  if service:
+                      rows.append((p or '?',service))
+                  for v in node.values(): walk(v,p)
+              elif isinstance(node,list):
+                  for v in node: walk(v,project)
+          walk(data)
+          seen=set()
+          for p,s in rows:
+              if (p,s) in seen: continue
+              seen.add((p,s))
+              print(f'PROJECT={p} SERVICE={s}')
+          if not seen:
+              # fallback sanitized traversal: print only scalar values under keys that look like names
+              def names(node,path=''):
+                  if isinstance(node,dict):
+                      for k,v in node.items():
+                          if isinstance(v,str) and k.lower() in {'name','projectname','servicename','project','service'}:
+                              print(f'{path}/{k}={v}')
+                          else: names(v,path+'/'+k)
+                  elif isinstance(node,list):
+                      for i,v in enumerate(node): names(v,path+f'[{i}]')
+              names(data)
           PY
-
-      - name: Update only Gestao Ads environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          status="$(curl -sS --max-time 30 -o /tmp/update-response.json -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/update-env.json \
-            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/updateAppEnv")"
-          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "EasyPanel rejected environment update with HTTP $status. ShortsFlow was not changed."
-            exit 1
-          fi
-          rm -f /tmp/update-env.json /tmp/update-response.json
-          echo "Gestao Ads environment updated. ShortsFlow environment remained unchanged."
-
-      - name: Deploy only Gestao Ads
-        shell: bash
-        run: |
-          set -euo pipefail
-          status="$(curl -sS --max-time 600 -o /tmp/deploy-response.json -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: Bearer $EASYPANEL_API_KEY" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            "$EASYPANEL_URL${EASYPANEL_API_PREFIX}/deployAppService" \
-            -d '{"projectName":"r2rmarketingdigital","serviceName":"gestao2r"}')"
-          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "EasyPanel rejected Gestao Ads deploy with HTTP $status."
-            exit 1
-          fi
-          rm -f /tmp/deploy-response.json
-          echo "Gestao Ads deployment requested. ShortsFlow was not redeployed."
-
-      - name: Verify Gestao Ads backend health
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 60); do
-            if curl -fsS --connect-timeout 10 --max-time 20 \
-              https://api-gestao.r2rmarketingdigital.com.br/health > /tmp/health.json 2>/dev/null; then
-              if python3 - <<'PY'
-          import json
-          data=json.load(open('/tmp/health.json'))
-          ok=(data.get('success') is True and (data.get('data') or {}).get('status')=='ok')
-          raise SystemExit(0 if ok else 1)
-          PY
-              then
-                echo "Gestao Ads backend healthy after environment update."
-                exit 0
-              fi
-            fi
-            sleep 10
-          done
-          echo "Gestao Ads did not become healthy in time."
-          exit 1
-
-      - name: Verify Google Analytics route exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          code="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/ga.json -w '%{http_code}' \
-            https://api-gestao.r2rmarketingdigital.com.br/google-analytics/status || true)"
-          if [ "$code" != "401" ] && [ "$code" != "200" ]; then
-            echo "Google Analytics route returned HTTP $code instead of 401/200."
-            exit 1
-          fi
-          echo "Google Analytics route is present in the deployed backend."
-
-      - name: Security cleanup
-        if: always()
-        shell: bash
-        run: |
-          rm -f /tmp/shortsia.json /tmp/gestao2r.json /tmp/update-env.json /tmp/update-response.json /tmp/deploy-response.json /tmp/health.json /tmp/ga.json /tmp/probe-body /tmp/probe-headers
-          echo "Temporary environment files removed from the runner."
+          rm -f /tmp/services.json
