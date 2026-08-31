@@ -33,22 +33,26 @@ jobs:
         run: |
           set -euo pipefail
           for service in "$SOURCE_SERVICE" "$TARGET_SERVICE"; do
-            curl -fsS --max-time 30 --get \
+            status="$(curl -sS --max-time 30 -o "/tmp/${service}.json" -w '%{http_code}' --get \
               -H "Authorization: Bearer $EASYPANEL_API_KEY" \
               -H "Accept: application/json" \
               --data-urlencode "projectName=$PROJECT_NAME" \
               --data-urlencode "serviceName=$service" \
-              "$EASYPANEL_URL/api/inspectAppService" > "/tmp/${service}.json"
+              "$EASYPANEL_URL/inspectAppService")"
+            if [ "$status" != "200" ]; then
+              echo "Service $PROJECT_NAME/$service was not inspected (HTTP $status). No changes made."
+              exit 1
+            fi
             test -s "/tmp/${service}.json"
+            echo "Service $PROJECT_NAME/$service located."
           done
-          echo "Source and target services located."
 
       - name: Build target environment preserving all existing variables
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, pathlib, sys
+          import json, os, pathlib
 
           def find_env(node):
               if isinstance(node, dict):
@@ -65,19 +69,14 @@ jobs:
                           return found
               return None
 
-          def parse_env(text):
-              result = []
-              values = {}
+          def values(text):
+              out = {}
               for raw in (text or '').splitlines():
-                  line = raw.rstrip('\r')
-                  if not line.strip() or line.lstrip().startswith('#') or '=' not in line:
-                      result.append(line)
+                  if '=' not in raw or raw.lstrip().startswith('#'):
                       continue
-                  key, value = line.split('=', 1)
-                  key = key.strip()
-                  values[key] = value
-                  result.append(line)
-              return result, values
+                  key, value = raw.split('=', 1)
+                  out[key.strip()] = value
+              return out
 
           source = json.loads(pathlib.Path('/tmp/shortsia.json').read_text())
           target = json.loads(pathlib.Path('/tmp/gestao2r.json').read_text())
@@ -88,7 +87,7 @@ jobs:
           if target_env is None:
               raise SystemExit('Target environment not found; no changes made.')
 
-          _, source_values = parse_env(source_env)
+          source_values = values(source_env)
           source_client = source_values.get('GOOGLE_OAUTH_CLIENT_ID', '').strip()
           source_secret = source_values.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
           if not source_client or not source_secret:
@@ -124,7 +123,7 @@ jobs:
               'env': new_env,
           }
           pathlib.Path('/tmp/update-env.json').write_text(json.dumps(payload), encoding='utf-8')
-          print('Target environment prepared with all existing variables preserved.')
+          print('Target environment prepared with existing variables preserved.')
           PY
 
       - name: Update only Gestao Ads environment
@@ -137,9 +136,9 @@ jobs:
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             --data-binary @/tmp/update-env.json \
-            "$EASYPANEL_URL/api/updateAppEnv")"
+            "$EASYPANEL_URL/updateAppEnv")"
           if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "EasyPanel rejected environment update with HTTP $status. No source service was changed."
+            echo "EasyPanel rejected environment update with HTTP $status. ShortsFlow was not changed."
             exit 1
           fi
           rm -f /tmp/update-env.json /tmp/update-response.json
@@ -154,8 +153,8 @@ jobs:
             -H "Authorization: Bearer $EASYPANEL_API_KEY" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
-            "$EASYPANEL_URL/api/deployAppService" \
-            -d '{"projectName":"r2rmarketingdigital","serviceName":"gestao2r","forceRebuild":true}')"
+            "$EASYPANEL_URL/deployAppService" \
+            -d '{"projectName":"r2rmarketingdigital","serviceName":"gestao2r"}')"
           if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
             echo "EasyPanel rejected Gestao Ads deploy with HTTP $status."
             exit 1
@@ -202,5 +201,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f /tmp/shortsia.json /tmp/gestao2r.json /tmp/update-env.json /tmp/health.json /tmp/ga.json
-          echo "Temporary files containing environment data removed from the runner."
+          rm -f /tmp/shortsia.json /tmp/gestao2r.json /tmp/update-env.json /tmp/update-response.json /tmp/deploy-response.json /tmp/health.json /tmp/ga.json
+          echo "Temporary environment files removed from the runner."
