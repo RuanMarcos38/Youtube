@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { LanguageRuntime } from "@/components/LanguageSelector";
 import LiveAudienceCard from "@/components/LiveAudienceCard";
 import PlatformNavigation from "@/components/PlatformNavigation";
+import PublishingEnhancements from "@/components/PublishingEnhancements";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
 import "./publication-policy.css";
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <LanguageRuntime />
         {children}
+        <PublishingEnhancements />
         <LiveAudienceCard />
         <PlatformNavigation />
         <YoutubeAccountSwitcher />

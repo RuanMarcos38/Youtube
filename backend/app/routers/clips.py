@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Clip, SystemSetting, User
-from ..schemas import ClipCaptionUpdateRequest, ClipOut, UploadRequest
+from ..schemas import BatchUploadRequest, BatchUploadResponse, ClipCaptionUpdateRequest, ClipOut, UploadRequest
 from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
 from ..services.ffmpeg_service import FFmpegError, ensure_ffmpeg, render_vertical_clip
 from ..services.serializers import clip_to_dict
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/clips", tags=["clips"])
 
 HIDDEN_PUBLICATION_STATUSES = ("upload_queued", "uploading", "uploaded", "archived")
 PUBLIC_UPLOAD_PRIVACY = "public"
+BATCH_UPLOADABLE_STATUSES = {"ready", "approved", "upload_failed"}
 
 
 def _utc_datetime(value: datetime) -> datetime:
@@ -160,6 +161,37 @@ def update_clip_captions(
     db.commit()
     db.refresh(clip)
     return clip_to_dict(clip)
+
+
+@router.post("/upload-batch", response_model=BatchUploadResponse, status_code=status.HTTP_202_ACCEPTED)
+def upload_clips_batch(
+    payload: BatchUploadRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not get_connection_status(db, user.id)["connected"]:
+        raise HTTPException(status_code=409, detail="Conecte o YouTube deste perfil antes de publicar.")
+
+    unique_ids = list(dict.fromkeys(payload.clip_ids))
+    clips = db.query(Clip).filter(Clip.user_id == user.id, Clip.id.in_(unique_ids)).all()
+    by_id = {clip.id: clip for clip in clips}
+    queued_ids: list[int] = []
+
+    for clip_id in unique_ids:
+        clip = by_id.get(clip_id)
+        if not clip or clip.status not in BATCH_UPLOADABLE_STATUSES:
+            continue
+        clip.status = "upload_queued"
+        clip.upload_privacy = PUBLIC_UPLOAD_PRIVACY
+        clip.upload_error = None
+        queued_ids.append(clip.id)
+
+    db.commit()
+    return {
+        "queued": len(queued_ids),
+        "skipped": len(unique_ids) - len(queued_ids),
+        "clip_ids": queued_ids,
+    }
 
 
 @router.post("/{clip_id}/upload", response_model=ClipOut, status_code=status.HTTP_202_ACCEPTED)

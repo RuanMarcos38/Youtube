@@ -36,6 +36,9 @@ class User(Base):
     youtube_connection: Mapped["YouTubeConnection | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    tiktok_connection: Mapped["TikTokConnection | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class UserSession(Base):
@@ -63,6 +66,20 @@ class YouTubeConnection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="youtube_connection")
+
+
+class TikTokConnection(Base):
+    __tablename__ = "saas_tiktok_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("saas_users.id"), unique=True, index=True)
+    token_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oauth_state: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    open_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="tiktok_connection")
 
 
 class SourceVideo(Base):
@@ -124,11 +141,30 @@ class Clip(Base):
     status: Mapped[str] = mapped_column(String(40), default="ready", index=True)
     youtube_video_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     upload_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    upload_privacy: Mapped[str] = mapped_column(String(20), default="private")
+    upload_privacy: Mapped[str] = mapped_column(String(20), default="public")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="clips")
+
+
+class TikTokPost(Base):
+    __tablename__ = "saas_tiktok_posts"
+    __table_args__ = (UniqueConstraint("user_id", "clip_id", name="uq_saas_tiktok_user_clip"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("saas_users.id"), index=True)
+    clip_id: Mapped[int] = mapped_column(ForeignKey("saas_clips.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    privacy_level: Mapped[str] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(Text, default="")
+    disable_comment: Mapped[bool] = mapped_column(Boolean, default=True)
+    disable_duet: Mapped[bool] = mapped_column(Boolean, default=True)
+    disable_stitch: Mapped[bool] = mapped_column(Boolean, default=True)
+    publish_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class TenantPlan(Base):

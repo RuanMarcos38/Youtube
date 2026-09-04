@@ -1,24 +1,11 @@
-/* Publications policy: YouTube uploads are public-only.
-   Keep the existing layout and replace the legacy privacy dropdown visually
-   with a single fixed value, without changing the Dashboard structure. */
-#cortes label:has(> select) {
-  align-items: center;
-}
-
-#cortes label:has(> select) > select {
+/* YouTube uploads are public-only in ShortsFlow.
+   Hide the legacy selector from the existing Dashboard without changing its
+   card/layout structure. The new batch panel displays the enforced policy. */
+#cortes > .sf-card > div:first-child > label {
   display: none !important;
 }
 
-#cortes label:has(> select)::after {
-  content: "Público";
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #e8e8e8;
-  border-radius: 0.5rem;
-  background: #fff;
-  padding: 0.5rem 0.75rem;
-  font-weight: 600;
-  color: #222;
+/* Defensive fallback for older Dashboard markup. */
+#cortes label:has(> select) > select {
+  display: none !important;
 }
