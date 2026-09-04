@@ -145,14 +145,11 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
     if not original.source_video:
         raise HTTPException(status_code=409, detail="O vídeo de origem deste processamento não foi encontrado.")
 
-    duration_seconds = original.source_video.duration_seconds
-    if duration_seconds <= 0:
-        try:
-            duration_seconds = get_video_duration_seconds(original.source_video.youtube_id)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail="Não foi possível validar a duração do vídeo para reenviar o processamento.") from exc
-        original.source_video.duration_seconds = duration_seconds
-        db.commit()
+    # Jobs criados antes do controle por minutos não possuem duração persistida.
+    # Preserve o comportamento de reenvio existente sem criar uma dependência
+    # nova da API do YouTube. Eles continuam sujeitos ao limite de Shorts, mas
+    # não são cobrados retroativamente em minutos.
+    duration_seconds = max(0, int(original.source_video.duration_seconds or 0))
     _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips)
     return _create_queued_job(db, user, original.source_video, original.requested_clips)
 
