@@ -1,7 +1,10 @@
 from collections.abc import Callable
 from pathlib import Path
+from threading import Lock
 
+from faster_whisper import WhisperModel
 from openai import OpenAI
+
 from ..config import settings
 
 
@@ -11,27 +14,127 @@ class TranscriptionError(RuntimeError):
 
 ProgressHook = Callable[[int, int, Path], None]
 
+_MODEL: WhisperModel | None = None
+_MODEL_KEY: tuple[str, str, str] | None = None
+_MODEL_INIT_LOCK = Lock()
+_TRANSCRIBE_LOCK = Lock()
 
-def transcribe_chunks(
+
+def _get_local_model() -> WhisperModel:
+    global _MODEL, _MODEL_KEY
+
+    model_name = (settings.local_whisper_model or "small").strip()
+    device = (settings.local_whisper_device or "cpu").strip()
+    compute_type = (settings.local_whisper_compute_type or "int8").strip()
+    key = (model_name, device, compute_type)
+
+    with _MODEL_INIT_LOCK:
+        if _MODEL is not None and _MODEL_KEY == key:
+            return _MODEL
+
+        download_root = settings.data_path / "models" / "faster-whisper"
+        download_root.mkdir(parents=True, exist_ok=True)
+        try:
+            _MODEL = WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(download_root),
+            )
+            _MODEL_KEY = key
+            return _MODEL
+        except Exception as exc:
+            raise TranscriptionError(
+                f"Local Faster-Whisper model could not be loaded ({model_name}/{device}/{compute_type}): {exc}"
+            ) from exc
+
+
+def _transcribe_local(
     audio_files: list[Path],
-    segment_seconds: int = 600,
-    progress_hook: ProgressHook | None = None,
+    segment_seconds: int,
+    progress_hook: ProgressHook | None,
+) -> tuple[str, list[dict]]:
+    model = _get_local_model()
+    all_segments: list[dict] = []
+    text_parts: list[str] = []
+    total = len(audio_files)
+    language = (settings.local_whisper_language or "").strip() or None
+
+    for index, audio_path in enumerate(audio_files):
+        offset = index * segment_seconds
+        if progress_hook:
+            progress_hook(index, total, audio_path)
+
+        try:
+            # Faster-Whisper performs most work while the segment generator is
+            # consumed. Serialize inference so two worker threads do not make a
+            # small CPU-only VPS run out of memory.
+            with _TRANSCRIBE_LOCK:
+                chunk_segments, _info = model.transcribe(
+                    str(audio_path),
+                    language=language,
+                    beam_size=max(1, int(settings.local_whisper_beam_size)),
+                    vad_filter=True,
+                    condition_on_previous_text=False,
+                )
+                chunk_segments = list(chunk_segments)
+        except Exception as exc:
+            raise TranscriptionError(
+                f"Local Faster-Whisper transcription failed for {audio_path.name}: {exc}"
+            ) from exc
+
+        chunk_text: list[str] = []
+        for segment in chunk_segments:
+            text = str(getattr(segment, "text", "") or "").strip()
+            if text:
+                chunk_text.append(text)
+            all_segments.append(
+                {
+                    "start": float(getattr(segment, "start", 0.0)) + offset,
+                    "end": float(getattr(segment, "end", 0.0)) + offset,
+                    "text": text,
+                }
+            )
+        text_parts.append(" ".join(chunk_text).strip())
+
+        if progress_hook:
+            progress_hook(index + 1, total, audio_path)
+
+    if not all_segments and any(text_parts):
+        raise TranscriptionError("Local transcription returned text but no timestamps")
+    return "\n".join(part for part in text_parts if part).strip(), all_segments
+
+
+def _transcribe_openai(
+    audio_files: list[Path],
+    segment_seconds: int,
+    progress_hook: ProgressHook | None,
 ) -> tuple[str, list[dict]]:
     if not settings.openai_api_key:
         raise TranscriptionError("OPENAI_API_KEY is not configured")
+
     client = OpenAI(api_key=settings.openai_api_key)
     all_segments: list[dict] = []
     text_parts: list[str] = []
     total = len(audio_files)
+
     for index, audio_path in enumerate(audio_files):
         offset = index * segment_seconds
         if progress_hook:
             progress_hook(index, total, audio_path)
         try:
             with audio_path.open("rb") as audio_file:
-                transcript = client.audio.transcriptions.create(model=settings.openai_transcription_model,file=audio_file,response_format="verbose_json",timestamp_granularities=["segment"])
+                transcript = client.audio.transcriptions.create(
+                    model=settings.openai_transcription_model,
+                    file=audio_file,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"],
+                )
         except Exception as exc:
-            raise TranscriptionError(f"OpenAI transcription failed for {audio_path.name}: {exc}") from exc
+            raise TranscriptionError(
+                f"OpenAI transcription failed for {audio_path.name}: {exc}"
+            ) from exc
+
         text = getattr(transcript, "text", "") or ""
         text_parts.append(text)
         segments = getattr(transcript, "segments", None) or []
@@ -41,10 +144,58 @@ def transcribe_chunks(
             elif isinstance(segment, dict):
                 item = segment
             else:
-                item = {"start": getattr(segment, "start", 0.0),"end": getattr(segment, "end", 0.0),"text": getattr(segment, "text", "")}
-            all_segments.append({"start": float(item.get("start", 0.0)) + offset,"end": float(item.get("end", 0.0)) + offset,"text": str(item.get("text", "")).strip()})
+                item = {
+                    "start": getattr(segment, "start", 0.0),
+                    "end": getattr(segment, "end", 0.0),
+                    "text": getattr(segment, "text", ""),
+                }
+            all_segments.append(
+                {
+                    "start": float(item.get("start", 0.0)) + offset,
+                    "end": float(item.get("end", 0.0)) + offset,
+                    "text": str(item.get("text", "")).strip(),
+                }
+            )
         if progress_hook:
             progress_hook(index + 1, total, audio_path)
+
     if not all_segments and text_parts:
-        raise TranscriptionError("Transcription returned text but no timestamps. Keep OPENAI_TRANSCRIPTION_MODEL=whisper-1 for timestamped editing.")
+        raise TranscriptionError(
+            "Transcription returned text but no timestamps. Keep "
+            "OPENAI_TRANSCRIPTION_MODEL=whisper-1 for timestamped editing."
+        )
     return "\n".join(text_parts).strip(), all_segments
+
+
+def transcribe_chunks(
+    audio_files: list[Path],
+    segment_seconds: int = 600,
+    progress_hook: ProgressHook | None = None,
+) -> tuple[str, list[dict]]:
+    provider = (settings.transcription_provider or "local").strip().lower()
+    if provider not in {"local", "openai", "auto"}:
+        raise TranscriptionError(
+            "TRANSCRIPTION_PROVIDER must be one of: local, openai, auto"
+        )
+
+    if provider == "openai":
+        return _transcribe_openai(audio_files, segment_seconds, progress_hook)
+
+    try:
+        return _transcribe_local(audio_files, segment_seconds, progress_hook)
+    except TranscriptionError as local_error:
+        # No paid API call is made unless this is explicitly enabled. The
+        # production default remains local-only to guarantee zero API cost.
+        should_fallback = (
+            provider == "auto" or settings.allow_openai_transcription_fallback
+        )
+        if should_fallback and settings.openai_api_key:
+            try:
+                return _transcribe_openai(
+                    audio_files, segment_seconds, progress_hook
+                )
+            except TranscriptionError as openai_error:
+                raise TranscriptionError(
+                    f"{local_error}; OpenAI fallback also failed: {openai_error}"
+                ) from openai_error
+        raise
