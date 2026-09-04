@@ -5,6 +5,7 @@ import LiveAudienceCard from "@/components/LiveAudienceCard";
 import PlatformNavigation from "@/components/PlatformNavigation";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
+import "./publication-policy.css";
 
 const inter = Inter({
   subsets: ["latin"],
