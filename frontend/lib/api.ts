@@ -120,7 +120,7 @@ export const adminUpdateDownloadAuth = (payload: {
 }) => api<DownloadAuthStatus>("/api/admin/download-auth", { method: "PUT", body: JSON.stringify(payload) });
 
 export async function getTrending(keyword: string, region = "BR", days = 14): Promise<TrendingVideo[]> {
-  const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "12" });
+  const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "25" });
   return api(`/api/videos/trending?${params}`);
 }
 
@@ -148,10 +148,49 @@ export const updateClipCaptions = (
   id: number,
   payload: { caption_position: string; caption_margin_v: number; caption_font_size: number; subtitle_srt?: string },
 ) => api<Clip>(`/api/clips/${id}/captions`, { method: "PATCH", body: JSON.stringify(payload) });
-export const uploadClip = (id: number, privacyStatus: string) =>
-  api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
+export const uploadClip = (id: number, _privacyStatus = "public") =>
+  api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: "public" }) });
+export const uploadClipsBatch = (clipIds: number[]) =>
+  api<{ queued: number; skipped: number; clip_ids: number[] }>("/api/clips/upload-batch", {
+    method: "POST",
+    body: JSON.stringify({ clip_ids: clipIds }),
+  });
 export const createEditorProjectFromClip = (id: number) =>
   api<{ id: string; status: string }>(`/api/editor-ai/clips/${id}/project`, { method: "POST" });
 export const youtubeStatus = () => api<{ configured: boolean; connected: boolean; channel_title?: string | null }>("/api/youtube/oauth/status");
 export const youtubeStart = () => api<{ authorization_url: string }>("/api/youtube/oauth/start");
 export const youtubeLiveMetrics = () => api<YouTubeLiveMetrics>("/api/youtube/live-metrics");
+
+export type TikTokStatus = {
+  configured: boolean;
+  connected: boolean;
+  display_name?: string | null;
+  redirect_uri: string;
+};
+
+export type TikTokCreatorInfo = {
+  creator_username: string;
+  creator_nickname: string;
+  privacy_level_options: string[];
+  comment_disabled: boolean;
+  duet_disabled: boolean;
+  stitch_disabled: boolean;
+  max_video_post_duration_sec: number;
+};
+
+export const tiktokStatus = () => api<TikTokStatus>("/api/tiktok/oauth/status");
+export const tiktokStart = () => api<{ authorization_url: string }>("/api/tiktok/oauth/start");
+export const tiktokCreatorInfo = () => api<TikTokCreatorInfo>("/api/tiktok/creator-info", { method: "POST" });
+export const tiktokUploadBatch = (
+  clipIds: number[],
+  payload: {
+    privacy_level: string;
+    allow_comment: boolean;
+    allow_duet: boolean;
+    allow_stitch: boolean;
+    music_usage_confirmed: boolean;
+  },
+) => api<{ queued: number; skipped: number; clip_ids: number[] }>("/api/tiktok/upload-batch", {
+  method: "POST",
+  body: JSON.stringify({ clip_ids: clipIds, ...payload }),
+});
