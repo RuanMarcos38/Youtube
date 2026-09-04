@@ -53,10 +53,25 @@ class UserOut(BaseModel):
     checkout_url: str
     upgrade_url: str
     plan_code: str
+    plan_name: str = ""
+    billing_provider: str = "legacy"
+    billing_cycle: str = "monthly"
     monthly_job_limit: int
     unlimited: bool
     jobs_used: int
     jobs_remaining: int | None = None
+    processing_minutes_limit: int | None = None
+    processing_minutes_used: int = 0
+    processing_minutes_remaining: int | None = None
+    shorts_limit: int | None = None
+    shorts_used: int = 0
+    shorts_remaining: int | None = None
+    channel_limit: int | None = None
+    channels_used: int = 0
+    channels_remaining: int | None = None
+    user_limit: int | None = None
+    users_used: int = 0
+    users_remaining: int | None = None
 
 
 class TeamUserOut(BaseModel):
@@ -75,6 +90,7 @@ class JobCreate(BaseModel):
     channel_title: str = ""
     thumbnail_url: str = ""
     url: HttpUrl | None = None
+    duration_seconds: int = Field(default=0, ge=0, le=86400)
     requested_clips: int = Field(default=3, ge=1, le=10)
     rights_confirmed: bool
 
@@ -86,6 +102,7 @@ class SourceVideoOut(BaseModel):
     channel_title: str
     original_url: str
     thumbnail_url: str
+    duration_seconds: int = 0
     rights_confirmed: bool
 
     model_config = {"from_attributes": True}
