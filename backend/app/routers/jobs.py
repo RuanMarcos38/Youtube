@@ -14,6 +14,8 @@ from ..services.serializers import job_to_dict
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+HIDDEN_PROCESSING_STATUSES = ("ready_for_review",)
+
 
 def _ensure_job_can_be_queued(user: User, db: Session) -> None:
     allowed, reason = can_use_tool(db, user)
@@ -89,10 +91,12 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
 
 @router.get("", response_model=list[JobOut])
 def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Completed jobs are intentionally hidden from the operational queue. Their
+    # clips/history remain stored; failed and active jobs stay visible for action.
     jobs = (
         db.query(Job)
         .options(joinedload(Job.source_video), joinedload(Job.clips))
-        .filter(Job.user_id == user.id)
+        .filter(Job.user_id == user.id, Job.status.notin_(HIDDEN_PROCESSING_STATUSES))
         .order_by(Job.id.desc())
         .limit(50)
         .all()
