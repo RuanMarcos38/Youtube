@@ -1,5 +1,8 @@
+import re
+
 from openai import OpenAI
 from pydantic import BaseModel, Field
+
 from ..config import settings
 from .seo_service import normalize_clip_metadata
 
@@ -28,6 +31,43 @@ CLIP_SELECTION_FALLBACK_LIMITS = (35000, 18000)
 CLIP_SELECTION_TIME_BUCKETS = 12
 SEGMENT_TEXT_LIMIT = 260
 
+_LOCAL_HOOK_TERMS = {
+    "como",
+    "porque",
+    "por que",
+    "segredo",
+    "verdade",
+    "erro",
+    "nunca",
+    "sempre",
+    "melhor",
+    "pior",
+    "importante",
+    "resultado",
+    "mudou",
+    "topo",
+    "obsessão",
+    "dinheiro",
+    "venda",
+    "vendas",
+    "cliente",
+    "clientes",
+    "estratégia",
+    "aprendi",
+    "descobri",
+    "atenção",
+    "imagine",
+    "how",
+    "why",
+    "secret",
+    "truth",
+    "mistake",
+    "never",
+    "best",
+    "important",
+    "result",
+}
+
 
 def _segment_line(segment: dict) -> str:
     text = " ".join(str(segment.get("text") or "").split())
@@ -42,7 +82,13 @@ def _transcript_budget(limit: int | None = None) -> int:
 
 
 def _distributed_transcript(segments: list[dict], budget: int) -> str:
-    valid = [item for item in segments if item.get("text") and item.get("start") is not None and item.get("end") is not None]
+    valid = [
+        item
+        for item in segments
+        if item.get("text")
+        and item.get("start") is not None
+        and item.get("end") is not None
+    ]
     if not valid:
         return ""
 
@@ -61,7 +107,9 @@ def _distributed_transcript(segments: list[dict], budget: int) -> str:
         for item in valid:
             item_start = float(item["start"])
             in_window = window_start <= item_start < window_end
-            in_last_window = is_last_bucket and window_start <= item_start <= window_end
+            in_last_window = (
+                is_last_bucket and window_start <= item_start <= window_end
+            )
             if in_window or in_last_window:
                 chunk.append(item)
         if not chunk:
@@ -70,7 +118,9 @@ def _distributed_transcript(segments: list[dict], budget: int) -> str:
         used = 0
         if output:
             output.append("")
-        output.append(f"[Excerpt {bucket + 1}/{bucket_count}: {window_start:.0f}s-{window_end:.0f}s]")
+        output.append(
+            f"[Excerpt {bucket + 1}/{bucket_count}: {window_start:.0f}s-{window_end:.0f}s]"
+        )
         for segment in chunk:
             line = _segment_line(segment)
             next_used = used + len(line) + 1
@@ -83,9 +133,17 @@ def _distributed_transcript(segments: list[dict], budget: int) -> str:
     return text[:budget]
 
 
-def _timestamped_transcript(segments: list[dict], limit: int | None = None) -> str:
+def _timestamped_transcript(
+    segments: list[dict], limit: int | None = None
+) -> str:
     budget = _transcript_budget(limit)
-    lines = [_segment_line(s) for s in segments if s.get("text") and s.get("start") is not None and s.get("end") is not None]
+    lines = [
+        _segment_line(s)
+        for s in segments
+        if s.get("text")
+        and s.get("start") is not None
+        and s.get("end") is not None
+    ]
     text = "\n".join(lines)
     if len(text) <= budget:
         return text
@@ -94,10 +152,187 @@ def _timestamped_transcript(segments: list[dict], limit: int | None = None) -> s
 
 def _is_rate_limit_error(message: str) -> bool:
     lowered = message.lower()
-    return "rate_limit_exceeded" in lowered or "tokens per min" in lowered or "tpm" in lowered
+    return (
+        "rate_limit_exceeded" in lowered
+        or "tokens per min" in lowered
+        or "tpm" in lowered
+    )
 
 
-def select_clips(segments: list[dict], duration: float, requested_clips: int, source_title: str) -> list[ClipCandidate]:
+def _is_credit_or_quota_error(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "insufficient_quota",
+            "credit_balance_exhausted",
+            "no credits remaining",
+            "quota exceeded",
+            "billing",
+        )
+    )
+
+
+def _clean_segments(segments: list[dict], duration: float) -> list[dict]:
+    cleaned: list[dict] = []
+    for item in segments:
+        text = " ".join(str(item.get("text") or "").split())
+        if not text:
+            continue
+        try:
+            start = max(0.0, float(item.get("start", 0.0)))
+            end = min(float(duration), float(item.get("end", 0.0)))
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        cleaned.append({"start": start, "end": end, "text": text})
+    cleaned.sort(key=lambda item: (item["start"], item["end"]))
+    return cleaned
+
+
+def _hook_from_text(text: str, fallback: str) -> str:
+    compact = " ".join(text.split()).strip()
+    if not compact:
+        return fallback[:160].strip() or "Trecho em destaque"
+    sentence = re.split(r"(?<=[.!?])\s+", compact, maxsplit=1)[0].strip()
+    if len(sentence) < 18 and len(compact) > len(sentence):
+        sentence = compact
+    return sentence[:160].rstrip(" ,;:-")
+
+
+def _local_score(text: str, clip_duration: float) -> float:
+    lowered = text.casefold()
+    words = re.findall(r"[\wÀ-ÿ]+", text, flags=re.UNICODE)
+    density = len(words) / max(1.0, clip_duration)
+    hook_hits = sum(1 for term in _LOCAL_HOOK_TERMS if term in lowered)
+    punctuation = min(3, text.count("?") * 2 + text.count("!"))
+    number_bonus = 1.0 if re.search(r"\b\d+([.,]\d+)?\b", text) else 0.0
+    opening_bonus = 1.0 if len(words) >= 8 else 0.0
+    return density * 2.0 + hook_hits * 2.5 + punctuation + number_bonus + opening_bonus
+
+
+def _build_local_candidates(
+    segments: list[dict], duration: float
+) -> list[tuple[float, float, float, str]]:
+    valid = _clean_segments(segments, duration)
+    if not valid:
+        return []
+
+    candidates: list[tuple[float, float, float, str]] = []
+    for start_index, first in enumerate(valid):
+        start = first["start"]
+        parts: list[str] = []
+        end = first["end"]
+
+        for item in valid[start_index:]:
+            if item["start"] - end > 4.0 and parts:
+                break
+            end = max(end, item["end"])
+            clip_duration = end - start
+            if clip_duration > 60.0:
+                break
+            parts.append(item["text"])
+
+            if clip_duration >= 20.0:
+                text = " ".join(parts)
+                duration_bonus = max(0.0, 3.0 - abs(38.0 - clip_duration) / 10.0)
+                score = _local_score(text, clip_duration) + duration_bonus
+                candidates.append((score, start, end, text))
+
+            if clip_duration >= 48.0:
+                break
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates
+
+
+def _select_clips_local(
+    segments: list[dict],
+    duration: float,
+    requested_clips: int,
+    source_title: str,
+) -> list[ClipCandidate]:
+    requested = max(1, int(requested_clips))
+    ranked = _build_local_candidates(segments, duration)
+    if not ranked:
+        raise AIPlanningError(
+            "No local clip candidates were found in the timestamped transcript"
+        )
+
+    selected: list[tuple[float, float, float, str]] = []
+    for candidate in ranked:
+        _, start, end, _ = candidate
+        if any(
+            start < existing_end + 1.0 and end > existing_start - 1.0
+            for _, existing_start, existing_end, _ in selected
+        ):
+            continue
+        selected.append(candidate)
+        if len(selected) >= requested:
+            break
+
+    if len(selected) < requested:
+        used_starts = {round(item[1], 1) for item in selected}
+        for candidate in ranked:
+            if round(candidate[1], 1) in used_starts:
+                continue
+            selected.append(candidate)
+            used_starts.add(round(candidate[1], 1))
+            if len(selected) >= requested:
+                break
+
+    selected.sort(key=lambda item: item[1])
+    result: list[ClipCandidate] = []
+    for _score, start, end, text in selected[:requested]:
+        clip_duration = end - start
+        if clip_duration < 15.0 or clip_duration > 60.0:
+            continue
+
+        hook = _hook_from_text(text, source_title)
+        title_seed = hook or source_title or "Short em destaque"
+        description_seed = (
+            f"Trecho selecionado automaticamente de {source_title}. {hook}"
+            if source_title
+            else f"Trecho selecionado automaticamente. {hook}"
+        ).strip()
+        title, description, copy_text, tags = normalize_clip_metadata(
+            title=title_seed,
+            description=description_seed,
+            copy_text="Qual a sua opinião sobre esse ponto? Comente e compartilhe.",
+            tags=[],
+            source_title=source_title,
+            hook=hook,
+        )
+        result.append(
+            ClipCandidate(
+                start=round(start, 3),
+                end=round(end, 3),
+                hook=hook,
+                reason=(
+                    "Selecionado localmente por densidade de fala, clareza do "
+                    "trecho e sinais de retenção, sem uso de API paga."
+                ),
+                title=title,
+                description=description,
+                copy=copy_text,
+                tags=tags,
+            )
+        )
+
+    if not result:
+        raise AIPlanningError(
+            "Local candidates were outside the required 15-60 second range"
+        )
+    return result
+
+
+def _select_clips_openai(
+    segments: list[dict],
+    duration: float,
+    requested_clips: int,
+    source_title: str,
+) -> list[ClipCandidate]:
     if not settings.openai_api_key:
         raise AIPlanningError("OPENAI_API_KEY is not configured")
 
@@ -116,7 +351,11 @@ def select_clips(segments: list[dict], duration: float, requested_clips: int, so
         "Do not use unrelated trending keywords, deceptive clickbait, fabricated promises, or claims of guaranteed virality. "
         "Metadata must accurately match what is said inside that specific clip."
     )
-    limits = (_transcript_budget(),) + tuple(limit for limit in CLIP_SELECTION_FALLBACK_LIMITS if limit < _transcript_budget())
+    limits = (_transcript_budget(),) + tuple(
+        limit
+        for limit in CLIP_SELECTION_FALLBACK_LIMITS
+        if limit < _transcript_budget()
+    )
     plan = None
     last_error: Exception | None = None
     try:
@@ -183,5 +422,47 @@ def select_clips(segments: list[dict], duration: float, requested_clips: int, so
             break
 
     if not cleaned:
-        raise AIPlanningError("OpenAI candidates were outside the required 15-60 second range")
+        raise AIPlanningError(
+            "OpenAI candidates were outside the required 15-60 second range"
+        )
     return cleaned
+
+
+def select_clips(
+    segments: list[dict],
+    duration: float,
+    requested_clips: int,
+    source_title: str,
+) -> list[ClipCandidate]:
+    provider = (settings.clip_planning_provider or "local").strip().lower()
+    if provider not in {"local", "openai", "auto"}:
+        raise AIPlanningError(
+            "CLIP_PLANNING_PROVIDER must be one of: local, openai, auto"
+        )
+
+    if provider == "local":
+        return _select_clips_local(
+            segments, duration, requested_clips, source_title
+        )
+
+    if provider == "openai":
+        return _select_clips_openai(
+            segments, duration, requested_clips, source_title
+        )
+
+    if not settings.openai_api_key:
+        return _select_clips_local(
+            segments, duration, requested_clips, source_title
+        )
+
+    try:
+        return _select_clips_openai(
+            segments, duration, requested_clips, source_title
+        )
+    except AIPlanningError as exc:
+        message = str(exc)
+        if _is_credit_or_quota_error(message) or _is_rate_limit_error(message):
+            return _select_clips_local(
+                segments, duration, requested_clips, source_title
+            )
+        raise
