@@ -204,6 +204,14 @@ def _external_from_payload(payload: dict) -> str:
     return ""
 
 
+def _customer_from_payload(payload: dict) -> str:
+    for name in ("checkout", "subscription", "payment"):
+        customer_id = _resource_id(_resource(payload, name).get("customer"))
+        if customer_id:
+            return customer_id
+    return ""
+
+
 def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | None, str | None]:
     parsed = parse_external_reference(_external_from_payload(payload))
     if parsed:
@@ -214,6 +222,7 @@ def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | Non
     checkout_id = _resource_id(_resource(payload, "checkout").get("id"))
     subscription_id = _resource_id(_resource(payload, "subscription").get("id"))
     payment_subscription_id = _resource_id(_resource(payload, "payment").get("subscription"))
+    customer_id = _customer_from_payload(payload)
     query = db.query(TenantPlan)
     if checkout_id:
         plan = query.filter(TenantPlan.asaas_checkout_id == checkout_id).first()
@@ -227,6 +236,15 @@ def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | Non
         plan = query.filter(TenantPlan.asaas_subscription_id == payment_subscription_id).first()
         if plan:
             return plan, None, None
+    if customer_id:
+        # SUBSCRIPTION_CREATED is emitted separately from CHECKOUT_PAID. The
+        # checkout event gives us the Asaas customer first; use it as a safe
+        # reconciliation fallback when the subscription event does not repeat
+        # the checkout externalReference. Never guess when two tenant plans
+        # somehow point at the same external customer.
+        matches = query.filter(TenantPlan.asaas_customer_id == customer_id).order_by(TenantPlan.id.desc()).limit(2).all()
+        if len(matches) == 1:
+            return matches[0], None, None
     return None, None, None
 
 
@@ -273,7 +291,7 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
     if plan:
         checkout_id = _resource_id(checkout.get("id"))
         subscription_id = _resource_id(subscription.get("id")) or _resource_id(payment.get("subscription"))
-        customer_id = _resource_id(checkout.get("customer")) or _resource_id(subscription.get("customer")) or _resource_id(payment.get("customer"))
+        customer_id = _customer_from_payload(payload)
         payment_id = _resource_id(payment.get("id"))
         if checkout_id:
             plan.asaas_checkout_id = checkout_id
