@@ -14,10 +14,28 @@ TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
 CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
 SCOPES = "user.info.basic,video.publish"
+_LOCAL_REDIRECT_URI = "http://localhost:8000/api/tiktok/oauth/callback"
 
 
 def oauth_configured() -> bool:
     return bool(settings.tiktok_client_key.strip() and settings.tiktok_client_secret.strip())
+
+
+def oauth_redirect_uri() -> str:
+    """Return the exact callback that must be registered in TikTok.
+
+    Production already serves backend and frontend through the same public HTTPS
+    domain. If EasyPanel still inherits the development default callback, derive
+    the production callback from FRONTEND_URL instead of sending users back to
+    localhost. An explicit TIKTOK_OAUTH_REDIRECT_URI always wins.
+    """
+    configured = settings.tiktok_oauth_redirect_uri.strip()
+    frontend = settings.frontend_url.strip().rstrip("/")
+    if configured and configured != _LOCAL_REDIRECT_URI:
+        return configured
+    if frontend.startswith("https://"):
+        return f"{frontend}/api/tiktok/oauth/callback"
+    return configured or _LOCAL_REDIRECT_URI
 
 
 def _connection(db: Session, user_id: int) -> TikTokConnection:
@@ -32,7 +50,7 @@ def _connection(db: Session, user_id: int) -> TikTokConnection:
 def build_authorization_url(db: Session, user: User) -> str:
     if not oauth_configured():
         raise RuntimeError(
-            "TikTok ainda não está configurado no servidor. Cadastre TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET e o redirect URI aprovado no TikTok for Developers."
+            "TikTok ainda não está configurado no servidor. Cadastre TIKTOK_CLIENT_KEY e TIKTOK_CLIENT_SECRET do app aprovado no TikTok for Developers."
         )
     state = secrets.token_urlsafe(32)
     connection = _connection(db, user.id)
@@ -43,7 +61,7 @@ def build_authorization_url(db: Session, user: User) -> str:
             "client_key": settings.tiktok_client_key,
             "response_type": "code",
             "scope": SCOPES,
-            "redirect_uri": settings.tiktok_oauth_redirect_uri,
+            "redirect_uri": oauth_redirect_uri(),
             "state": state,
         }
     )
@@ -95,7 +113,7 @@ def complete_oauth(db: Session, code: str, state: str) -> int:
             "client_secret": settings.tiktok_client_secret,
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": settings.tiktok_oauth_redirect_uri,
+            "redirect_uri": oauth_redirect_uri(),
         }
     )
     stamped = _stamp_token(payload)
@@ -186,7 +204,7 @@ def get_connection_status(db: Session, user_id: int) -> dict:
         "configured": configured,
         "connected": connected,
         "display_name": connection.display_name if connected and connection else None,
-        "redirect_uri": settings.tiktok_oauth_redirect_uri,
+        "redirect_uri": oauth_redirect_uri(),
     }
 
 
