@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
@@ -11,6 +12,11 @@ from ..config import settings
 from ..database import Base, engine
 
 logger = logging.getLogger(__name__)
+
+# One-time visual reset requested for the Publications queue. The marker keeps
+# the cleanup non-destructive: old clips stay in the database/filesystem, while
+# the Publications screen starts clean after this deployment.
+PUBLICATIONS_RESET_KEY = "maintenance.publications_clean_start_2026_09_04_v1"
 
 try:
     import fcntl
@@ -48,6 +54,7 @@ def initialize_database(*, attempts: int = 12, delay_seconds: float = 1.0) -> No
             with _schema_lock():
                 Base.metadata.create_all(bind=engine)
                 _ensure_clip_caption_columns()
+                _ensure_publications_reset_marker()
             return
         except OperationalError as exc:
             last_error = exc
@@ -75,3 +82,29 @@ def _ensure_clip_caption_columns() -> None:
     with engine.begin() as connection:
         for _, statement in missing:
             connection.execute(text(f"ALTER TABLE saas_clips {clause} {statement}"))
+
+
+def _ensure_publications_reset_marker() -> None:
+    """Create one persistent cutoff used to hide legacy queue items.
+
+    This intentionally does not delete clips, jobs, source videos or media files.
+    It only records when the Publications queue was reset, so the current
+    superadmin workspace can start clean without damaging project history.
+    """
+    reset_at = datetime.now(timezone.utc)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO saas_system_settings (key, value, secret, updated_at)
+                VALUES (:key, :value, :secret, :updated_at)
+                ON CONFLICT(key) DO NOTHING
+                """
+            ),
+            {
+                "key": PUBLICATIONS_RESET_KEY,
+                "value": reset_at.isoformat(),
+                "secret": False,
+                "updated_at": reset_at,
+            },
+        )
