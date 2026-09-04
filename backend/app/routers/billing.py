@@ -36,6 +36,13 @@ def _webhook_token(db: Session) -> str:
     return settings.kiwify_webhook_token.strip()
 
 
+def _apply_new_checkout_route(payload: dict) -> dict:
+    if asaas_configured():
+        payload["checkout_url"] = "/planos"
+        payload["upgrade_url"] = "/planos"
+    return payload
+
+
 @router.get("/public")
 def public_billing_config():
     db = SessionLocal()
@@ -43,7 +50,7 @@ def public_billing_config():
         payload = get_public_config_safe(db)
         payload["asaas_enabled"] = asaas_configured()
         payload["plans_url"] = "/planos"
-        return payload
+        return _apply_new_checkout_route(payload)
     finally:
         db.close()
 
@@ -67,7 +74,7 @@ def my_billing(user: User = Depends(get_current_user), db: Session = Depends(get
         "upgrade_url": public_config["upgrade_url"],
         "asaas_enabled": asaas_configured(),
     })
-    return payload
+    return _apply_new_checkout_route(payload)
 
 
 @router.post("/asaas/checkout")
