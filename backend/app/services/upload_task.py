@@ -4,9 +4,23 @@ from pathlib import Path
 from sqlalchemy.orm import joinedload
 
 from ..database import SessionLocal
+from ..errors import YouTubeUploadLimitError
 from ..models import Clip, Job
 from .seo_service import build_publish_metadata
 from .youtube_upload import upload_video
+
+
+def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: int) -> None:
+    current = db.get(Clip, current_clip_id)
+    if current:
+        current.status = "approved"
+        current.upload_error = message
+        current.upload_privacy = "public"
+    for queued in db.query(Clip).filter(Clip.user_id == user_id, Clip.status == "upload_queued").all():
+        queued.status = "approved"
+        queued.upload_error = message
+        queued.upload_privacy = "public"
+    db.commit()
 
 
 def run_upload(clip_id: int, privacy_status: str) -> None:
@@ -61,6 +75,11 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         clip.status = "uploaded"
         clip.youtube_video_id = video_id
         db.commit()
+    except YouTubeUploadLimitError as exc:
+        db.rollback()
+        clip = db.get(Clip, clip_id)
+        if clip:
+            _pause_user_upload_queue(db, clip.user_id, str(exc), clip_id)
     except Exception as exc:
         db.rollback()
         clip = db.get(Clip, clip_id)
