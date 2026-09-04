@@ -135,11 +135,20 @@ class Settings(BaseSettings):
     auth_cookie_name: str = "shortsflow_session"
     auth_session_hours: int = 168
 
+    # Kiwify permanece disponível para não quebrar clientes/checkout legados.
     kiwify_checkout_url: str = "https://pay.kiwify.com.br/tBv68U5"
     kiwify_upgrade_url: str = "https://pay.kiwify.com.br/8n30IZ9"
     kiwify_base_checkout_code: str = "tBv68U5"
     kiwify_upgrade_checkout_code: str = "8n30IZ9"
     kiwify_webhook_token: str = ""
+
+    # Asaas é o provedor dos novos planos. As credenciais são somente de
+    # runtime; nunca possuem valor padrão e nunca são expostas ao frontend.
+    asaas_api_key: str = ""
+    asaas_webhook_auth_token: str = ""
+    asaas_base_url: str = "https://api.asaas.com/v3"
+    asaas_checkout_expiration_minutes: int = 60
+
     base_plan_job_limit: int = 10
     billing_require_active: bool = True
 
