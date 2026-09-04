@@ -22,6 +22,7 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
             return
         clip.status = "uploading"
         clip.upload_error = None
+        clip.upload_privacy = "public"
         db.commit()
 
         try:
@@ -46,6 +47,9 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         clip.tags_json = json.dumps(metadata.tags, ensure_ascii=False)
         db.commit()
 
+        # Public is enforced here as the final safety layer, even if an older
+        # queued record still contains a legacy private/unlisted value.
+        privacy_status = "public"
         video_id = upload_video(
             Path(clip.file_path),
             metadata.title,
