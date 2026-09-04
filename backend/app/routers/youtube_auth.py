@@ -1,15 +1,17 @@
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..config import settings
 from ..database import get_db
-from ..models import User
+from ..models import User, YouTubeConnection
 from ..errors import YouTubeAuthError, YouTubeQuotaError
 from ..schemas import OAuthStartResponse, OAuthStatusResponse, YouTubeLiveAudience, YouTubeLiveMetrics
+from ..services.billing import ensure_plan
+from ..services.plans import can_connect_channel
 from ..services.youtube_live_audience import get_live_audience
 from ..services.youtube_metrics import get_live_channel_metrics
 from ..services.youtube_oauth import build_authorization_url, complete_oauth, disconnect, get_connection_status
@@ -48,6 +50,15 @@ def live_audience(user: User = Depends(get_current_user), db: Session = Depends(
 
 @router.get("/oauth/start", response_model=OAuthStartResponse)
 def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Reconectar o canal do próprio perfil não consome uma nova vaga. O limite
+    # só é verificado quando este usuário ainda não possui conexão ativa.
+    existing = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user.id).first()
+    already_connected = bool(existing and existing.token_json)
+    if not already_connected and user.role != "superadmin":
+        plan = ensure_plan(db, user.tenant_id)
+        allowed, reason = can_connect_channel(db, plan)
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
     try:
         return {"authorization_url": build_authorization_url(db, user)}
     except RuntimeError as exc:
@@ -75,8 +86,6 @@ def oauth_callback(
     try:
         complete_oauth(db, code, state)
     except Exception:
-        # Provider/token internals must not be exposed to the browser. The user can
-        # retry the account picker and diagnostics retain the server-side context.
         return _frontend_redirect("error", "oauth_nao_concluido")
     return _frontend_redirect("connected")
 
