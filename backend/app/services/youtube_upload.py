@@ -1,9 +1,11 @@
 import random
 import time
 from pathlib import Path
+
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+
 from ..errors import raise_for_youtube_error
 from .youtube_oauth import get_credentials
 
@@ -16,12 +18,15 @@ def upload_video(
     description: str,
     tags: list[str],
     user_id: int,
-    privacy_status: str = "private",
+    privacy_status: str = "public",
     max_retries: int = 5,
 ) -> str:
     if not file_path.exists():
         raise FileNotFoundError(file_path)
 
+    # ShortsFlow is public-only on YouTube. Ignore legacy caller values so an
+    # old frontend or queued record can never turn a new upload private.
+    privacy_status = "public"
     youtube = build("youtube", "v3", credentials=get_credentials(user_id), cache_discovery=False)
     body = {
         "snippet": {
