@@ -1,10 +1,15 @@
 from pathlib import Path
 import subprocess
+from threading import Lock
 from ..config import settings
 
 
 class FFmpegError(RuntimeError):
     pass
+
+
+_FFMPEG_READY = False
+_FFMPEG_CHECK_LOCK = Lock()
 
 
 def _run(command: list[str]) -> str:
@@ -19,8 +24,15 @@ def _run(command: list[str]) -> str:
 
 
 def ensure_ffmpeg() -> None:
-    _run([settings.ffmpeg_binary, "-version"])
-    _run([settings.ffprobe_binary, "-version"])
+    global _FFMPEG_READY
+    if _FFMPEG_READY:
+        return
+    with _FFMPEG_CHECK_LOCK:
+        if _FFMPEG_READY:
+            return
+        _run([settings.ffmpeg_binary, "-version"])
+        _run([settings.ffprobe_binary, "-version"])
+        _FFMPEG_READY = True
 
 
 def get_duration(video_path: Path) -> float:
@@ -36,6 +48,11 @@ def get_duration(video_path: Path) -> float:
 
 def extract_audio_chunks(video_path: Path, output_dir: Path, segment_seconds: int = 600) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    # A retry can reuse the same job directory after settings changed. Remove
+    # only generated audio chunks so stale 10-minute files are never mixed with
+    # the new 20-minute split. Source video, clips and credentials are untouched.
+    for old_chunk in output_dir.glob("audio_*.mp3"):
+        old_chunk.unlink(missing_ok=True)
     pattern = output_dir / "audio_%03d.mp3"
     _run([
         settings.ffmpeg_binary, "-y",
@@ -135,6 +152,12 @@ def render_vertical_clip(
         style = _subtitle_force_style(caption_position, caption_margin_v, caption_font_size)
         filters.append(f"subtitles='{escaped}':force_style='{style}'")
 
+    preset = (settings.ffmpeg_preset or "veryfast").strip()
+    if preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
+        preset = "veryfast"
+    crf = max(16, min(30, int(settings.ffmpeg_crf or 21)))
+    threads = max(1, min(8, int(settings.ffmpeg_threads_per_job or 2)))
+
     _run([
         settings.ffmpeg_binary, "-y",
         "-ss", f"{start_seconds:.3f}",
@@ -142,7 +165,8 @@ def render_vertical_clip(
         "-t", f"{duration:.3f}",
         "-vf", ",".join(filters),
         "-map", "0:v:0", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "22",
+        "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+        "-threads", str(threads),
         "-c:a", "aac", "-b:a", "128k",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         str(output_path),

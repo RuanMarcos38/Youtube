@@ -63,6 +63,13 @@ def _transcription_progress_updater(job_id: int):
     return update
 
 
+def _audio_chunk_seconds() -> int:
+    # 20-minute chunks cut FFmpeg/file overhead roughly in half compared with
+    # the previous 10-minute chunks, while remaining comfortably small for the
+    # optional timestamped API fallback if an administrator enables it later.
+    return max(300, min(1200, int(settings.audio_chunk_seconds or 1200)))
+
+
 def run_pipeline(job_id: int) -> None:
     db = SessionLocal()
     try:
@@ -84,12 +91,22 @@ def run_pipeline(job_id: int) -> None:
 
         _set_status(job_id, "extracting_audio", 30)
         duration = get_duration(video_path)
-        audio_files = extract_audio_chunks(video_path, work_dir / "audio")
+        chunk_seconds = _audio_chunk_seconds()
+        audio_files = extract_audio_chunks(video_path, work_dir / "audio", segment_seconds=chunk_seconds)
 
         _set_status(job_id, "transcribing", 45)
-        transcript_text, segments = transcribe_chunks(audio_files, progress_hook=_transcription_progress_updater(job_id))
+        transcript_text, segments = transcribe_chunks(
+            audio_files,
+            segment_seconds=chunk_seconds,
+            progress_hook=_transcription_progress_updater(job_id),
+        )
         (work_dir / "transcript.txt").write_text(transcript_text, encoding="utf-8")
-        (work_dir / "segments.json").write_text(json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Compact JSON writes faster and uses less disk on long videos. The data
+        # itself and all timestamps remain unchanged.
+        (work_dir / "segments.json").write_text(
+            json.dumps(segments, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
 
         _set_status(job_id, "selecting_clips", 65)
         plan = select_clips(segments, duration, job.requested_clips, source.title)

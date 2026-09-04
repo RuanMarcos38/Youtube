@@ -84,7 +84,19 @@ class Settings(BaseSettings):
     local_whisper_device: str = "cpu"
     local_whisper_compute_type: str = "int8"
     local_whisper_language: str = ""
-    local_whisper_beam_size: int = 3
+    # Greedy decoding keeps Portuguese transcription accurate enough for clip
+    # selection while avoiding the large CPU cost of a 3-beam search.
+    local_whisper_beam_size: int = 1
+    # Up to two CPU-heavy Whisper calls run at once. The worker can still keep
+    # five videos active (download/extract/transcribe/render) without making a
+    # small VPS thrash or run out of RAM.
+    local_whisper_parallelism: int = 2
+    # 0 lets the runtime divide the available CPU threads automatically between
+    # concurrent Whisper calls. These are performance controls, never secrets.
+    local_whisper_cpu_threads: int = 0
+    # Longer audio chunks reduce process/file overhead while staying small
+    # enough for the optional OpenAI fallback when it is explicitly enabled.
+    audio_chunk_seconds: int = 1200
     allow_openai_transcription_fallback: bool = False
     clip_planning_provider: str = "local"
 
@@ -110,8 +122,15 @@ class Settings(BaseSettings):
     ytdlp_node_path: str = "/usr/local/bin/node"
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
-    worker_poll_seconds: float = 2.0
-    worker_concurrency: int = 2
+    # Veryfast is substantially quicker than medium for 9:16 Shorts while CRF
+    # 21 preserves clean text/faces for social publishing.
+    ffmpeg_preset: str = "veryfast"
+    ffmpeg_crf: int = 21
+    ffmpeg_threads_per_job: int = 2
+    worker_poll_seconds: float = 1.0
+    # Five pipeline workers means videos 1-5 can be active together and video 6
+    # remains queued until a slot is released.
+    worker_concurrency: int = 5
 
     auth_cookie_name: str = "shortsflow_session"
     auth_session_hours: int = 168
