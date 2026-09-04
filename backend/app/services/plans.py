@@ -129,28 +129,30 @@ def _month_start() -> datetime:
     return datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
 
-def processing_seconds_used(db: Session, tenant_id: int) -> int:
-    value = (
+def processing_seconds_used(db: Session, tenant_id: int, *, all_time: bool = False) -> int:
+    query = (
         db.query(func.coalesce(func.sum(SourceVideo.duration_seconds), 0))
         .join(Job, Job.source_video_id == SourceVideo.id)
-        .filter(Job.tenant_id == tenant_id, Job.created_at >= _month_start())
-        .scalar()
+        .filter(Job.tenant_id == tenant_id)
     )
-    return int(value or 0)
+    if not all_time:
+        query = query.filter(Job.created_at >= _month_start())
+    return int(query.scalar() or 0)
 
 
-def processing_minutes_used(db: Session, tenant_id: int) -> int:
-    seconds = processing_seconds_used(db, tenant_id)
+def processing_minutes_used(db: Session, tenant_id: int, *, all_time: bool = False) -> int:
+    seconds = processing_seconds_used(db, tenant_id, all_time=all_time)
     return int(math.ceil(seconds / 60)) if seconds else 0
 
 
-def shorts_used(db: Session, tenant_id: int) -> int:
-    value = (
+def shorts_used(db: Session, tenant_id: int, *, all_time: bool = False) -> int:
+    query = (
         db.query(func.coalesce(func.sum(Job.requested_clips), 0))
-        .filter(Job.tenant_id == tenant_id, Job.created_at >= _month_start())
-        .scalar()
+        .filter(Job.tenant_id == tenant_id)
     )
-    return int(value or 0)
+    if not all_time:
+        query = query.filter(Job.created_at >= _month_start())
+    return int(query.scalar() or 0)
 
 
 def channels_used(db: Session, tenant_id: int) -> int:
@@ -193,8 +195,11 @@ def quota_payload(db: Session, plan: TenantPlan) -> dict:
             "users_remaining": None,
         }
 
-    minutes_used = processing_minutes_used(db, plan.tenant_id)
-    clips_used = shorts_used(db, plan.tenant_id)
+    # Trial é uma degustação única: seus 30 minutos/3 Shorts não voltam no mês
+    # seguinte. Planos pagos continuam renovando a franquia a cada mês.
+    all_time = plan.plan_code == "trial"
+    minutes_used = processing_minutes_used(db, plan.tenant_id, all_time=all_time)
+    clips_used = shorts_used(db, plan.tenant_id, all_time=all_time)
     connected = channels_used(db, plan.tenant_id)
     seats = users_used(db, plan.tenant_id)
 
@@ -226,18 +231,21 @@ def can_create_job(db: Session, plan: TenantPlan, duration_seconds: int, request
 
     duration_seconds = max(0, int(duration_seconds or 0))
     requested_clips = max(1, int(requested_clips or 1))
-    current_seconds = processing_seconds_used(db, plan.tenant_id)
+    all_time = plan.plan_code == "trial"
+    current_seconds = processing_seconds_used(db, plan.tenant_id, all_time=all_time)
     projected_minutes = int(math.ceil((current_seconds + duration_seconds) / 60)) if current_seconds + duration_seconds else 0
-    current_shorts = shorts_used(db, plan.tenant_id)
+    current_shorts = shorts_used(db, plan.tenant_id, all_time=all_time)
 
     if projected_minutes > definition["processing_minutes_limit"]:
+        period = "no período de teste" if all_time else "por mês"
         return False, (
-            f"Seu plano {definition['name']} permite {definition['processing_minutes_limit']} minutos processados por mês. "
+            f"Seu plano {definition['name']} permite {definition['processing_minutes_limit']} minutos processados {period}. "
             "Faça upgrade para continuar."
         )
     if current_shorts + requested_clips > definition["shorts_limit"]:
+        period = "no período de teste" if all_time else "por mês"
         return False, (
-            f"Seu plano {definition['name']} permite até {definition['shorts_limit']} Shorts por mês. "
+            f"Seu plano {definition['name']} permite até {definition['shorts_limit']} Shorts {period}. "
             "Faça upgrade para continuar."
         )
     return True, ""
