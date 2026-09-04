@@ -112,6 +112,20 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
     if price_cents <= 0:
         raise ValueError("Este plano não possui cobrança configurada.")
 
+    from .billing import ensure_plan
+
+    tenant_plan = ensure_plan(db, user.tenant_id)
+    provider = (getattr(tenant_plan, "billing_provider", "") or "").strip().lower()
+    billing_status = (tenant_plan.billing_status or "").strip().lower()
+    if provider == "asaas" and billing_status in {"active", "paid", "past_due"}:
+        raise ValueError(
+            "Você já possui uma assinatura Asaas vinculada a esta conta. Para trocar de plano sem gerar cobrança duplicada, use o atendimento administrativo."
+        )
+    if tenant_plan.asaas_checkout_id and billing_status not in {"inactive", "canceled", "cancelled"}:
+        raise ValueError(
+            "Já existe um checkout Asaas em aberto para esta conta. Conclua ou aguarde o vencimento desse checkout antes de gerar outro."
+        )
+
     reference = external_reference(user.tenant_id, plan_code, billing_cycle)
     frontend = settings.frontend_url.rstrip("/")
     now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
@@ -149,9 +163,6 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
         raise RuntimeError("O Asaas não retornou o identificador do checkout.")
     checkout_url = str(data.get("link") or "").strip() or f"https://asaas.com/checkoutSession/show?id={checkout_id}"
 
-    from .billing import ensure_plan
-
-    tenant_plan = ensure_plan(db, user.tenant_id)
     tenant_plan.asaas_checkout_id = checkout_id
     # Criar um checkout nunca troca o provedor, ciclo, status ou plano atual.
     # Essas mudanças acontecem somente depois do CHECKOUT_PAID autenticado.
@@ -237,11 +248,9 @@ def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | Non
         if plan:
             return plan, None, None
     if customer_id:
-        # SUBSCRIPTION_CREATED is emitted separately from CHECKOUT_PAID. The
-        # checkout event gives us the Asaas customer first; use it as a safe
-        # reconciliation fallback when the subscription event does not repeat
-        # the checkout externalReference. Never guess when two tenant plans
-        # somehow point at the same external customer.
+        # SUBSCRIPTION_CREATED é emitido separadamente do CHECKOUT_PAID. O
+        # checkout nos fornece o cliente Asaas; ele serve como fallback seguro
+        # quando o evento de assinatura não repete a referência do checkout.
         matches = query.filter(TenantPlan.asaas_customer_id == customer_id).order_by(TenantPlan.id.desc()).limit(2).all()
         if len(matches) == 1:
             return matches[0], None, None
@@ -317,6 +326,10 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
             tenant = db.get(Tenant, plan.tenant_id)
             if tenant:
                 tenant.billing_status = "active"
+
+        elif event_type in {"CHECKOUT_CANCELED", "CHECKOUT_EXPIRED"}:
+            if checkout_id and plan.asaas_checkout_id == checkout_id:
+                plan.asaas_checkout_id = None
 
         elif event_type in {"PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"} and plan.billing_provider == "asaas":
             plan.billing_status = "active"
