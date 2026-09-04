@@ -7,6 +7,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import PaymentEvent, ProvisionedCredential, Tenant, TenantPlan, User, YouTubeConnection
 from ..schemas import ActivationRequest, LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
+from ..services.asaas import asaas_configured
 from ..services.billing import ensure_plan, plan_payload
 from ..services.plans import can_add_user
 from ..services.system_config import get_public_config_safe
@@ -17,6 +18,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def _user_payload(user: User, db: Session) -> dict:
     plan = plan_payload(db, user.tenant_id)
     public_config = get_public_config_safe(db)
+    checkout_url = "/planos" if asaas_configured() else public_config["checkout_url"]
+    upgrade_url = "/planos" if asaas_configured() else public_config["upgrade_url"]
     return {
         "id": user.id,
         "tenant_id": user.tenant_id,
@@ -25,8 +28,8 @@ def _user_payload(user: User, db: Session) -> dict:
         "role": user.role,
         "active": user.active,
         "billing_status": plan["billing_status"],
-        "checkout_url": public_config["checkout_url"],
-        "upgrade_url": public_config["upgrade_url"],
+        "checkout_url": checkout_url,
+        "upgrade_url": upgrade_url,
         "plan_code": plan["plan_code"],
         "plan_name": plan["plan_name"],
         "billing_provider": plan["billing_provider"],
@@ -86,8 +89,6 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
     )
     db.add(user)
     db.flush()
-    # O teste gratuito é um plano real, com limites explícitos. Isso evita
-    # qualquer alteração nos usuários legados que já possuem TenantPlan.
     db.add(
         TenantPlan(
             tenant_id=tenant.id,
