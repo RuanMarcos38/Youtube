@@ -23,6 +23,17 @@ PROCESSING_STATES = {
 }
 HEARTBEAT_FILE = settings.data_path / "worker_heartbeat.txt"
 DOWNLOAD_PROBE_INTERVAL_SECONDS = 15 * 60
+MAX_PIPELINE_CONCURRENCY = 5
+
+
+def _pipeline_concurrency() -> int:
+    """Return the configured pipeline capacity, hard-capped at five videos.
+
+    Five jobs can be active at once; the sixth stays with status ``queued`` and
+    is only claimed after one active job finishes. This cap is intentionally
+    independent from YouTube/TikTok upload pools, which remain serialized.
+    """
+    return max(1, min(int(settings.worker_concurrency), MAX_PIPELINE_CONCURRENCY))
 
 
 def _heartbeat() -> None:
@@ -121,7 +132,7 @@ def main() -> None:
     initialize_database()
     _recover_interrupted()
 
-    concurrency = max(1, min(int(settings.worker_concurrency), 4))
+    concurrency = _pipeline_concurrency()
     active_jobs: dict[Future, int] = {}
     active_upload: Future | None = None
     active_tiktok_upload: Future | None = None
