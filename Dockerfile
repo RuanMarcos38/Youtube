@@ -34,7 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CHROME_BIN=/usr/bin/chromium
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip ffmpeg ca-certificates fonts-dejavu-core supervisor \
+    python3 python3-venv python3-pip ffmpeg ca-certificates fonts-dejavu-core supervisor libgomp1 \
     chromium xvfb \
     && rm -rf /var/lib/apt/lists/*
 
