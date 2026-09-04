@@ -9,6 +9,11 @@ function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 }
 
+function usageText(used: number | undefined, limit: number | null | undefined, unit: string) {
+  if (limit == null) return `${used || 0} ${unit}`;
+  return `${used || 0} de ${limit} ${unit}`;
+}
+
 export default function PricingPlans() {
   const [catalog, setCatalog] = useState<BillingPlansResponse | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -30,12 +35,17 @@ export default function PricingPlans() {
 
   const paidPlans = (catalog?.plans || []).filter((plan) => plan.code !== "trial");
   const trial = (catalog?.plans || []).find((plan) => plan.code === "trial");
+  const activeAsaas = Boolean(user && user.billing_provider === "asaas" && ["active", "paid", "past_due"].includes(user.billing_status));
 
   async function openCheckout(plan: BillingPlan, currentUser = user) {
     setError("");
     if (!currentUser) {
       setPendingPlan(plan.code);
       registerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (currentUser.billing_provider === "asaas" && ["active", "paid", "past_due"].includes(currentUser.billing_status)) {
+      setError("Sua assinatura Asaas já está vinculada. A troca de plano é bloqueada nesta tela para evitar uma segunda cobrança recorrente.");
       return;
     }
     if (!catalog?.asaas_enabled) {
@@ -96,17 +106,37 @@ export default function PricingPlans() {
         {trial && (
           <section className="mt-10 grid items-center gap-5 rounded-2xl border border-[#ddecbb] bg-white p-6 shadow-sm md:grid-cols-[1fr_auto] md:p-8">
             <div>
-              <div className="text-xs font-black uppercase text-[#729b19]">Teste gratuito</div>
+              <div className="text-xs font-black uppercase text-[#729b19]">Teste gratuito · uso único</div>
               <h2 className="mt-1 text-2xl font-black">{trial.name}: {trial.processing_minutes_limit} min + {trial.shorts_limit} Shorts</h2>
-              <p className="mt-2 text-sm leading-6 text-[#666]">Crie sua conta sem cobrança e valide o fluxo antes de escolher um plano pago.</p>
+              <p className="mt-2 text-sm leading-6 text-[#666]">Crie sua conta sem cobrança e valide o fluxo antes de escolher um plano pago. A franquia de teste não renova mensalmente.</p>
             </div>
             {!user ? <button onClick={() => registerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} className="rounded-xl bg-[#b8f238] px-6 py-3 text-sm font-black">Começar grátis</button> : <div className="rounded-xl bg-[#f4f4f4] px-5 py-3 text-sm font-black">Plano atual: {user.plan_name || user.plan_code}</div>}
+          </section>
+        )}
+
+        {user && (
+          <section className="mt-6 rounded-2xl border border-[#e6e6e6] bg-white p-6 shadow-sm md:p-8">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div className="text-xs font-black uppercase text-red-700">Seu consumo</div>
+                <h2 className="mt-1 text-2xl font-black">{user.plan_name || user.plan_code}</h2>
+              </div>
+              <div className="rounded-full bg-[#f4f4f4] px-3 py-1.5 text-xs font-black">Status: {user.billing_status}</div>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Processamento</div><div className="mt-1 text-sm font-black">{usageText(user.processing_minutes_used, user.processing_minutes_limit, "min")}</div></div>
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Shorts</div><div className="mt-1 text-sm font-black">{usageText(user.shorts_used, user.shorts_limit, "Shorts")}</div></div>
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Canais</div><div className="mt-1 text-sm font-black">{usageText(user.channels_used, user.channel_limit, "canais")}</div></div>
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Usuários</div><div className="mt-1 text-sm font-black">{usageText(user.users_used, user.user_limit, "usuários")}</div></div>
+            </div>
+            {activeAsaas && <p className="mt-4 text-xs leading-5 text-[#6e7971]">Para sua segurança, esta tela não cria uma segunda assinatura recorrente enquanto existir uma assinatura Asaas ativa ou pendente de regularização.</p>}
           </section>
         )}
 
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {paidPlans.map((plan) => {
             const price = cycle === "monthly" ? plan.monthly_price_cents : plan.yearly_price_cents;
+            const currentPlan = Boolean(user && user.plan_code === plan.code);
             return (
               <article key={plan.code} className={`relative flex min-h-[570px] flex-col rounded-2xl border bg-white p-6 shadow-sm ${plan.featured ? "border-[#111] ring-2 ring-[#b8f238]" : "border-[#e6e6e6]"}`}>
                 {plan.featured && <span className="absolute -top-3 left-5 rounded-full bg-[#111] px-3 py-1 text-[10px] font-black uppercase text-white">Mais escolhido</span>}
@@ -129,8 +159,8 @@ export default function PricingPlans() {
                   {plan.features.map((feature) => <div key={feature} className="flex gap-2"><span className="font-black text-[#729b19]">✓</span><span>{feature}</span></div>)}
                 </div>
 
-                <button disabled={loadingCode === plan.code} onClick={() => void openCheckout(plan)} className={`mt-6 rounded-xl px-5 py-3 text-sm font-black disabled:opacity-50 ${plan.featured ? "bg-[#111] text-white" : "bg-[#b8f238] text-[#111]"}`}>
-                  {loadingCode === plan.code ? "Abrindo checkout..." : user ? `Assinar ${plan.name}` : `Criar conta e assinar`}
+                <button disabled={loadingCode === plan.code || activeAsaas} onClick={() => void openCheckout(plan)} className={`mt-6 rounded-xl px-5 py-3 text-sm font-black disabled:opacity-50 ${plan.featured ? "bg-[#111] text-white" : "bg-[#b8f238] text-[#111]"}`}>
+                  {loadingCode === plan.code ? "Abrindo checkout..." : currentPlan ? "Plano atual" : activeAsaas ? "Troca protegida" : user ? `Assinar ${plan.name}` : "Criar conta e assinar"}
                 </button>
               </article>
             );
