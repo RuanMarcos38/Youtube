@@ -9,6 +9,8 @@ export type PublicConfig = {
   checkout_url: string;
   upgrade_url: string;
   base_plan_job_limit: number;
+  asaas_enabled?: boolean;
+  plans_url?: string;
 };
 
 export type UserProfile = {
@@ -22,10 +24,25 @@ export type UserProfile = {
   checkout_url: string;
   upgrade_url: string;
   plan_code: string;
+  plan_name?: string;
+  billing_provider?: string;
+  billing_cycle?: string;
   monthly_job_limit: number;
   unlimited: boolean;
   jobs_used: number;
   jobs_remaining?: number | null;
+  processing_minutes_limit?: number | null;
+  processing_minutes_used?: number;
+  processing_minutes_remaining?: number | null;
+  shorts_limit?: number | null;
+  shorts_used?: number;
+  shorts_remaining?: number | null;
+  channel_limit?: number | null;
+  channels_used?: number;
+  channels_remaining?: number | null;
+  user_limit?: number | null;
+  users_used?: number;
+  users_remaining?: number | null;
 };
 
 export type TeamUser = {
@@ -40,7 +57,10 @@ export type TeamUser = {
 
 export type BillingStatus = {
   plan_code: string;
+  plan_name?: string;
   billing_status: string;
+  billing_provider?: string;
+  billing_cycle?: string;
   monthly_job_limit: number;
   unlimited: boolean;
   jobs_used: number;
@@ -48,6 +68,48 @@ export type BillingStatus = {
   subscription_value_cents: number;
   checkout_url: string;
   upgrade_url: string;
+  asaas_enabled?: boolean;
+  processing_minutes_limit?: number | null;
+  processing_minutes_used?: number;
+  processing_minutes_remaining?: number | null;
+  shorts_limit?: number | null;
+  shorts_used?: number;
+  shorts_remaining?: number | null;
+  channel_limit?: number | null;
+  channels_used?: number;
+  channels_remaining?: number | null;
+  user_limit?: number | null;
+  users_used?: number;
+  users_remaining?: number | null;
+};
+
+export type BillingPlan = {
+  code: "trial" | "creator" | "pro" | "business" | "agency";
+  name: string;
+  description: string;
+  monthly_price_cents: number;
+  yearly_price_cents: number;
+  processing_minutes_limit: number;
+  shorts_limit: number;
+  channel_limit: number;
+  user_limit: number;
+  featured: boolean;
+  features: string[];
+};
+
+export type BillingPlansResponse = {
+  plans: BillingPlan[];
+  asaas_enabled: boolean;
+  webhook_ready: boolean;
+  extra_channel_price_cents: number;
+};
+
+export type AsaasCheckoutResponse = {
+  checkout_id: string;
+  checkout_url: string;
+  plan_code: string;
+  billing_cycle: "monthly" | "yearly";
+  amount_cents: number;
 };
 
 export type AdminMetrics = {
@@ -153,6 +215,7 @@ export type SourceVideo = {
   channel_title: string;
   original_url: string;
   thumbnail_url: string;
+  duration_seconds?: number;
   rights_confirmed: boolean;
 };
 

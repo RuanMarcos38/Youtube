@@ -34,6 +34,23 @@ def _duration_seconds(value: str | None) -> int:
         return 0
 
 
+def get_video_duration_seconds(video_id: str) -> int:
+    """Fetch only contentDetails so usage limits are enforced server-side.
+
+    This intentionally does not trust the browser for billing/usage metadata.
+    """
+    youtube = _youtube_public_client()
+    try:
+        response = youtube.videos().list(part="contentDetails", id=video_id, maxResults=1).execute()
+        items = response.get("items", [])
+        if not items:
+            return 0
+        return _duration_seconds(items[0].get("contentDetails", {}).get("duration"))
+    except HttpError as exc:
+        raise_for_youtube_error(exc)
+        raise
+
+
 def _normalize_video(item: dict) -> dict:
     snippet = item.get("snippet", {})
     stats = item.get("statistics", {})
@@ -60,13 +77,7 @@ def _published_sort_key(video: dict) -> str:
 
 
 def discover_videos(keyword: str = "", region: str = "BR", max_results: int = 12, days: int = 14) -> list[dict]:
-    """Return newly published long-form videos suitable for Shorts extraction.
-
-    YouTube's ``videoDuration=long`` filter only guarantees videos longer than
-    20 minutes, so the exact 50-minute requirement is enforced after fetching
-    contentDetails. Results are ordered by publication date, not by lifetime
-    view count, so the workspace surfaces fresh source material first.
-    """
+    """Return newly published long-form videos suitable for Shorts extraction."""
     youtube = _youtube_public_client()
     region = (region or settings.youtube_default_region).upper()
     max_results = max(1, min(max_results, 25))

@@ -26,13 +26,7 @@ except ImportError:  # pragma: no cover - Windows/local fallback
 
 @contextmanager
 def _schema_lock():
-    """Serialize SQLite DDL between the API and worker processes.
-
-    Both processes start in the same container. Without a process lock they can
-    execute create_all at the same time during a deploy, which can leave the API
-    restarting with SQLite 'database is locked' errors while the Next.js frontend
-    continues serving the login page.
-    """
+    """Serialize SQLite DDL between the API and worker processes."""
     if engine.url.get_backend_name() != "sqlite" or fcntl is None:
         yield
         return
@@ -54,6 +48,8 @@ def initialize_database(*, attempts: int = 12, delay_seconds: float = 1.0) -> No
             with _schema_lock():
                 Base.metadata.create_all(bind=engine)
                 _ensure_clip_caption_columns()
+                _ensure_source_video_usage_columns()
+                _ensure_tenant_plan_billing_columns()
                 _ensure_publications_reset_marker()
             return
         except OperationalError as exc:
@@ -66,31 +62,55 @@ def initialize_database(*, attempts: int = 12, delay_seconds: float = 1.0) -> No
         raise last_error
 
 
-def _ensure_clip_caption_columns() -> None:
+def _add_missing_columns(table: str, ddl: dict[str, str]) -> None:
     inspector = inspect(engine)
-    existing = {column["name"] for column in inspector.get_columns("saas_clips")}
-    ddl = {
-        "caption_position": "caption_position VARCHAR(20) DEFAULT 'bottom' NOT NULL",
-        "caption_margin_v": "caption_margin_v INTEGER DEFAULT 120 NOT NULL",
-        "caption_font_size": "caption_font_size INTEGER DEFAULT 18 NOT NULL",
-    }
+    existing = {column["name"] for column in inspector.get_columns(table)}
     missing = [(column, statement) for column, statement in ddl.items() if column not in existing]
     if not missing:
         return
-
     clause = "ADD COLUMN" if engine.url.get_backend_name() == "sqlite" else "ADD COLUMN IF NOT EXISTS"
     with engine.begin() as connection:
         for _, statement in missing:
-            connection.execute(text(f"ALTER TABLE saas_clips {clause} {statement}"))
+            connection.execute(text(f"ALTER TABLE {table} {clause} {statement}"))
+
+
+def _ensure_clip_caption_columns() -> None:
+    _add_missing_columns(
+        "saas_clips",
+        {
+            "caption_position": "caption_position VARCHAR(20) DEFAULT 'bottom' NOT NULL",
+            "caption_margin_v": "caption_margin_v INTEGER DEFAULT 120 NOT NULL",
+            "caption_font_size": "caption_font_size INTEGER DEFAULT 18 NOT NULL",
+        },
+    )
+
+
+def _ensure_source_video_usage_columns() -> None:
+    # Additive only. Legacy source videos receive duration 0 and therefore are
+    # not retroactively charged against the new monthly minute allowance.
+    _add_missing_columns(
+        "saas_source_videos",
+        {"duration_seconds": "duration_seconds INTEGER DEFAULT 0 NOT NULL"},
+    )
+
+
+def _ensure_tenant_plan_billing_columns() -> None:
+    # Keep every Kiwify and legacy field untouched while adding Asaas metadata.
+    _add_missing_columns(
+        "saas_tenant_plans",
+        {
+            "billing_provider": "billing_provider VARCHAR(30) DEFAULT 'legacy' NOT NULL",
+            "billing_cycle": "billing_cycle VARCHAR(20) DEFAULT 'monthly' NOT NULL",
+            "asaas_checkout_id": "asaas_checkout_id VARCHAR(120)",
+            "asaas_customer_id": "asaas_customer_id VARCHAR(120)",
+            "asaas_subscription_id": "asaas_subscription_id VARCHAR(120)",
+            "asaas_payment_id": "asaas_payment_id VARCHAR(120)",
+        },
+    )
 
 
 def _ensure_publications_reset_marker() -> None:
-    """Create one persistent cutoff used to hide legacy queue items.
-
-    This intentionally does not delete clips, jobs, source videos or media files.
-    It only records when the Publications queue was reset, so the current
-    superadmin workspace can start clean without damaging project history.
-    """
+    """Create one persistent cutoff used to hide legacy queue items."""
     reset_at = datetime.now(timezone.utc)
     with engine.begin() as connection:
         connection.execute(

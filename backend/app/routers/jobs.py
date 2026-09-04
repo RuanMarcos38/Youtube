@@ -8,19 +8,27 @@ from ..config import settings
 from ..database import get_db
 from ..models import Job, SourceVideo, User
 from ..schemas import JobCreate, JobOut
-from ..services.billing import can_use_tool
+from ..services.billing import can_use_tool, ensure_plan
 from ..services.downloader import download_access_configured
+from ..services.plans import can_create_job
 from ..services.serializers import job_to_dict
+from ..services.youtube_search import get_video_duration_seconds
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 HIDDEN_PROCESSING_STATUSES = ("ready_for_review",)
 
 
-def _ensure_job_can_be_queued(user: User, db: Session) -> None:
+def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, requested_clips: int) -> None:
     allowed, reason = can_use_tool(db, user)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+
+    if user.role != "superadmin":
+        plan = ensure_plan(db, user.tenant_id)
+        allowed, reason = can_create_job(db, plan, duration_seconds, requested_clips)
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
 
     if settings.environment.strip().lower() == "production" and not download_access_configured():
         raise HTTPException(
@@ -52,6 +60,23 @@ def _create_queued_job(db: Session, user: User, source: SourceVideo, requested_c
     return job_to_dict(job)
 
 
+def _validated_duration(payload: JobCreate, source: SourceVideo | None) -> int:
+    if payload.duration_seconds > 0:
+        return payload.duration_seconds
+    if source and source.duration_seconds > 0:
+        return source.duration_seconds
+    try:
+        duration = get_video_duration_seconds(payload.video_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível validar a duração do vídeo para aplicar o limite do plano. Tente novamente.",
+        ) from exc
+    if duration <= 0:
+        raise HTTPException(status_code=409, detail="A duração do vídeo não pôde ser identificada.")
+    return duration
+
+
 @router.post("", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not payload.rights_confirmed:
@@ -60,13 +85,14 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
             detail="Confirme que você possui direitos, licença ou autorização para reutilizar o conteúdo.",
         )
 
-    _ensure_job_can_be_queued(user, db)
-
     source = (
         db.query(SourceVideo)
         .filter(SourceVideo.user_id == user.id, SourceVideo.youtube_id == payload.video_id)
         .first()
     )
+    duration_seconds = _validated_duration(payload, source)
+    _ensure_job_can_be_queued(user, db, duration_seconds, payload.requested_clips)
+
     if source is None:
         source = SourceVideo(
             tenant_id=user.tenant_id,
@@ -76,6 +102,7 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
             channel_title=payload.channel_title,
             original_url=str(payload.url or f"https://www.youtube.com/watch?v={payload.video_id}"),
             thumbnail_url=payload.thumbnail_url,
+            duration_seconds=duration_seconds,
             rights_confirmed=True,
         )
         db.add(source)
@@ -84,6 +111,7 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
         source.title = payload.title
         source.channel_title = payload.channel_title
         source.thumbnail_url = payload.thumbnail_url
+        source.duration_seconds = duration_seconds
         source.rights_confirmed = True
 
     return _create_queued_job(db, user, source, payload.requested_clips)
@@ -91,8 +119,6 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
 
 @router.get("", response_model=list[JobOut])
 def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Completed jobs are intentionally hidden from the operational queue. Their
-    # clips/history remain stored; failed and active jobs stay visible for action.
     jobs = (
         db.query(Job)
         .options(joinedload(Job.source_video), joinedload(Job.clips))
@@ -119,7 +145,12 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
     if not original.source_video:
         raise HTTPException(status_code=409, detail="O vídeo de origem deste processamento não foi encontrado.")
 
-    _ensure_job_can_be_queued(user, db)
+    # Jobs criados antes do controle por minutos não possuem duração persistida.
+    # Preserve o comportamento de reenvio existente sem criar uma dependência
+    # nova da API do YouTube. Eles continuam sujeitos ao limite de Shorts, mas
+    # não são cobrados retroativamente em minutos.
+    duration_seconds = max(0, int(original.source_video.duration_seconds or 0))
+    _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips)
     return _create_queued_job(db, user, original.source_video, original.requested_clips)
 
 
