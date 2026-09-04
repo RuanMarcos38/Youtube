@@ -1,3 +1,5 @@
+import shutil
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
@@ -115,6 +117,26 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
 
     _ensure_job_can_be_queued(user, db)
     return _create_queued_job(db, user, original.source_video, original.requested_clips)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_failed_job(job_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    job = (
+        db.query(Job)
+        .options(joinedload(Job.clips))
+        .filter(Job.id == job_id, Job.user_id == user.id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado para este perfil.")
+    if job.status != "failed":
+        raise HTTPException(status_code=409, detail="Apenas processamentos que falharam podem ser excluídos.")
+
+    work_dir = settings.data_path / "users" / str(user.id) / "jobs" / str(job.id)
+    db.delete(job)
+    db.commit()
+    shutil.rmtree(work_dir, ignore_errors=True)
+    return None
 
 
 @router.get("/{job_id}", response_model=JobOut)
