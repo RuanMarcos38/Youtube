@@ -139,6 +139,16 @@ class UploadRequest(BaseModel):
     privacy_status: str = Field(default="public", pattern="^(private|unlisted|public)$")
 
 
+class BatchUploadRequest(BaseModel):
+    clip_ids: list[int] = Field(min_length=1, max_length=100)
+
+
+class BatchUploadResponse(BaseModel):
+    queued: int
+    skipped: int
+    clip_ids: list[int]
+
+
 class OAuthStartResponse(BaseModel):
     authorization_url: str
 
@@ -149,6 +159,38 @@ class OAuthStatusResponse(BaseModel):
     channel_id: str | None = None
     channel_title: str | None = None
     redirect_uri: str
+
+
+class TikTokOAuthStatusResponse(BaseModel):
+    configured: bool
+    connected: bool
+    display_name: str | None = None
+    redirect_uri: str
+
+
+class TikTokCreatorInfoResponse(BaseModel):
+    creator_username: str = ""
+    creator_nickname: str = ""
+    privacy_level_options: list[str] = []
+    comment_disabled: bool = False
+    duet_disabled: bool = False
+    stitch_disabled: bool = False
+    max_video_post_duration_sec: int = 60
+
+
+class TikTokBatchUploadRequest(BaseModel):
+    clip_ids: list[int] = Field(min_length=1, max_length=100)
+    privacy_level: str = Field(min_length=1, max_length=60)
+    allow_comment: bool = False
+    allow_duet: bool = False
+    allow_stitch: bool = False
+    music_usage_confirmed: bool
+
+
+class TikTokBatchUploadResponse(BaseModel):
+    queued: int
+    skipped: int
+    clip_ids: list[int]
 
 
 class YouTubeVideoMetric(BaseModel):
