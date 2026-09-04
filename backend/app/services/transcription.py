@@ -1,3 +1,4 @@
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -20,18 +21,53 @@ _MODEL_KEY: tuple[str, str, str, int, int] | None = None
 _MODEL_INIT_LOCK = Lock()
 
 
+def _cgroup_cpu_limit() -> int | None:
+    """Best-effort CPU quota detection for Docker/EasyPanel containers."""
+    try:
+        cpu_max = Path("/sys/fs/cgroup/cpu.max")
+        if cpu_max.exists():
+            quota_text, period_text = cpu_max.read_text(encoding="utf-8").strip().split()[:2]
+            if quota_text != "max":
+                quota = int(quota_text)
+                period = max(1, int(period_text))
+                return max(1, math.ceil(quota / period))
+    except Exception:
+        pass
+
+    try:
+        quota_path = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+        period_path = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+        if quota_path.exists() and period_path.exists():
+            quota = int(quota_path.read_text(encoding="utf-8").strip())
+            period = max(1, int(period_path.read_text(encoding="utf-8").strip()))
+            if quota > 0:
+                return max(1, math.ceil(quota / period))
+    except Exception:
+        pass
+    return None
+
+
+def _available_cpu_threads() -> int:
+    host = max(1, int(os.cpu_count() or 1))
+    cgroup = _cgroup_cpu_limit()
+    return min(host, cgroup) if cgroup else host
+
+
 def _parallelism() -> int:
-    return max(1, min(int(settings.local_whisper_parallelism or 1), 5))
+    requested = max(1, min(int(settings.local_whisper_parallelism or 1), 5))
+    available = _available_cpu_threads()
+    # Give each Whisper inference at least ~2 CPU threads when possible. Five
+    # videos remain active in the pipeline, but the heaviest stage is bounded to
+    # what the actual EasyPanel CPU quota can sustain without thrashing.
+    safe_for_cpu = max(1, available // 2)
+    return max(1, min(requested, safe_for_cpu))
 
 
 def _cpu_threads_per_transcription() -> int:
     configured = int(settings.local_whisper_cpu_threads or 0)
     if configured > 0:
         return max(1, configured)
-    available = max(1, int(os.cpu_count() or 1))
-    # Divide CPU resources between simultaneous Whisper calls instead of letting
-    # every job spawn threads for every core. This is critical when five videos
-    # are active on one VPS.
+    available = _available_cpu_threads()
     return max(1, available // _parallelism())
 
 
@@ -89,8 +125,8 @@ def _transcribe_local(
 
         try:
             # CTranslate2 supports parallel generation through num_workers. The
-            # semaphore keeps the number of simultaneous CPU-heavy calls bounded
-            # while other pipeline stages continue for up to five videos.
+            # semaphore keeps CPU-heavy calls bounded while other pipeline
+            # stages continue for up to five videos.
             with _TRANSCRIBE_SLOTS:
                 chunk_segments, _info = model.transcribe(
                     str(audio_path),
