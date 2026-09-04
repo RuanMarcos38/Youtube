@@ -4,7 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import admin, auth, billing, clips, diagnostics, editor_ai, jobs, media, system, tiktok_auth, videos, youtube_auth
 from .services.bootstrap import ensure_superadmin
+from .services.caption_removal_runtime import install_editor_api_caption_queue
 from .services.database_bootstrap import initialize_database
+
+
+# Preserve the existing editor routes and storage. This only makes the current
+# "remove captions" action queue a real clean render for direct-upload projects.
+install_editor_api_caption_queue(editor_ai)
 
 
 @asynccontextmanager
