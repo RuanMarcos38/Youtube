@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.routers.clips import _normalize_subtitle_text
-from app.schemas import ClipCaptionUpdateRequest
+from app.schemas import ClipCaptionUpdateRequest, UploadRequest
 
 
 def test_plain_caption_text_is_converted_to_srt():
@@ -20,3 +20,7 @@ def test_existing_srt_is_preserved():
 def test_caption_settings_reject_invalid_ranges():
     with pytest.raises(ValidationError):
         ClipCaptionUpdateRequest(caption_position="bottom", caption_margin_v=10, caption_font_size=40)
+
+
+def test_upload_request_defaults_to_public():
+    assert UploadRequest().privacy_status == "public"
