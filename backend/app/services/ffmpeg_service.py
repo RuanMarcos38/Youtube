@@ -1,10 +1,15 @@
 from pathlib import Path
 import subprocess
+from threading import Lock
 from ..config import settings
 
 
 class FFmpegError(RuntimeError):
     pass
+
+
+_FFMPEG_READY = False
+_FFMPEG_CHECK_LOCK = Lock()
 
 
 def _run(command: list[str]) -> str:
@@ -19,8 +24,15 @@ def _run(command: list[str]) -> str:
 
 
 def ensure_ffmpeg() -> None:
-    _run([settings.ffmpeg_binary, "-version"])
-    _run([settings.ffprobe_binary, "-version"])
+    global _FFMPEG_READY
+    if _FFMPEG_READY:
+        return
+    with _FFMPEG_CHECK_LOCK:
+        if _FFMPEG_READY:
+            return
+        _run([settings.ffmpeg_binary, "-version"])
+        _run([settings.ffprobe_binary, "-version"])
+        _FFMPEG_READY = True
 
 
 def get_duration(video_path: Path) -> float:
