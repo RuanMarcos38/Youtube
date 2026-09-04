@@ -66,7 +66,10 @@ def _claim_next_upload() -> tuple[int, str] | None:
         clip = db.query(Clip).filter(Clip.status == "upload_queued").order_by(Clip.id.asc()).first()
         if not clip:
             return None
-        privacy = clip.upload_privacy or "private"
+        # Public is the only publication mode supported by ShortsFlow.
+        # Legacy values saved before this policy are intentionally ignored.
+        privacy = "public"
+        clip.upload_privacy = privacy
         clip.status = "uploading"
         clip.upload_error = None
         db.commit()
