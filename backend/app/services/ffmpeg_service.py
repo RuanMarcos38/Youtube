@@ -135,6 +135,12 @@ def render_vertical_clip(
         style = _subtitle_force_style(caption_position, caption_margin_v, caption_font_size)
         filters.append(f"subtitles='{escaped}':force_style='{style}'")
 
+    preset = (settings.ffmpeg_preset or "veryfast").strip()
+    if preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
+        preset = "veryfast"
+    crf = max(16, min(30, int(settings.ffmpeg_crf or 21)))
+    threads = max(1, min(8, int(settings.ffmpeg_threads_per_job or 2)))
+
     _run([
         settings.ffmpeg_binary, "-y",
         "-ss", f"{start_seconds:.3f}",
@@ -142,7 +148,8 @@ def render_vertical_clip(
         "-t", f"{duration:.3f}",
         "-vf", ",".join(filters),
         "-map", "0:v:0", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "22",
+        "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+        "-threads", str(threads),
         "-c:a", "aac", "-b:a", "128k",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         str(output_path),
