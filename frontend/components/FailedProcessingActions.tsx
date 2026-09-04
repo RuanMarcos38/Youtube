@@ -57,7 +57,7 @@ export default function FailedProcessingActions() {
     try {
       await deleteJob(job.id);
       setJobs((current) => current.filter((item) => item.id !== job.id));
-      await refresh();
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível excluir este processamento.");
     } finally {
