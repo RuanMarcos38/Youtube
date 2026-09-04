@@ -48,6 +48,11 @@ def get_duration(video_path: Path) -> float:
 
 def extract_audio_chunks(video_path: Path, output_dir: Path, segment_seconds: int = 600) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    # A retry can reuse the same job directory after settings changed. Remove
+    # only generated audio chunks so stale 10-minute files are never mixed with
+    # the new 20-minute split. Source video, clips and credentials are untouched.
+    for old_chunk in output_dir.glob("audio_*.mp3"):
+        old_chunk.unlink(missing_ok=True)
     pattern = output_dir / "audio_%03d.mp3"
     _run([
         settings.ffmpeg_binary, "-y",
