@@ -95,7 +95,13 @@ class Settings(BaseSettings):
     google_oauth_project_id: str = ""
     youtube_oauth_redirect_uri: str = "http://localhost:8000/api/youtube/oauth/callback"
     youtube_default_region: str = "BR"
-    youtube_default_privacy: str = "private"
+    youtube_default_privacy: str = "public"
+
+    # TikTok is isolated from all existing Google/YouTube credentials. These
+    # values remain empty until an approved TikTok Developer app is connected.
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
+    tiktok_oauth_redirect_uri: str = "http://localhost:8000/api/tiktok/oauth/callback"
 
     ytdlp_cookie_file: str = ""
     ytdlp_cookies_b64: str = ""
