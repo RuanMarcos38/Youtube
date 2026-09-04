@@ -67,6 +67,7 @@ def test_select_clips_retries_with_smaller_transcript_on_rate_limit(monkeypatch)
             self.api_key = api_key
             self.responses = fake_responses
 
+    monkeypatch.setattr(ai_service.settings, "clip_planning_provider", "openai")
     monkeypatch.setattr(ai_service.settings, "openai_api_key", "sk-test")
     monkeypatch.setattr(ai_service.settings, "max_transcript_chars", 180000)
     monkeypatch.setattr(ai_service, "OpenAI", _FakeOpenAI)
@@ -76,3 +77,28 @@ def test_select_clips_retries_with_smaller_transcript_on_rate_limit(monkeypatch)
     assert len(clips) == 1
     assert len(fake_responses.call_lengths) == 2
     assert fake_responses.call_lengths[1] < fake_responses.call_lengths[0]
+
+
+def test_select_clips_local_requires_no_openai_key(monkeypatch):
+    monkeypatch.setattr(ai_service.settings, "clip_planning_provider", "local")
+    monkeypatch.setattr(ai_service.settings, "openai_api_key", "")
+
+    segments = []
+    for index in range(40):
+        start = index * 3.0
+        segments.append(
+            {
+                "start": start,
+                "end": start + 2.8,
+                "text": (
+                    "Esse é um ponto importante porque mostra como melhorar o resultado "
+                    f"sem aumentar o custo etapa {index}."
+                ),
+            }
+        )
+
+    clips = ai_service.select_clips(segments, 120.0, 2, "Podcast de estratégia")
+
+    assert len(clips) == 2
+    assert all(15.0 <= clip.end - clip.start <= 60.0 for clip in clips)
+    assert all("sem uso de API paga" in clip.reason for clip in clips)
