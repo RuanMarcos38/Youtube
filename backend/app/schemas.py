@@ -134,7 +134,9 @@ class JobOut(BaseModel):
 
 
 class UploadRequest(BaseModel):
-    privacy_status: str = Field(default="private", pattern="^(private|unlisted|public)$")
+    # Kept compatible with older frontends, but the API always publishes as
+    # public. New requests default to public as the only supported mode.
+    privacy_status: str = Field(default="public", pattern="^(private|unlisted|public)$")
 
 
 class OAuthStartResponse(BaseModel):
