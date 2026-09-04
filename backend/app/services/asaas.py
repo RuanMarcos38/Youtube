@@ -137,10 +137,6 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
                 "value": round(price_cents / 100, 2),
             }
         ],
-        "customerData": {
-            "name": user.display_name,
-            "email": user.email,
-        },
         "subscription": {
             "cycle": cycle,
             "nextDueDate": first_due,
@@ -157,10 +153,8 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
 
     tenant_plan = ensure_plan(db, user.tenant_id)
     tenant_plan.asaas_checkout_id = checkout_id
-    tenant_plan.billing_provider = "asaas"
-    tenant_plan.billing_cycle = billing_cycle
-    # A criação do checkout não ativa a assinatura. O plano atual continua
-    # intacto até o evento CHECKOUT_PAID chegar pelo webhook.
+    # Criar um checkout nunca troca o provedor, ciclo, status ou plano atual.
+    # Essas mudanças acontecem somente depois do CHECKOUT_PAID autenticado.
     db.commit()
 
     return {
@@ -277,7 +271,6 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
     tenant_id = plan.tenant_id if plan else None
 
     if plan:
-        plan.billing_provider = "asaas"
         checkout_id = _resource_id(checkout.get("id"))
         subscription_id = _resource_id(subscription.get("id")) or _resource_id(payment.get("subscription"))
         customer_id = _resource_id(checkout.get("customer")) or _resource_id(subscription.get("customer")) or _resource_id(payment.get("customer"))
@@ -292,6 +285,7 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
             plan.asaas_payment_id = payment_id
 
         if event_type == "CHECKOUT_PAID":
+            plan.billing_provider = "asaas"
             if requested_plan_code:
                 definition = get_plan_definition(requested_plan_code)
                 plan.plan_code = requested_plan_code
@@ -306,20 +300,20 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
             if tenant:
                 tenant.billing_status = "active"
 
-        elif event_type in {"PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"}:
+        elif event_type in {"PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"} and plan.billing_provider == "asaas":
             plan.billing_status = "active"
             plan.current_period_start = datetime.now(timezone.utc)
             tenant = db.get(Tenant, plan.tenant_id)
             if tenant:
                 tenant.billing_status = "active"
 
-        elif event_type == "PAYMENT_OVERDUE":
+        elif event_type == "PAYMENT_OVERDUE" and plan.billing_provider == "asaas":
             plan.billing_status = "past_due"
             tenant = db.get(Tenant, plan.tenant_id)
             if tenant:
                 tenant.billing_status = "past_due"
 
-        elif event_type in {"PAYMENT_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED", "SUBSCRIPTION_INACTIVATED", "SUBSCRIPTION_DELETED"}:
+        elif event_type in {"PAYMENT_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED", "SUBSCRIPTION_INACTIVATED", "SUBSCRIPTION_DELETED"} and plan.billing_provider == "asaas":
             plan.billing_status = "inactive"
             tenant = db.get(Tenant, plan.tenant_id)
             if tenant:
