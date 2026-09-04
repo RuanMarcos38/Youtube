@@ -102,3 +102,41 @@ def test_retry_rejects_running_job(monkeypatch):
             raise AssertionError("retry_job should reject non-failed jobs")
     finally:
         db.close()
+
+
+def test_delete_failed_job_removes_record_and_workdir_but_keeps_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs_router.settings, "data_dir", str(tmp_path))
+    db = _session()
+    try:
+        user, failed = _user_with_failed_job(db)
+        job_id = failed.id
+        source_id = failed.source_video_id
+        work_dir = tmp_path / "users" / str(user.id) / "jobs" / str(job_id)
+        work_dir.mkdir(parents=True)
+        (work_dir / "partial.tmp").write_text("incomplete", encoding="utf-8")
+
+        result = jobs_router.delete_failed_job(job_id, user=user, db=db)
+
+        assert result is None
+        assert db.get(Job, job_id) is None
+        assert db.get(SourceVideo, source_id) is not None
+        assert not work_dir.exists()
+    finally:
+        db.close()
+
+
+def test_delete_rejects_running_job():
+    db = _session()
+    try:
+        user, failed = _user_with_failed_job(db)
+        failed.status = "rendering"
+        db.commit()
+
+        try:
+            jobs_router.delete_failed_job(failed.id, user=user, db=db)
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("delete_failed_job should reject non-failed jobs")
+    finally:
+        db.close()

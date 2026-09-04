@@ -141,6 +141,7 @@ export async function createJob(video: TrendingVideo, requestedClips: number): P
 
 export const listJobs = () => api<Job[]>("/api/jobs");
 export const retryJob = (id: number) => api<Job>(`/api/jobs/${id}/retry`, { method: "POST" });
+export const deleteJob = (id: number) => api<void>(`/api/jobs/${id}`, { method: "DELETE" });
 export const listClips = () => api<Clip[]>("/api/clips");
 export const approveClip = (id: number) => api<Clip>(`/api/clips/${id}/approve`, { method: "POST" });
 export const updateClipCaptions = (
