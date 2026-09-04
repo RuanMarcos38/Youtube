@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 
 from .config import settings
 from .database import SessionLocal
-from .models import Clip, Job
+from .models import Clip, Job, TikTokPost
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
 from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
+from .services.tiktok_upload_task import run_tiktok_upload
 from .services.upload_task import run_upload
 
 PROCESSING_STATES = {
@@ -38,6 +39,9 @@ def _recover_interrupted() -> None:
         for clip in db.query(Clip).filter(Clip.status == "uploading").all():
             clip.status = "upload_queued"
             clip.upload_error = "Recovered after worker restart"
+        for post in db.query(TikTokPost).filter(TikTokPost.status == "uploading").all():
+            post.status = "queued"
+            post.error = "Recovered after worker restart"
         db.commit()
     finally:
         db.close()
@@ -78,6 +82,20 @@ def _claim_next_upload() -> tuple[int, str] | None:
         db.close()
 
 
+def _claim_next_tiktok_post() -> int | None:
+    db = SessionLocal()
+    try:
+        post = db.query(TikTokPost).filter(TikTokPost.status == "queued").order_by(TikTokPost.id.asc()).first()
+        if not post:
+            return None
+        post.status = "uploading"
+        post.error = None
+        db.commit()
+        return post.id
+    finally:
+        db.close()
+
+
 def _collect_finished_jobs(active: dict[Future, int]) -> None:
     for future, job_id in list(active.items()):
         if not future.done():
@@ -106,6 +124,7 @@ def main() -> None:
     concurrency = max(1, min(int(settings.worker_concurrency), 4))
     active_jobs: dict[Future, int] = {}
     active_upload: Future | None = None
+    active_tiktok_upload: Future | None = None
     active_probe: Future | None = None
     active_editor: Future | None = None
     last_probe_started = 0.0
@@ -113,6 +132,7 @@ def main() -> None:
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-upload") as upload_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-tiktok") as tiktok_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-probe") as probe_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-editor-ai") as editor_pool,
     ):
@@ -126,6 +146,13 @@ def main() -> None:
                 except Exception:
                     pass
                 active_upload = None
+
+            if active_tiktok_upload is not None and active_tiktok_upload.done():
+                try:
+                    active_tiktok_upload.result()
+                except Exception:
+                    pass
+                active_tiktok_upload = None
 
             if active_probe is not None and active_probe.done():
                 try:
@@ -158,6 +185,11 @@ def main() -> None:
                 upload = _claim_next_upload()
                 if upload is not None:
                     active_upload = upload_pool.submit(run_upload, upload[0], upload[1])
+
+            if active_tiktok_upload is None:
+                post_id = _claim_next_tiktok_post()
+                if post_id is not None:
+                    active_tiktok_upload = tiktok_pool.submit(run_tiktok_upload, post_id)
 
             if active_editor is None:
                 editor_task = claim_next_editor_task()
