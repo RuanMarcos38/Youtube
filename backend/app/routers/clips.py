@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -5,15 +6,39 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Clip, User
+from ..models import Clip, SystemSetting, User
 from ..schemas import ClipCaptionUpdateRequest, ClipOut, UploadRequest
+from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
 from ..services.ffmpeg_service import FFmpegError, ensure_ffmpeg, render_vertical_clip
 from ..services.serializers import clip_to_dict
 from ..services.youtube_oauth import get_connection_status
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
-HIDDEN_PUBLICATION_STATUSES = ("upload_queued", "uploading", "uploaded")
+HIDDEN_PUBLICATION_STATUSES = ("upload_queued", "uploading", "uploaded", "archived")
+PUBLIC_UPLOAD_PRIVACY = "public"
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _publication_reset_at(user: User, db: Session) -> datetime | None:
+    # The one-time cleanup is intentionally limited to the superadmin workspace
+    # that requested the Publications screen to start clean. Other profiles keep
+    # their pending review queue untouched.
+    if user.role != "superadmin":
+        return None
+    marker = db.get(SystemSetting, PUBLICATIONS_RESET_KEY)
+    if not marker or not marker.value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(marker.value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _utc_datetime(parsed)
 
 
 @router.get("", response_model=list[ClipOut])
@@ -25,6 +50,11 @@ def list_clips(user: User = Depends(get_current_user), db: Session = Depends(get
         .limit(100)
         .all()
     )
+
+    reset_at = _publication_reset_at(user, db)
+    if reset_at is not None:
+        clips = [clip for clip in clips if _utc_datetime(clip.created_at) >= reset_at]
+
     return [clip_to_dict(clip) for clip in clips]
 
 
@@ -146,8 +176,13 @@ def upload_clip(
         raise HTTPException(status_code=409, detail="Aprove o corte antes de enviar.")
     if not get_connection_status(db, user.id)["connected"]:
         raise HTTPException(status_code=409, detail="Conecte o YouTube deste perfil antes de publicar.")
+
+    # Public is the only allowed publication mode in ShortsFlow. The request
+    # field is kept for backward compatibility with already deployed frontends,
+    # but private/unlisted values are intentionally ignored.
+    _ = payload
     clip.status = "upload_queued"
-    clip.upload_privacy = payload.privacy_status
+    clip.upload_privacy = PUBLIC_UPLOAD_PRIVACY
     clip.upload_error = None
     db.commit()
     db.refresh(clip)
