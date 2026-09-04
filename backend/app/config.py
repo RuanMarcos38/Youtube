@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     openai_transcription_model: str = "whisper-1"
     max_transcript_chars: int = 180000
 
+    # The normal Shorts pipeline is local-first and does not require paid API
+    # credits. OpenAI remains available only when explicitly selected.
+    transcription_provider: str = "local"
+    local_whisper_model: str = "small"
+    local_whisper_device: str = "cpu"
+    local_whisper_compute_type: str = "int8"
+    local_whisper_language: str = ""
+    local_whisper_beam_size: int = 3
+    allow_openai_transcription_fallback: bool = False
+    clip_planning_provider: str = "local"
+
     youtube_api_key: str = ""
     google_oauth_client_secrets_file: str = "client_secret.json"
     google_oauth_client_id: str = ""
