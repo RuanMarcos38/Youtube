@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg ca-certificates fonts-dejavu-core \
+    ffmpeg ca-certificates fonts-dejavu-core libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
