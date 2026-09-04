@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 from ..auth import create_session, delete_session, get_current_user, hash_password, normalize_email, require_owner, verify_password
 from ..config import settings
 from ..database import get_db
-from ..models import PaymentEvent, ProvisionedCredential, Tenant, User, YouTubeConnection
+from ..models import PaymentEvent, ProvisionedCredential, Tenant, TenantPlan, User, YouTubeConnection
 from ..schemas import ActivationRequest, LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
 from ..services.billing import ensure_plan, plan_payload
+from ..services.plans import can_add_user
 from ..services.system_config import get_public_config_safe
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -27,10 +28,25 @@ def _user_payload(user: User, db: Session) -> dict:
         "checkout_url": public_config["checkout_url"],
         "upgrade_url": public_config["upgrade_url"],
         "plan_code": plan["plan_code"],
+        "plan_name": plan["plan_name"],
+        "billing_provider": plan["billing_provider"],
+        "billing_cycle": plan["billing_cycle"],
         "monthly_job_limit": plan["monthly_job_limit"],
         "unlimited": plan["unlimited"],
         "jobs_used": plan["jobs_used"],
         "jobs_remaining": plan["jobs_remaining"],
+        "processing_minutes_limit": plan["processing_minutes_limit"],
+        "processing_minutes_used": plan["processing_minutes_used"],
+        "processing_minutes_remaining": plan["processing_minutes_remaining"],
+        "shorts_limit": plan["shorts_limit"],
+        "shorts_used": plan["shorts_used"],
+        "shorts_remaining": plan["shorts_remaining"],
+        "channel_limit": plan["channel_limit"],
+        "channels_used": plan["channels_used"],
+        "channels_remaining": plan["channels_remaining"],
+        "user_limit": plan["user_limit"],
+        "users_used": plan["users_used"],
+        "users_remaining": plan["users_remaining"],
     }
 
 
@@ -57,7 +73,7 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    tenant = Tenant(name=(payload.company_name or payload.name).strip(), billing_status="pending")
+    tenant = Tenant(name=(payload.company_name or payload.name).strip(), billing_status="trial")
     db.add(tenant)
     db.flush()
     user = User(
@@ -69,6 +85,21 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
         active=True,
     )
     db.add(user)
+    db.flush()
+    # O teste gratuito é um plano real, com limites explícitos. Isso evita
+    # qualquer alteração nos usuários legados que já possuem TenantPlan.
+    db.add(
+        TenantPlan(
+            tenant_id=tenant.id,
+            plan_code="trial",
+            billing_status="trial",
+            billing_provider="shortsflow",
+            billing_cycle="monthly",
+            monthly_job_limit=999999,
+            unlimited=False,
+            subscription_value_cents=0,
+        )
+    )
     db.commit()
     db.refresh(user)
     db.refresh(tenant)
@@ -111,7 +142,7 @@ def activate_paid_access(payload: ActivationRequest, response: Response, db: Ses
     if not event:
         raise HTTPException(
             status_code=404,
-            detail="Pagamento aprovado não localizado. Use o mesmo e-mail da compra e o código do pedido informado pela Kiwify.",
+            detail="Pagamento aprovado não localizado. Confira o mesmo e-mail da compra e o código do pedido.",
         )
 
     credential = (
@@ -192,6 +223,13 @@ def create_team_user(payload: TeamUserCreate, owner: User = Depends(require_owne
     email = normalize_email(str(payload.email))
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="Este e-mail já possui uma conta.")
+
+    if owner.role != "superadmin":
+        plan = ensure_plan(db, owner.tenant_id)
+        allowed, reason = can_add_user(db, plan)
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+
     try:
         password_hash = hash_password(payload.password)
     except ValueError as exc:
