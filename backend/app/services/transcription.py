@@ -1,6 +1,7 @@
+import os
 from collections.abc import Callable
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 
 from faster_whisper import WhisperModel
 from openai import OpenAI
@@ -15,9 +16,26 @@ class TranscriptionError(RuntimeError):
 ProgressHook = Callable[[int, int, Path], None]
 
 _MODEL: WhisperModel | None = None
-_MODEL_KEY: tuple[str, str, str] | None = None
+_MODEL_KEY: tuple[str, str, str, int, int] | None = None
 _MODEL_INIT_LOCK = Lock()
-_TRANSCRIBE_LOCK = Lock()
+
+
+def _parallelism() -> int:
+    return max(1, min(int(settings.local_whisper_parallelism or 1), 5))
+
+
+def _cpu_threads_per_transcription() -> int:
+    configured = int(settings.local_whisper_cpu_threads or 0)
+    if configured > 0:
+        return max(1, configured)
+    available = max(1, int(os.cpu_count() or 1))
+    # Divide CPU resources between simultaneous Whisper calls instead of letting
+    # every job spawn threads for every core. This is critical when five videos
+    # are active on one VPS.
+    return max(1, available // _parallelism())
+
+
+_TRANSCRIBE_SLOTS = BoundedSemaphore(_parallelism())
 
 
 def _get_local_model() -> WhisperModel:
@@ -26,7 +44,9 @@ def _get_local_model() -> WhisperModel:
     model_name = (settings.local_whisper_model or "small").strip()
     device = (settings.local_whisper_device or "cpu").strip()
     compute_type = (settings.local_whisper_compute_type or "int8").strip()
-    key = (model_name, device, compute_type)
+    cpu_threads = _cpu_threads_per_transcription()
+    num_workers = _parallelism()
+    key = (model_name, device, compute_type, cpu_threads, num_workers)
 
     with _MODEL_INIT_LOCK:
         if _MODEL is not None and _MODEL_KEY == key:
@@ -39,6 +59,8 @@ def _get_local_model() -> WhisperModel:
                 model_name,
                 device=device,
                 compute_type=compute_type,
+                cpu_threads=cpu_threads,
+                num_workers=num_workers,
                 download_root=str(download_root),
             )
             _MODEL_KEY = key
@@ -66,16 +88,19 @@ def _transcribe_local(
             progress_hook(index, total, audio_path)
 
         try:
-            # Faster-Whisper performs most work while the segment generator is
-            # consumed. Serialize inference so two worker threads do not make a
-            # small CPU-only VPS run out of memory.
-            with _TRANSCRIBE_LOCK:
+            # CTranslate2 supports parallel generation through num_workers. The
+            # semaphore keeps the number of simultaneous CPU-heavy calls bounded
+            # while other pipeline stages continue for up to five videos.
+            with _TRANSCRIBE_SLOTS:
                 chunk_segments, _info = model.transcribe(
                     str(audio_path),
                     language=language,
                     beam_size=max(1, int(settings.local_whisper_beam_size)),
                     vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 500},
                     condition_on_previous_text=False,
+                    temperature=0.0,
+                    word_timestamps=False,
                 )
                 chunk_segments = list(chunk_segments)
         except Exception as exc:
