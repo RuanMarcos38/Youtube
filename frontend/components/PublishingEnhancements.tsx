@@ -17,6 +17,7 @@ import {
   tiktokMetrics,
   tiktokPublicationClips,
   youtubePublicationClips,
+  type TikTokDashboardAlert,
   type TikTokMetrics,
   type TikTokPublicationClip,
   type YouTubeAvailability,
@@ -33,8 +34,28 @@ function privacyLabel(value: string) {
   return labels[value] || value;
 }
 
-function fmtNumber(value?: number) {
+function fmtNumber(value?: number | null) {
   return new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+}
+
+function fmtExact(value?: number | null) {
+  return new Intl.NumberFormat("pt-BR").format(Math.round(value || 0));
+}
+
+function fmtPercent(value?: number | null) {
+  return `${Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}%`;
+}
+
+function fmtSigned(value?: number | null) {
+  const safe = Number(value || 0);
+  return `${safe > 0 ? "+" : ""}${new Intl.NumberFormat("pt-BR").format(safe)}`;
+}
+
+function fmtDateTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
 function fmtCountdown(seconds: number) {
@@ -69,11 +90,28 @@ function youtubeStatusLabel(status?: string) {
   return labels[status || "ready"] || status || "Pronto";
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="rounded-xl border border-[#ececec] bg-[#fafafa] p-3">
       <div className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#777]">{label}</div>
       <div className="mt-1 text-xl font-black text-[#111]">{value}</div>
+      {detail && <div className="mt-1 text-[10px] leading-4 text-[#777]">{detail}</div>}
+    </div>
+  );
+}
+
+function Alert({ alert }: { alert: TikTokDashboardAlert }) {
+  const cls = alert.kind === "success"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+    : alert.kind === "danger"
+      ? "border-red-200 bg-red-50 text-red-800"
+      : alert.kind === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-blue-100 bg-blue-50 text-blue-900";
+  return (
+    <div className={`rounded-xl border p-3 ${cls}`}>
+      <div className="text-xs font-black">{alert.title}</div>
+      <div className="mt-1 text-[10px] leading-4 opacity-80">{alert.detail}</div>
     </div>
   );
 }
@@ -92,6 +130,7 @@ export default function PublishingEnhancements() {
   const [error, setError] = useState("");
   const [ttStatus, setTtStatus] = useState<TikTokStatus | null>(null);
   const [creator, setCreator] = useState<TikTokCreatorInfo | null>(null);
+  const [creatorError, setCreatorError] = useState("");
   const [privacy, setPrivacy] = useState("");
   const [allowComment, setAllowComment] = useState(false);
   const [allowDuet, setAllowDuet] = useState(false);
@@ -158,15 +197,20 @@ export default function PublishingEnhancements() {
         try {
           const info = await tiktokCreatorInfo();
           setCreator(info);
-        } catch {
-          setCreator(null);
+          setCreatorError("");
+          setPrivacy((current) => info.privacy_level_options.includes(current) ? current : "");
+        } catch (err) {
+          // Preserve the last valid creator info during a transient TikTok/API
+          // failure. This avoids making the controls disappear after one 5xx.
+          setCreatorError(err instanceof Error ? err.message : "Não foi possível atualizar as opções do TikTok.");
         }
       } else {
         setCreator(null);
+        setCreatorError("");
         setPrivacy("");
       }
-    } catch {
-      setTtStatus(null);
+    } catch (err) {
+      setCreatorError(err instanceof Error ? err.message : "Não foi possível verificar a conexão do TikTok.");
     }
   }
 
@@ -277,12 +321,8 @@ export default function PublishingEnhancements() {
     if (!musicConfirmed) return setError("Confirme a declaração de uso de música exigida pelo TikTok.");
     setBusy("tiktok"); setError(""); setNotice("");
     try {
-      const latest = await tiktokCreatorInfo();
-      setCreator(latest);
-      if (!latest.privacy_level_options.includes(privacy)) {
-        setPrivacy("");
-        throw new Error("As opções de privacidade do TikTok mudaram. Selecione novamente.");
-      }
+      // The backend validates Creator Info immediately before queueing. Do not
+      // make a duplicate TikTok Creator Info request from the browser.
       const result = await tiktokUploadBatch([...tiktokSelected], {
         privacy_level: privacy,
         allow_comment: allowComment,
@@ -290,10 +330,12 @@ export default function PublishingEnhancements() {
         allow_stitch: allowStitch,
         music_usage_confirmed: musicConfirmed,
       });
-      setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow agora aguarda PUBLISH_COMPLETE do TikTok antes de considerar publicado e remover da aba.`);
+      setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow aguarda PUBLISH_COMPLETE do TikTok antes de considerar publicado e remover da aba.`);
       await refreshQueues();
+      void refreshMetrics(metricDays);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao criar a fila do TikTok.");
+      void refreshTikTok();
     } finally { setBusy(""); }
   }
 
@@ -327,7 +369,7 @@ export default function PublishingEnhancements() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-xs font-black text-[#111]">TikTok {ttStatus?.connected ? `· ${ttStatus.display_name || "conectado"}` : ""}</div>
-              <div className="mt-1 text-[11px] text-[#667085]">A publicação só é concluída quando o TikTok confirma o status final. “Arquivo enviado” não é mais tratado como “post publicado”.</div>
+              <div className="mt-1 text-[11px] text-[#667085]">A publicação só é concluída quando o TikTok confirma o status final. “Arquivo enviado” não é tratado como “post publicado”.</div>
             </div>
             <button type="button" onClick={() => connectTikTok(false)} disabled={!ttStatus?.configured || Boolean(busy)} className="sf-button sf-button-outline disabled:opacity-40">
               {ttStatus?.connected ? "Trocar conta TikTok" : "Conectar TikTok"}
@@ -350,34 +392,117 @@ export default function PublishingEnhancements() {
               <label className="flex max-w-md items-start gap-2 text-[10px] leading-4 text-[#667085]"><input type="checkbox" checked={musicConfirmed} onChange={(e) => setMusicConfirmed(e.target.checked)} className="mt-0.5" /><span>Confirmo o uso de música conforme exigido pelo TikTok.</span></label>
             </div>
           )}
+
+          {ttStatus?.connected && !creator && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <div className="font-black">Opções de publicação ainda não carregadas</div>
+              <div className="mt-1 leading-5">{creatorError || "O TikTok ainda não retornou as opções de privacidade desta conta."}</div>
+              <button type="button" onClick={() => void refreshTikTok()} disabled={Boolean(busy)} className="sf-button sf-button-outline mt-3">Recarregar opções TikTok</button>
+            </div>
+          )}
+          {ttStatus?.connected && creator && creatorError && <div className="mt-3 text-[10px] text-amber-700">Última atualização do TikTok teve uma falha temporária; as últimas opções válidas foram preservadas. {creatorError}</div>}
         </div>
       )}
 
       {tab === "tiktok" && ttStatus?.connected && (
         <div className="mt-4 rounded-xl border border-[#e7e7e7] bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><div className="text-xs font-black">Dashboard TikTok</div><div className="mt-1 text-[10px] text-[#777]">Atualização automática pela API a cada 60 segundos; histórico de snapshots salvo pelo ShortsFlow.</div></div>
+            <div>
+              <div className="text-sm font-black">Dashboard TikTok</div>
+              <div className="mt-1 text-[10px] text-[#777]">Métricas oficiais disponíveis pela API, atualização automática a cada 60 segundos e histórico salvo pelo ShortsFlow.</div>
+              {metricData?.refreshed_at && <div className="mt-1 text-[9px] text-[#999]">Atualizado em {fmtDateTime(metricData.refreshed_at)}</div>}
+            </div>
             <div className="flex gap-1">
               {[7, 30, 90].map((days) => <button key={days} type="button" onClick={() => setMetricDays(days)} className={`rounded-lg px-3 py-1.5 text-[10px] font-black ${metricDays === days ? "bg-[#111] text-white" : "bg-[#f2f2f2]"}`}>{days} dias</button>)}
             </div>
           </div>
+
           {metricData && !metricData.available ? (
-            <div className="mt-3 rounded-xl bg-[#f7f7f7] p-4 text-xs leading-5 text-[#555]">
-              <div>{metricData.reason}</div>
-              <button type="button" onClick={() => connectTikTok(true)} className="sf-button sf-button-primary mt-3">Ativar métricas TikTok</button>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3"><Metric label="Fila local" value={String(metricData.local_publications.queued)} /><Metric label="Processando" value={String(metricData.local_publications.processing)} /><Metric label="Falhas" value={String(metricData.local_publications.failed)} /></div>
+            <div className="mt-4">
+              <div className="rounded-xl bg-[#f7f7f7] p-4 text-xs leading-5 text-[#555]">
+                <div className="font-black text-[#111]">Métricas oficiais aguardando autorização</div>
+                <div className="mt-1">{metricData.reason}</div>
+                <button type="button" onClick={() => connectTikTok(true)} className="sf-button sf-button-primary mt-3">Ativar métricas TikTok</button>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <Metric label="Fila local" value={String(metricData.local_publications.queued)} />
+                <Metric label="Processando" value={String(metricData.local_publications.processing)} />
+                <Metric label="Publicados confirmados" value={String(metricData.local_publications.published_confirmed)} />
+                <Metric label="Falhas" value={String(metricData.local_publications.failed)} />
+                <Metric label="Pausados" value={String(metricData.local_publications.paused_limit)} />
+              </div>
+              {!!metricData.alerts?.length && <div className="mt-3 grid gap-2 md:grid-cols-2">{metricData.alerts.map((alert, index) => <Alert key={`${alert.title}-${index}`} alert={alert} />)}</div>}
             </div>
           ) : metricData?.available ? (
             <>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-                <Metric label="Seguidores" value={fmtNumber(metricData.profile?.followers)} />
-                <Metric label="Visualizações" value={fmtNumber(metricData.period?.views)} />
-                <Metric label="Curtidas" value={fmtNumber(metricData.period?.likes)} />
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                <Metric label="Seguidores" value={fmtNumber(metricData.profile?.followers)} detail={`Δ ${fmtSigned(metricData.growth?.followers_delta)}`} />
+                <Metric label="Visualizações" value={fmtNumber(metricData.period?.views)} detail={`${metricDays} dias`} />
+                <Metric label="Vídeos" value={fmtExact(metricData.period?.videos)} detail={`Conta: ${fmtExact(metricData.profile?.video_count)}`} />
+                <Metric label="Curtidas" value={fmtNumber(metricData.period?.likes)} detail={`Conta: ${fmtNumber(metricData.profile?.likes_total)}`} />
                 <Metric label="Comentários" value={fmtNumber(metricData.period?.comments)} />
                 <Metric label="Compartilhamentos" value={fmtNumber(metricData.period?.shares)} />
-                <Metric label="Vídeos no período" value={fmtNumber(metricData.period?.videos)} />
+                <Metric label="Engajamento" value={fmtPercent(metricData.period?.engagement_rate)} detail={`${fmtNumber(metricData.period?.engagement_total)} interações`} />
+                <Metric label="Média de views" value={fmtNumber(metricData.period?.avg_views_per_video)} detail="por vídeo no período" />
               </div>
-              <div className="mt-3 text-[10px] text-[#777]">Histórico coletado: {metricData.history.length} ponto(s) · Publicações confirmadas pelo ShortsFlow: {metricData.local_publications.published_confirmed} · Processando: {metricData.local_publications.processing} · Falhas: {metricData.local_publications.failed}</div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[1.15fr_.85fr]">
+                <div className="rounded-xl border border-[#ececec] bg-[#fafafa] p-4">
+                  <div className="text-xs font-black">Operação de publicação</div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                    <Metric label="Publicados" value={String(metricData.local_publications.published_confirmed)} />
+                    <Metric label="Processando" value={String(metricData.local_publications.processing)} />
+                    <Metric label="Fila" value={String(metricData.local_publications.queued)} />
+                    <Metric label="Falhas" value={String(metricData.local_publications.failed)} />
+                    <Metric label="Pausados" value={String(metricData.local_publications.paused_limit)} />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#ececec] bg-[#fafafa] p-4">
+                  <div className="text-xs font-black">Monetização / Creator Rewards</div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <Metric label="Receita oficial" value={metricData.monetization?.official_revenue_available ? fmtNumber(metricData.monetization.official_revenue) : "Não disponível via API"} />
+                    <Metric label="Vídeos ≥ 60s" value={String(metricData.monetization?.duration_eligible_videos || 0)} detail={`${metricData.monetization?.duration_ineligible_videos || 0} abaixo de 60s`} />
+                  </div>
+                  <div className="mt-3 text-[10px] leading-5 text-[#666]">{metricData.monetization?.note}</div>
+                </div>
+              </div>
+
+              {!!metricData.alerts?.length && (
+                <div className="mt-4">
+                  <div className="mb-2 text-xs font-black">Alertas e oportunidades</div>
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{metricData.alerts.map((alert, index) => <Alert key={`${alert.title}-${index}`} alert={alert} />)}</div>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[1.15fr_.85fr]">
+                <div className="rounded-xl border border-[#ececec] bg-white p-4">
+                  <div className="flex items-center justify-between gap-2"><div className="text-xs font-black">Melhores vídeos do período</div><div className="text-[9px] text-[#888]">por visualizações</div></div>
+                  <div className="mt-3 space-y-2">
+                    {(metricData.top_videos || []).slice(0, 5).map((video, index) => (
+                      <div key={video.id || index} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#eee] bg-[#fafafa] p-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-[11px] font-black">{index + 1}. {video.title || "Vídeo TikTok"}</div>
+                          <div className="mt-1 text-[9px] text-[#777]">{video.duration}s · {fmtNumber(video.like_count)} curtidas · {fmtNumber(video.comment_count)} comentários · {fmtNumber(video.share_count)} compartilhamentos</div>
+                        </div>
+                        <div className="text-right"><div className="text-sm font-black">{fmtNumber(video.view_count)}</div><div className="text-[9px] text-[#888]">views</div></div>
+                      </div>
+                    ))}
+                    {!metricData.top_videos?.length && <div className="text-[10px] text-[#777]">Nenhum vídeo retornado para o período.</div>}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#ececec] bg-white p-4">
+                  <div className="text-xs font-black">Histórico e crescimento</div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <Metric label="Δ Seguidores" value={fmtSigned(metricData.growth?.followers_delta)} />
+                    <Metric label="Δ Curtidas da conta" value={fmtSigned(metricData.growth?.likes_total_delta)} />
+                    <Metric label="Δ Vídeos" value={fmtSigned(metricData.growth?.video_count_delta)} />
+                    <Metric label="Snapshots" value={String(metricData.history.length)} detail="histórico horário preservado" />
+                  </div>
+                  <div className="mt-3 text-[10px] leading-5 text-[#777]">O histórico passa a ser armazenado por até 120 dias. Os deltas usam o primeiro snapshot disponível dentro do período selecionado.</div>
+                </div>
+              </div>
             </>
           ) : <div className="mt-3 text-xs text-[#777]">Carregando métricas...</div>}
         </div>
@@ -391,7 +516,7 @@ export default function PublishingEnhancements() {
         {tab === "youtube" ? (
           <button type="button" onClick={publishYouTube} disabled={!youtubeSelected.size || Boolean(busy) || (availability.blocked && remaining > 0)} className="sf-button sf-button-youtube disabled:opacity-40">{busy === "youtube" ? "Criando fila..." : `Publicar ${youtubeSelected.size || ""} no YouTube`}</button>
         ) : (
-          <button type="button" onClick={publishTikTok} disabled={!tiktokSelected.size || !privacy || !musicConfirmed || Boolean(busy) || !ttStatus?.connected} className="sf-button sf-button-primary disabled:opacity-40">{busy === "tiktok" ? "Criando fila..." : `Publicar ${tiktokSelected.size || ""} no TikTok`}</button>
+          <button type="button" onClick={publishTikTok} disabled={!tiktokSelected.size || !privacy || !musicConfirmed || Boolean(busy) || !ttStatus?.connected || !creator} className="sf-button sf-button-primary disabled:opacity-40">{busy === "tiktok" ? "Criando fila..." : `Publicar ${tiktokSelected.size || ""} no TikTok`}</button>
         )}
       </div>
 
