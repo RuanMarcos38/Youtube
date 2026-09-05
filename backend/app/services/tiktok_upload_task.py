@@ -58,8 +58,6 @@ def run_tiktok_upload(post_id: int) -> None:
             disable_duet=post.disable_duet,
             disable_stitch=post.disable_stitch,
         )
-        # FILE_UPLOAD only means TikTok received the bytes. Keep the video on the
-        # TikTok tab until the official status endpoint returns PUBLISH_COMPLETE.
         post.status = "processing"
         post.publish_id = publish_id
         post.error = "TikTok recebeu o arquivo e está processando/moderando a publicação."
@@ -90,8 +88,16 @@ def refresh_tiktok_post(post_id: int) -> None:
         result = fetch_post_status(db, user_id=post.user_id, publish_id=post.publish_id)
         remote = result["status"]
         if remote == "PUBLISH_COMPLETE":
-            post.status = "published"
-            post.error = None
+            public_ids = result.get("post_ids") or []
+            if post.privacy_level == "PUBLIC_TO_EVERYONE" and not public_ids:
+                # TikTok can finish the Direct Post before moderation makes a
+                # public video visible in the feed. Keep it on-screen until the
+                # status endpoint returns a publicly available post id.
+                post.status = "processing"
+                post.error = "TikTok concluiu o envio, mas a postagem pública ainda aguarda moderação para aparecer no feed."
+            else:
+                post.status = "published"
+                post.error = None
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"
             message = _failed_message(reason)
@@ -116,8 +122,6 @@ def refresh_tiktok_post(post_id: int) -> None:
         db.rollback()
         post = db.get(TikTokPost, post_id)
         if post and post.status in {"processing", "submitted"}:
-            # A temporary status-check failure must never turn a potentially
-            # successful TikTok post into a failed one. Keep it visible and retry.
             post.error = f"Aguardando confirmação do TikTok: {exc}"
             db.commit()
     finally:
