@@ -28,7 +28,7 @@ def test_does_not_confuse_rate_limit_with_audit_restriction():
     assert not is_unaudited_error_text("rate_limit_exceeded")
 
 
-def test_unaudited_public_block_filters_public_option():
+def test_unaudited_public_block_disables_public_account_direct_post():
     initialize_database()
     user_id = int(uuid.uuid4().hex[:8], 16)
     db = SessionLocal()
@@ -41,6 +41,29 @@ def test_unaudited_public_block_filters_public_option():
             creator={
                 "creator_username": "ruan",
                 "privacy_level_options": ["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"],
+            },
+        )
+
+        assert creator["public_posting_blocked"] is True
+        assert creator["privacy_level_options"] == []
+        assert "contas TikTok privadas" in creator["public_posting_block_reason"]
+    finally:
+        db.close()
+
+
+def test_unaudited_public_block_keeps_self_only_for_private_account():
+    initialize_database()
+    user_id = int(uuid.uuid4().hex[:8], 16)
+    db = SessionLocal()
+    try:
+        mark_unaudited_public_block(db, user_id=user_id)
+
+        creator = apply_unaudited_public_block(
+            db,
+            user_id=user_id,
+            creator={
+                "creator_username": "ruan",
+                "privacy_level_options": ["FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"],
             },
         )
 
@@ -233,7 +256,7 @@ def test_release_unaudited_public_queue_keeps_current_error_visible():
         queued = TikTokPost(
             user_id=user.id,
             clip_id=second.id,
-            privacy_level="PUBLIC_TO_EVERYONE",
+            privacy_level="SELF_ONLY",
             status="queued",
         )
         private_processing = TikTokPost(

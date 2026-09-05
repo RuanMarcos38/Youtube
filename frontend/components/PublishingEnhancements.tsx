@@ -429,7 +429,7 @@ export default function PublishingEnhancements() {
             <>
               {creator.public_posting_blocked && (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">
-                  {creator.public_posting_block_reason || "Publicação pública ainda aguarda auditoria do TikTok. O envio automático disponível agora é Somente eu."}
+                  {creator.public_posting_block_reason || "O TikTok bloqueou o Direct Post porque o app ainda aguarda auditoria. Conclua a auditoria do app no TikTok for Developers ou teste com uma conta TikTok privada."}
                 </div>
               )}
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,1fr)_auto_auto] lg:items-end">

@@ -45,8 +45,9 @@ def _raise_tiktok_error(response: httpx.Response, payload: dict) -> None:
     if code == "unaudited_client_can_only_post_to_private_accounts":
         raise TikTokUnauditedClientError(
             "O TikTok identificou este cliente da Content Posting API como não auditado. "
-            "Enquanto a auditoria do app não for concluída, o TikTok bloqueia publicação pública. "
-            "Para teste, use a opção 'Somente eu' quando ela estiver disponível; para publicar publicamente, conclua a auditoria do app no TikTok for Developers."
+            "Clientes não auditados só conseguem publicar via Direct Post em contas TikTok privadas. "
+            "Se a conta conectada for pública, o TikTok também recusa 'Somente eu'. "
+            "Conclua a auditoria do app no TikTok for Developers ou torne a conta TikTok privada para teste."
         )
     if code in {"scope_not_authorized", "scope_permission_missed"}:
         raise TikTokUploadError(

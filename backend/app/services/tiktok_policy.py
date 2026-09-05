@@ -9,8 +9,13 @@ from ..models import SystemSetting, TikTokPost
 PUBLIC_AUDIT_SETTING_PREFIX = "tiktok_public_audit_block_user_"
 PUBLIC_AUDIT_BLOCK_HOURS = 6
 PUBLIC_AUDIT_BLOCK_REASON = (
+    "O TikTok recusou o Direct Post porque o app da Content Posting API ainda não está auditado. "
+    "Clientes não auditados só conseguem testar Direct Post em contas TikTok privadas; nesta conta pública, "
+    "até 'Somente eu' é recusado pelo TikTok. Conclua a auditoria do app no TikTok for Developers ou torne a conta TikTok privada para teste."
+)
+PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON = (
     "O TikTok recusou publicação pública porque o app da Content Posting API ainda não está auditado. "
-    "Até a próxima verificação, publique como 'Somente eu'."
+    "Nesta conta TikTok privada, teste somente com 'Somente eu'. Para publicar publicamente, conclua a auditoria do app no TikTok for Developers."
 )
 UNAUDITED_CODE = "unaudited_client_can_only_post_to_private_accounts"
 UNAUDITED_MARKERS = (
@@ -95,13 +100,12 @@ def unaudited_public_block_active(db: Session, *, user_id: int) -> bool:
 
 
 def sync_unaudited_public_block_from_recent_failure(db: Session, *, user_id: int, commit: bool = True) -> bool:
-    """Restore the public gate from a recent failed public attempt."""
+    """Restore the Direct Post audit gate from a recent unaudited failure."""
     cutoff = _utcnow() - timedelta(hours=PUBLIC_AUDIT_BLOCK_HOURS)
     rows = (
         db.query(TikTokPost)
         .filter(
             TikTokPost.user_id == user_id,
-            TikTokPost.privacy_level == "PUBLIC_TO_EVERYONE",
             TikTokPost.status == "failed",
             TikTokPost.error.is_not(None),
         )
@@ -120,20 +124,22 @@ def sync_unaudited_public_block_from_recent_failure(db: Session, *, user_id: int
 
 
 def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) -> dict:
-    """Return Creator Info with public posting hidden while the local block is active."""
+    """Return Creator Info adjusted after TikTok proves the client is unaudited."""
     active = unaudited_public_block_active(db, user_id=user_id)
     if not active:
         active = sync_unaudited_public_block_from_recent_failure(db, user_id=user_id)
     if not active:
         return creator
+    options = [str(value) for value in (creator.get("privacy_level_options") or []) if str(value).strip()]
+    public_account = "PUBLIC_TO_EVERYONE" in options
     adjusted = dict(creator)
-    adjusted["privacy_level_options"] = [
-        value
-        for value in (creator.get("privacy_level_options") or [])
-        if value == "SELF_ONLY"
-    ]
     adjusted["public_posting_blocked"] = True
-    adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON
+    if public_account:
+        adjusted["privacy_level_options"] = []
+        adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON
+    else:
+        adjusted["privacy_level_options"] = [value for value in options if value == "SELF_ONLY"]
+        adjusted["public_posting_block_reason"] = PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON
     return adjusted
 
 
@@ -173,20 +179,23 @@ def release_unaudited_public_queue(
     current_post_id: int,
     current_error: str | None = None,
 ) -> int:
-    """Undo a public batch after TikTok authoritatively rejects an unaudited client.
+    """Undo a Direct Post batch after TikTok authoritatively rejects an unaudited client.
 
-    The first failed Direct Post is enough to prove the client-level restriction. All
-    queued clips are returned to a clean, retryable state instead of showing the same
-    red error dozens of times. The clip that proved the rejection keeps a visible
-    error so a failed public attempt is never silent.
+    The first failed Direct Post is enough to prove the client/account-level
+    restriction. Pending clips are returned to a clean, retryable state instead
+    of showing the same red error dozens of times. The clip that proved the
+    rejection keeps a visible error so the failed attempt is never silent.
     """
     mark_unaudited_public_block(db, user_id=user_id, commit=False)
     rows = (
         db.query(TikTokPost)
         .filter(
             TikTokPost.user_id == user_id,
-            TikTokPost.status.in_(["queued", "uploading", "processing", "submitted", "paused_limit"]),
-            or_(TikTokPost.privacy_level == "PUBLIC_TO_EVERYONE", TikTokPost.id == current_post_id),
+            or_(
+                TikTokPost.id == current_post_id,
+                TikTokPost.status.in_(["queued", "uploading", "paused_limit"]),
+                TikTokPost.status.in_(["processing", "submitted"]) & TikTokPost.publish_id.is_(None),
+            ),
         )
         .all()
     )
