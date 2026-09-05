@@ -17,7 +17,7 @@ export default function PublishingUiOrganizer() {
         // Publicações para não misturar métricas com a fila de envio.
         const dashboardTitle = Array.from(root.querySelectorAll<HTMLElement>("div"))
           .find((element) => element.textContent?.trim() === "Dashboard TikTok");
-        const dashboardCard = dashboardTitle?.parentElement?.parentElement as HTMLElement | null;
+        const dashboardCard = dashboardTitle?.parentElement?.parentElement?.parentElement as HTMLElement | null;
         if (dashboardCard && dashboardCard.dataset.metricsMoved !== "true") {
           dashboardCard.dataset.metricsMoved = "true";
           dashboardCard.style.display = "none";
