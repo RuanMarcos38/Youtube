@@ -59,6 +59,15 @@ def _recover_interrupted() -> None:
         for post in db.query(TikTokPost).filter(TikTokPost.status == "submitted", TikTokPost.publish_id.is_not(None)).all():
             post.status = "processing"
             post.error = "Aguardando confirmação final do TikTok."
+        # A draft delivered to TikTok is not a completed post. Previous builds
+        # stopped polling at draft_sent and hid the clip too early. Recover
+        # those rows so they remain visible until TikTok says PUBLISH_COMPLETE.
+        for post in db.query(TikTokPost).filter(TikTokPost.status == "draft_sent", TikTokPost.publish_id.is_not(None)).all():
+            post.status = "processing"
+            post.error = (
+                "Rascunho entregue ao TikTok. Abra a notificação na Caixa de Entrada do aplicativo e conclua a publicação. "
+                "O ShortsFlow continuará acompanhando este envio."
+            )
         db.commit()
     finally:
         db.close()
@@ -115,7 +124,7 @@ def _tiktok_status_batch() -> list[int]:
     try:
         rows = (
             db.query(TikTokPost)
-            .filter(TikTokPost.status.in_(["processing", "submitted"]), TikTokPost.publish_id.is_not(None))
+            .filter(TikTokPost.status.in_(["processing", "submitted", "draft_sent"]), TikTokPost.publish_id.is_not(None))
             .order_by(TikTokPost.updated_at.asc(), TikTokPost.id.asc())
             .limit(TIKTOK_STATUS_BATCH_SIZE)
             .all()
