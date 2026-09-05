@@ -17,6 +17,7 @@ from ..schemas import (
     TikTokCreatorInfoResponse,
     TikTokOAuthStatusResponse,
 )
+from ..services.tiktok_metrics import get_tiktok_metrics
 from ..services.tiktok_oauth import (
     build_authorization_url,
     complete_oauth,
@@ -41,23 +42,32 @@ def oauth_status(user: User = Depends(get_current_user), db: Session = Depends(g
 
 
 @router.get("/oauth/start", response_model=OAuthStartResponse)
-def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def oauth_start(
+    metrics: bool = Query(default=False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        return {"authorization_url": build_authorization_url(db, user)}
+        return {"authorization_url": build_authorization_url(db, user, include_metrics=metrics)}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/oauth/authorize")
-def oauth_authorize(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def oauth_authorize(
+    metrics: bool = Query(default=False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Start TikTok OAuth through a normal same-origin browser redirect.
 
-    This route is used for both first connection and account switching. The
-    current token is kept until the new OAuth callback succeeds, so a cancelled
-    account change does not destroy the working connection.
+    The normal connection requests only the scopes already used for publishing.
+    Metrics scopes are requested only when the user explicitly activates the
+    TikTok dashboard, so publishing keeps working even before those extra scopes
+    are approved for the app.
     """
     try:
-        return RedirectResponse(url=build_authorization_url(db, user), status_code=302)
+        return RedirectResponse(url=build_authorization_url(db, user, include_metrics=metrics), status_code=302)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -89,6 +99,18 @@ def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depen
 def creator_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         return get_creator_info(db, user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/metrics")
+def metrics(
+    days: int = Query(default=30, ge=0, le=3650),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_tiktok_metrics(db, user.id, days=days)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -153,7 +175,9 @@ def upload_batch(
         if post is None:
             post = TikTokPost(user_id=user.id, clip_id=clip.id, privacy_level=payload.privacy_level)
             db.add(post)
-        elif post.status == "submitted":
+        elif post.status in {"queued", "uploading", "processing", "submitted", "published"}:
+            # Never create a second TikTok Direct Post while the first one is
+            # queued, processing, or already confirmed as published.
             continue
 
         post.status = "queued"
