@@ -10,7 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Job, YouTubeConnection
+from ..database import engine
+from ..models import Job, TikTokConnection, YouTubeConnection
 from .download_probe import read_download_probe
 from .downloader import js_runtime_status
 from .runtime_download_auth import COOKIE_OVERRIDE_FILE, PROXY_OVERRIDE_FILE
@@ -169,6 +170,65 @@ def _google_oauth_check() -> tuple[bool, str]:
     )
 
 
+def _db_pool_health() -> tuple[bool, str]:
+    pool = engine.pool
+    status_text = str(pool.status()) if hasattr(pool, "status") else pool.__class__.__name__
+    checked_out = None
+    size = None
+    overflow = None
+    try:
+        checked_out = int(pool.checkedout()) if hasattr(pool, "checkedout") else None
+    except Exception:
+        checked_out = None
+    try:
+        size = int(pool.size()) if hasattr(pool, "size") else None
+    except Exception:
+        size = None
+    try:
+        overflow = int(pool.overflow()) if hasattr(pool, "overflow") else None
+    except Exception:
+        overflow = None
+    if checked_out is None or size is None:
+        return True, f"Pool SQL operacional: {status_text}"
+    capacity = max(1, size + max(0, overflow or 0))
+    healthy = checked_out < max(3, capacity)
+    return healthy, f"Conexões em uso: {checked_out}; pool base: {size}; overflow atual: {overflow or 0}. {status_text}"
+
+
+def _tiktok_local_health(db: Session) -> tuple[bool, str]:
+    configured = bool(settings.tiktok_client_key.strip() and settings.tiktok_client_secret.strip())
+    rows = db.query(TikTokConnection).filter(TikTokConnection.token_json.isnot(None)).all()
+    publish_ready = 0
+    metrics_ready = 0
+    malformed = 0
+    for row in rows:
+        try:
+            token = json.loads(row.token_json or "{}")
+            raw = token.get("scope") or token.get("scopes") or ""
+            scopes = (
+                {str(item).strip() for item in raw if str(item).strip()}
+                if isinstance(raw, list)
+                else {item.strip() for item in str(raw).replace(" ", ",").split(",") if item.strip()}
+            )
+            if "video.publish" in scopes:
+                publish_ready += 1
+            if {"user.info.stats", "video.list"}.issubset(scopes):
+                metrics_ready += 1
+        except Exception:
+            malformed += 1
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    ok = configured and malformed == 0
+    detail = (
+        f"App TikTok {'configurado' if configured else 'não configurado'}; "
+        f"{len(rows)} conexão(ões) salvas; {publish_ready} com video.publish; "
+        f"{metrics_ready} com métricas; {malformed} token(s) inválido(s)."
+    )
+    return ok, detail
+
+
 def _editor_projects_health() -> tuple[bool, str]:
     users_root = settings.data_path / "users"
     if not users_root.exists():
@@ -216,6 +276,7 @@ def run_self_test(db: Session, *, auto_fix: bool = True) -> dict:
         return True, "Conexão SQL respondendo."
 
     _safe_check(checks, "Banco de dados", db_test, recommendation="Revisar DATABASE_URL/SQLite do serviço shortsia.")
+    _safe_check(checks, "Pool de conexões SQL", _db_pool_health, required=False, recommendation="Investigar endpoints que estejam retendo conexões durante chamadas externas.")
     _safe_check(checks, "Worker", lambda: (_worker_alive(), "Heartbeat ativo." if _worker_alive() else "Heartbeat do worker não foi encontrado ou está atrasado."), recommendation="O Supervisor deve reiniciar o worker; verifique os logs se continuar inativo.")
     _safe_check(checks, "FFmpeg", lambda: (bool(shutil.which(settings.ffmpeg_binary)), "FFmpeg disponível." if shutil.which(settings.ffmpeg_binary) else "FFmpeg não encontrado."), recommendation="Reconstruir a imagem Docker oficial do ShortsFlow.")
     _safe_check(checks, "FFprobe", lambda: (bool(shutil.which(settings.ffprobe_binary)), "FFprobe disponível." if shutil.which(settings.ffprobe_binary) else "FFprobe não encontrado."), recommendation="Reconstruir a imagem Docker oficial do ShortsFlow.")
@@ -229,6 +290,13 @@ def run_self_test(db: Session, *, auto_fix: bool = True) -> dict:
         _google_oauth_check,
         required=False,
         recommendation="Configure Client ID/Secret e mantenha o app Google em Produção ou adicione o e-mail em Test users.",
+    )
+    _safe_check(
+        checks,
+        "TikTok OAuth e permissões",
+        lambda: _tiktok_local_health(db),
+        required=False,
+        recommendation="Reconecte somente o perfil TikTok afetado ou aprove no Developer Portal os escopos video.publish, user.info.stats e video.list necessários.",
     )
 
     runtime = js_runtime_status()
