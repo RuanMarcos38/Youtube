@@ -32,6 +32,10 @@ function PublishIcon({ className = "h-5 w-5" }: IconProps) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 14v5h14v-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
+function MetricsIcon({ className = "h-5 w-5" }: IconProps) {
+  return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M5 19V11m7 8V5m7 14v-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M3.5 20h17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>;
+}
+
 function TikTokIcon({ className = "h-4 w-4" }: IconProps) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M14.7 3.2c.5 2.4 1.8 3.8 4.1 4.4v3.1a9 9 0 0 1-4.1-1.2v5.6a5.8 5.8 0 1 1-5-5.7v3.2a2.7 2.7 0 1 0 1.8 2.5V3.2h3.2Z" fill="currentColor"/></svg>;
 }
@@ -47,6 +51,7 @@ const items = [
   { href: "/projetos", label: "Projetos", icon: ProjectsIcon },
   { href: "/#processamento", label: "Processamentos", icon: ProcessIcon },
   { href: "/#cortes", label: "Publicações", icon: PublishIcon },
+  { href: "/metricas-tiktok", label: "Métricas TikTok", icon: MetricsIcon },
 ];
 
 export default function PlatformNavigation() {
@@ -81,6 +86,7 @@ export default function PlatformNavigation() {
   const activeHref = useMemo(() => {
     if (pathname === "/editor-ia") return "/editor-ia";
     if (pathname === "/projetos") return "/projetos";
+    if (pathname === "/metricas-tiktok") return "/metricas-tiktok";
     if (pathname === "/") {
       if (hash === "#configurar") return "/#configurar";
       if (hash === "#processamento") return "/#processamento";
@@ -132,14 +138,14 @@ export default function PlatformNavigation() {
       </aside>
 
       <nav className="fixed bottom-0 left-0 right-0 z-[70] border-t border-[#e4e7ec] bg-white/98 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(16,24,40,.06)] backdrop-blur xl:hidden" aria-label="Menu principal da plataforma">
-        <div className="mx-auto flex max-w-2xl items-start justify-around gap-1">
+        <div className="mx-auto flex max-w-2xl items-start justify-start gap-1 overflow-x-auto sm:justify-around">
           {items.map((item) => {
             const active = activeHref === item.href;
             const Icon = item.icon;
             return (
               <a key={item.href} href={item.href} className={`flex min-w-[62px] flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-center text-[9px] font-medium leading-tight ${active ? "bg-red-50 text-[#e00000]" : "text-[#667085]"}`}>
                 <Icon className="h-[18px] w-[18px]" />
-                <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Painel ao vivo", "Painel").replace("Editor de vídeo", "Editor")}</span>
+                <span>{item.label.replace("Processamentos", "Processar").replace("Publicações", "Publicar").replace("Painel ao vivo", "Painel").replace("Editor de vídeo", "Editor").replace("Métricas TikTok", "Métricas")}</span>
               </a>
             );
           })}

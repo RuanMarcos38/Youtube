@@ -4,6 +4,7 @@ import { LanguageRuntime } from "@/components/LanguageSelector";
 import LiveAudienceCard from "@/components/LiveAudienceCard";
 import PlatformNavigation from "@/components/PlatformNavigation";
 import PublishingEnhancements from "@/components/PublishingEnhancements";
+import PublishingUiOrganizer from "@/components/PublishingUiOrganizer";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
 import "./publication-policy.css";
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <LanguageRuntime />
         {children}
         <PublishingEnhancements />
+        <PublishingUiOrganizer />
         <LiveAudienceCard />
         <PlatformNavigation />
         <YoutubeAccountSwitcher />
