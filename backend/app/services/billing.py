@@ -8,6 +8,7 @@ from ..auth import hash_password, normalize_email
 from ..config import settings
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 from .email_service import send_access_credentials
+from .plans import quota_payload
 from .system_config import get_base_plan_job_limit
 
 
@@ -50,15 +51,19 @@ def plan_payload(db: Session, tenant_id: int) -> dict:
     plan = ensure_plan(db, tenant_id)
     used = jobs_used(db, tenant_id)
     remaining = None if plan.unlimited else max(0, plan.monthly_job_limit - used)
-    return {
+    payload = {
         "plan_code": plan.plan_code,
         "billing_status": plan.billing_status,
+        "billing_provider": getattr(plan, "billing_provider", "legacy") or "legacy",
+        "billing_cycle": getattr(plan, "billing_cycle", "monthly") or "monthly",
         "monthly_job_limit": plan.monthly_job_limit,
         "unlimited": plan.unlimited,
         "jobs_used": used,
         "jobs_remaining": remaining,
         "subscription_value_cents": plan.subscription_value_cents,
     }
+    payload.update(quota_payload(db, plan))
+    return payload
 
 
 def can_use_tool(db: Session, user: User) -> tuple[bool, str]:
@@ -71,7 +76,7 @@ def can_use_tool(db: Session, user: User) -> tuple[bool, str]:
         return True, ""
     used = jobs_used(db, user.tenant_id)
     if used >= plan.monthly_job_limit:
-        return False, "Seu limite mensal foi atingido. Faça o Upgrade para continuar usando sem limite."
+        return False, "Seu limite mensal foi atingido. Faça o Upgrade para continuar usando."
     return True, ""
 
 
@@ -203,6 +208,8 @@ def apply_kiwify_webhook(db: Session, payload: dict) -> dict:
         plan = ensure_plan(db, tenant_id)
         upgrade = _is_upgrade(db, payload)
         plan.billing_status = "active"
+        plan.billing_provider = "kiwify"
+        plan.billing_cycle = "monthly"
         plan.kiwify_order_id = order_id
         plan.kiwify_product_id = product_id or plan.kiwify_product_id
         plan.kiwify_customer_email = email
@@ -221,8 +228,6 @@ def apply_kiwify_webhook(db: Session, payload: dict) -> dict:
                 row = db.query(ProvisionedCredential).filter(ProvisionedCredential.order_id == order_id).first()
                 if row:
                     row.delivered = True
-                    # Once delivered, retain only the password hash on User. The
-                    # plaintext bootstrap password must not remain in the database.
                     row.temporary_password = ""
                     db.commit()
 
