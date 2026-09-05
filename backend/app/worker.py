@@ -25,6 +25,10 @@ HEARTBEAT_FILE = settings.data_path / "worker_heartbeat.txt"
 DOWNLOAD_PROBE_INTERVAL_SECONDS = 15 * 60
 TIKTOK_STATUS_INTERVAL_SECONDS = 15
 TIKTOK_STATUS_BATCH_SIZE = 6
+# TikTok allows at most 6 Direct Post initialization requests per minute for
+# each user access token. Keep a small safety margin so a large batch such as
+# 40 videos remains queued instead of being rejected by rate limiting.
+TIKTOK_UPLOAD_MIN_INTERVAL_SECONDS = 11.0
 MAX_PIPELINE_CONCURRENCY = 5
 
 
@@ -159,6 +163,7 @@ def main() -> None:
     active_editor: Future | None = None
     last_probe_started = 0.0
     last_tiktok_status_started = 0.0
+    last_tiktok_upload_started = 0.0
 
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
@@ -223,9 +228,10 @@ def main() -> None:
                 if status_ids:
                     last_tiktok_status_started = now
                     active_tiktok_upload = tiktok_pool.submit(_refresh_tiktok_batch, status_ids)
-                else:
+                elif last_tiktok_upload_started == 0.0 or now - last_tiktok_upload_started >= TIKTOK_UPLOAD_MIN_INTERVAL_SECONDS:
                     post_id = _claim_next_tiktok_post()
                     if post_id is not None:
+                        last_tiktok_upload_started = now
                         active_tiktok_upload = tiktok_pool.submit(run_tiktok_upload, post_id)
 
             if active_editor is None:
