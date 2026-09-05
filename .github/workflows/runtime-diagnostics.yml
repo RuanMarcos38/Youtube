@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   diagnostics:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -43,14 +43,18 @@ jobs:
             clearTimeout(idle);
             try { ws.close(); } catch {}
             const lines = buffer.replace(/\r/g, '').split('\n').filter(Boolean);
-            const needles = ['traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database', 'uvicorn', 'backend', 'supervisor', 'exited', 'fatal', 'no such column', 'locked'];
+            const needles = [
+              'traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database',
+              'uvicorn', 'backend', 'supervisor', 'exited', 'fatal', 'no such column',
+              'locked', 'tiktok', 'creator-info', 'creator_info', 'oauth/authorize', '500'
+            ];
             const interesting = lines.filter(line => needles.some(word => line.toLowerCase().includes(word)));
             console.log('--- FILTERED SHORTSFLOW RUNTIME DIAGNOSTICS ---');
-            console.log((interesting.length ? interesting : lines.slice(-200)).slice(-250).join('\n'));
+            console.log((interesting.length ? interesting : lines.slice(-300)).slice(-400).join('\n'));
             process.exit(code);
           };
 
-          const hard = setTimeout(() => finish(buffer ? 0 : 1), 10000);
+          const hard = setTimeout(() => finish(buffer ? 0 : 1), 12000);
           ws.addEventListener('message', event => {
             let text = String(event.data ?? '');
             try {
@@ -59,7 +63,7 @@ jobs:
             } catch {}
             buffer += text;
             clearTimeout(idle);
-            idle = setTimeout(() => { clearTimeout(hard); finish(0); }, 1200);
+            idle = setTimeout(() => { clearTimeout(hard); finish(0); }, 1800);
           });
           ws.addEventListener('error', () => {
             clearTimeout(hard);
