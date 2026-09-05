@@ -17,7 +17,7 @@ from ..schemas import (
     TikTokCreatorInfoResponse,
     TikTokOAuthStatusResponse,
 )
-from ..services.tiktok_metrics import get_tiktok_metrics
+from ..services.tiktok_metrics_safe import get_tiktok_metrics
 from ..services.tiktok_oauth import (
     build_authorization_url,
     complete_oauth,
@@ -36,6 +36,38 @@ def _frontend_redirect(status_value: str, reason: str = "") -> RedirectResponse:
     return RedirectResponse(url=f"{settings.frontend_url}/?{urlencode(query)}#cortes")
 
 
+def _unaudited_restriction_known(db: Session, user_id: int) -> bool:
+    """Detect the restriction from prior TikTok responses without new schema."""
+    rows = (
+        db.query(TikTokPost.error)
+        .filter(TikTokPost.user_id == user_id, TikTokPost.error.is_not(None))
+        .order_by(TikTokPost.updated_at.desc())
+        .limit(100)
+        .all()
+    )
+    for row in rows:
+        message = str(row[0] or "").lower()
+        if "unaudited_client_can_only_post_to_private_accounts" in message:
+            return True
+        if "não auditado" in message or "nao auditado" in message:
+            return True
+    return False
+
+
+def _apply_known_tiktok_restrictions(db: Session, user_id: int, creator: dict) -> dict:
+    if not _unaudited_restriction_known(db, user_id):
+        return creator
+    options = [str(item) for item in creator.get("privacy_level_options") or []]
+    if "SELF_ONLY" not in options:
+        raise RuntimeError(
+            "O TikTok marcou este app como não auditado e esta conta não oferece a opção 'Somente eu'. "
+            "A conexão e as credenciais foram preservadas. Para publicar por API, conclua a auditoria do app no TikTok for Developers ou use uma conta/configuração que permita publicação privada durante os testes."
+        )
+    restricted = dict(creator)
+    restricted["privacy_level_options"] = ["SELF_ONLY"]
+    return restricted
+
+
 @router.get("/oauth/status", response_model=TikTokOAuthStatusResponse)
 def oauth_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return get_connection_status(db, user.id)
@@ -47,6 +79,16 @@ def oauth_start(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if metrics:
+        connection = get_connection_status(db, user.id)
+        if not connection.get("metrics_authorized"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "O TikTok ainda não liberou os escopos de Display API para este app. "
+                    "A conexão atual foi preservada e o ShortsFlow não solicitará escopos não aprovados."
+                ),
+            )
     try:
         return {"authorization_url": build_authorization_url(db, user, include_metrics=metrics)}
     except RuntimeError as exc:
@@ -59,13 +101,20 @@ def oauth_authorize(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Start TikTok OAuth through a normal same-origin browser redirect.
+    """Start TikTok OAuth without ever replacing valid credentials silently.
 
-    The normal connection requests only the scopes already used for publishing.
-    Metrics scopes are requested only when the user explicitly activates the
-    TikTok dashboard, so publishing keeps working even before those extra scopes
-    are approved for the app.
+    Metrics authorization is only sent to TikTok when those scopes are already
+    present in the current connection. This prevents the previously resolved
+    TikTok `scope` page from returning when the app has not been approved for
+    Display API scopes yet.
     """
+    if metrics:
+        connection = get_connection_status(db, user.id)
+        if not connection.get("metrics_authorized"):
+            return _frontend_redirect(
+                "metrics_limited",
+                "Escopos de métricas ainda não aprovados pelo TikTok; conexão atual preservada.",
+            )
     try:
         return RedirectResponse(url=build_authorization_url(db, user, include_metrics=metrics), status_code=302)
     except RuntimeError as exc:
@@ -98,7 +147,8 @@ def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depen
 @router.post("/creator-info", response_model=TikTokCreatorInfoResponse)
 def creator_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        return get_creator_info(db, user.id)
+        creator = get_creator_info(db, user.id)
+        return _apply_known_tiktok_restrictions(db, user.id, creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -142,10 +192,22 @@ def upload_batch(
     if not connection["connected"]:
         raise HTTPException(status_code=409, detail="Conecte o TikTok deste perfil antes de publicar.")
 
+    unaudited_known = _unaudited_restriction_known(db, user.id)
+    if unaudited_known and payload.privacy_level != "SELF_ONLY":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "O TikTok já informou que este cliente da Content Posting API ainda não foi auditado. "
+                "A fila pública foi bloqueada localmente para evitar novas falhas. Selecione 'Somente eu' para testes; "
+                "publicação pública depende da auditoria do app no TikTok for Developers."
+            ),
+        )
+
     try:
         # Creator Info is checked once, server-side, immediately before the
         # batch is queued. The browser does not make a duplicate validation.
         creator = get_creator_info(db, user.id, force=True)
+        creator = _apply_known_tiktok_restrictions(db, user.id, creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     options = creator.get("privacy_level_options") or []
