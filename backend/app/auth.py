@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.orm import Session, joinedload
 
 from .config import settings
@@ -80,12 +81,23 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Faça login para continuar.")
 
-    session = (
-        db.query(UserSession)
-        .options(joinedload(UserSession.user).joinedload(User.tenant))
-        .filter(UserSession.token_hash == _token_hash(token))
-        .first()
-    )
+    try:
+        session = (
+            db.query(UserSession)
+            .options(joinedload(UserSession.user).joinedload(User.tenant))
+            .filter(UserSession.token_hash == _token_hash(token))
+            .first()
+        )
+    except SQLAlchemyTimeoutError as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="O banco está momentaneamente ocupado. Tente novamente em alguns segundos.",
+        ) from exc
+
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão inválida. Faça login novamente.")
 
@@ -97,9 +109,22 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sua sessão expirou. Faça login novamente.")
 
-    if not session.user.active:
+    user = session.user
+    if not user.active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este usuário está desativado.")
-    return session.user
+
+    # A autenticação é uma leitura curta. Finalizar a transação aqui devolve a
+    # conexão ao pool antes de endpoints que podem aguardar YouTube/TikTok por
+    # vários segundos. expire_on_commit=False mantém os dados do usuário já
+    # carregados disponíveis para o restante da requisição.
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return user
 
 
 def require_owner(user: User = Depends(get_current_user)) -> User:

@@ -27,6 +27,12 @@ export type TikTokMetricSnapshot = {
   shares_period: number;
 };
 
+export type TikTokDashboardAlert = {
+  kind: "success" | "warning" | "danger" | "info" | string;
+  title: string;
+  detail: string;
+};
+
 export type TikTokMetrics = {
   available: boolean;
   metrics_authorized: boolean;
@@ -40,18 +46,28 @@ export type TikTokMetrics = {
     following: number;
     likes_total: number;
     video_count: number;
-  };
+  } | null;
   period?: {
     videos: number;
     views: number;
     likes: number;
     comments: number;
     shares: number;
+    engagement_total: number;
+    engagement_rate: number;
+    avg_views_per_video: number;
+  } | null;
+  growth?: {
+    followers_delta: number;
+    likes_total_delta: number;
+    video_count_delta: number;
+    views_period_delta: number;
   };
   top_videos?: Array<{
     id: string;
     title: string;
     create_time: number;
+    duration: number;
     cover_image_url: string;
     share_url: string;
     view_count: number;
@@ -59,6 +75,16 @@ export type TikTokMetrics = {
     comment_count: number;
     share_count: number;
   }>;
+  monetization?: {
+    official_revenue_available: boolean;
+    official_revenue: number | null;
+    currency: string;
+    creator_rewards_min_duration_sec: number;
+    duration_eligible_videos: number;
+    duration_ineligible_videos: number;
+    note: string;
+  };
+  alerts?: TikTokDashboardAlert[];
   history: TikTokMetricSnapshot[];
   local_publications: {
     total_attempts: number;

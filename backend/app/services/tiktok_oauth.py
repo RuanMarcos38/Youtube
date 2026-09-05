@@ -1,6 +1,7 @@
 import json
 import secrets
 import time
+from threading import Lock
 from urllib.parse import urlencode
 
 import httpx
@@ -16,6 +17,9 @@ CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/que
 BASE_SCOPES = "user.info.basic,video.publish"
 METRICS_SCOPES = "user.info.basic,user.info.stats,video.list,video.publish"
 _LOCAL_REDIRECT_URI = "http://localhost:8000/api/tiktok/oauth/callback"
+_CREATOR_CACHE_TTL_SECONDS = 45
+_CREATOR_CACHE: dict[int, tuple[float, dict]] = {}
+_CREATOR_CACHE_LOCK = Lock()
 
 
 def oauth_configured() -> bool:
@@ -41,6 +45,37 @@ def _connection(db: Session, user_id: int) -> TikTokConnection:
     return connection
 
 
+def _release_read_transaction(db: Session) -> None:
+    """Return a read-only SQL connection to the pool before external I/O."""
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
+def clear_creator_info_cache(user_id: int) -> None:
+    with _CREATOR_CACHE_LOCK:
+        _CREATOR_CACHE.pop(int(user_id), None)
+
+
+def _cached_creator_info(user_id: int) -> dict | None:
+    now = time.monotonic()
+    with _CREATOR_CACHE_LOCK:
+        cached = _CREATOR_CACHE.get(int(user_id))
+        if not cached:
+            return None
+        expires_at, value = cached
+        if expires_at <= now:
+            _CREATOR_CACHE.pop(int(user_id), None)
+            return None
+        return dict(value)
+
+
+def _store_creator_info(user_id: int, value: dict) -> None:
+    with _CREATOR_CACHE_LOCK:
+        _CREATOR_CACHE[int(user_id)] = (time.monotonic() + _CREATOR_CACHE_TTL_SECONDS, dict(value))
+
+
 def _json_response(response: httpx.Response, context: str) -> dict:
     try:
         payload = response.json()
@@ -48,7 +83,7 @@ def _json_response(response: httpx.Response, context: str) -> dict:
         status_code = int(response.status_code or 0)
         if status_code >= 500:
             raise RuntimeError(
-                f"TikTok está temporariamente indisponível ao {context} (HTTP {status_code}). O ShortsFlow tentará novamente; aguarde alguns segundos."
+                f"TikTok está temporariamente indisponível ao {context} (HTTP {status_code}). Aguarde alguns segundos e tente novamente."
             ) from exc
         raise RuntimeError(
             f"TikTok retornou uma resposta inválida ao {context} (HTTP {status_code or 'desconhecido'})."
@@ -124,6 +159,10 @@ def complete_oauth(db: Session, code: str, state: str) -> int:
     if not connection:
         raise RuntimeError("Estado OAuth do TikTok inválido. Inicie a conexão novamente.")
 
+    connection_id = int(connection.id)
+    user_id = int(connection.user_id)
+    _release_read_transaction(db)
+
     payload = _token_request(
         {
             "client_key": settings.tiktok_client_key,
@@ -135,18 +174,32 @@ def complete_oauth(db: Session, code: str, state: str) -> int:
     )
     stamped = _stamp_token(payload)
     profile = _profile(str(stamped.get("access_token") or ""))
+
+    connection = (
+        db.query(TikTokConnection)
+        .filter(TikTokConnection.id == connection_id, TikTokConnection.oauth_state == state)
+        .first()
+    )
+    if not connection:
+        _release_read_transaction(db)
+        raise RuntimeError("Esta autorização do TikTok já foi concluída ou expirou. Inicie a conexão novamente.")
     connection.token_json = json.dumps(stamped)
     connection.open_id = str(profile.get("open_id") or stamped.get("open_id") or "") or None
     connection.display_name = str(profile.get("display_name") or "") or None
     connection.oauth_state = None
     db.commit()
-    return connection.user_id
+    clear_creator_info_cache(user_id)
+    return user_id
 
 
 def _refresh(db: Session, connection: TikTokConnection, token: dict) -> dict:
     refresh_token = str(token.get("refresh_token") or "").strip()
     if not refresh_token:
         raise RuntimeError("A conexão do TikTok expirou. Reconecte a conta.")
+    connection_id = int(connection.id)
+    user_id = int(connection.user_id)
+    _release_read_transaction(db)
+
     payload = _token_request(
         {
             "client_key": settings.tiktok_client_key,
@@ -156,8 +209,13 @@ def _refresh(db: Session, connection: TikTokConnection, token: dict) -> dict:
         }
     )
     stamped = _stamp_token(payload, token)
+    connection = db.get(TikTokConnection, connection_id)
+    if not connection:
+        _release_read_transaction(db)
+        raise RuntimeError("A conexão do TikTok não existe mais. Reconecte a conta.")
     connection.token_json = json.dumps(stamped)
     db.commit()
+    clear_creator_info_cache(user_id)
     return stamped
 
 
@@ -171,17 +229,23 @@ def _stored_token(db: Session, user_id: int) -> tuple[TikTokConnection, dict]:
         raise RuntimeError("Credencial do TikTok inválida. Reconecte a conta.") from exc
     if time.time() >= float(token.get("_expires_at") or 0):
         token = _refresh(db, connection, token)
+        connection = db.query(TikTokConnection).filter(TikTokConnection.user_id == user_id).first()
+        if not connection:
+            raise RuntimeError("A conexão do TikTok não existe mais. Reconecte a conta.")
     return connection, token
 
 
 def get_access_token(db: Session, user_id: int) -> str:
     if not oauth_configured():
         raise RuntimeError("TikTok ainda não está configurado no servidor.")
-    _, token = _stored_token(db, user_id)
-    access_token = str(token.get("access_token") or "").strip()
-    if not access_token:
-        raise RuntimeError("Credencial do TikTok inválida. Reconecte a conta.")
-    return access_token
+    try:
+        _, token = _stored_token(db, user_id)
+        access_token = str(token.get("access_token") or "").strip()
+        if not access_token:
+            raise RuntimeError("Credencial do TikTok inválida. Reconecte a conta.")
+        return access_token
+    finally:
+        _release_read_transaction(db)
 
 
 def token_scopes(db: Session, user_id: int) -> set[str]:
@@ -189,12 +253,14 @@ def token_scopes(db: Session, user_id: int) -> set[str]:
         return set()
     try:
         _, token = _stored_token(db, user_id)
+        raw = token.get("scope") or token.get("scopes") or ""
+        if isinstance(raw, list):
+            return {str(item).strip() for item in raw if str(item).strip()}
+        return {item.strip() for item in str(raw).replace(" ", ",").split(",") if item.strip()}
     except RuntimeError:
         return set()
-    raw = token.get("scope") or token.get("scopes") or ""
-    if isinstance(raw, list):
-        return {str(item).strip() for item in raw if str(item).strip()}
-    return {item.strip() for item in str(raw).replace(" ", ",").split(",") if item.strip()}
+    finally:
+        _release_read_transaction(db)
 
 
 def metrics_authorized(db: Session, user_id: int) -> bool:
@@ -202,7 +268,12 @@ def metrics_authorized(db: Session, user_id: int) -> bool:
     return {"user.info.stats", "video.list"}.issubset(scopes)
 
 
-def get_creator_info(db: Session, user_id: int) -> dict:
+def get_creator_info(db: Session, user_id: int, *, force: bool = False) -> dict:
+    if not force:
+        cached = _cached_creator_info(user_id)
+        if cached:
+            return cached
+
     access_token = get_access_token(db, user_id)
     scopes = token_scopes(db, user_id)
     if scopes and "video.publish" not in scopes:
@@ -264,7 +335,7 @@ def get_creator_info(db: Session, user_id: int) -> dict:
         max_duration = max(1, int(data.get("max_video_post_duration_sec") or 60))
     except (TypeError, ValueError):
         max_duration = 60
-    return {
+    result = {
         "creator_username": str(data.get("creator_username") or ""),
         "creator_nickname": str(data.get("creator_nickname") or ""),
         "privacy_level_options": privacy_options,
@@ -273,13 +344,19 @@ def get_creator_info(db: Session, user_id: int) -> dict:
         "stitch_disabled": bool(data.get("stitch_disabled", False)),
         "max_video_post_duration_sec": max_duration,
     }
+    _store_creator_info(user_id, result)
+    return result
 
 
 def get_connection_status(db: Session, user_id: int) -> dict:
     configured = oauth_configured()
     connection = db.query(TikTokConnection).filter(TikTokConnection.user_id == user_id).first()
+    has_token = bool(connection and connection.token_json)
+    display_name = connection.display_name if connection else None
+    _release_read_transaction(db)
+
     connected = False
-    if configured and connection and connection.token_json:
+    if configured and has_token:
         try:
             get_access_token(db, user_id)
             connected = True
@@ -289,7 +366,7 @@ def get_connection_status(db: Session, user_id: int) -> dict:
     return {
         "configured": configured,
         "connected": connected,
-        "display_name": connection.display_name if connected and connection else None,
+        "display_name": display_name if connected else None,
         "redirect_uri": oauth_redirect_uri(),
         "publish_authorized": ("video.publish" in scopes) if scopes else connected,
         "metrics_authorized": {"user.info.stats", "video.list"}.issubset(scopes) if connected else False,
@@ -301,3 +378,4 @@ def disconnect(db: Session, user_id: int) -> None:
     if connection:
         db.delete(connection)
         db.commit()
+    clear_creator_info_cache(user_id)
