@@ -133,3 +133,46 @@ def test_tiktok_post_only_disappears_after_publish_complete(monkeypatch):
         assert refreshed.error is None
     finally:
         db.close()
+
+
+def test_tiktok_public_post_disappears_after_publish_complete_without_public_id(monkeypatch):
+    initialize_database()
+    db = SessionLocal()
+    try:
+        user, clip = _fixture(db)
+        post = TikTokPost(
+            user_id=user.id,
+            clip_id=clip.id,
+            privacy_level="PUBLIC_TO_EVERYONE",
+            status="processing",
+            publish_id=f"pub-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(post)
+        db.commit()
+        post_id = post.id
+        assert clip.id in {item["id"] for item in tiktok_publications(user=user, db=db)["clips"]}
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        "app.services.tiktok_upload_task.fetch_post_status",
+        lambda db, user_id, publish_id: {
+            "status": "PUBLISH_COMPLETE",
+            "fail_reason": "",
+            "post_ids": [],
+            "uploaded_bytes": 100,
+        },
+    )
+    refresh_tiktok_post(post_id)
+
+    db = SessionLocal()
+    try:
+        refreshed = db.get(TikTokPost, post_id)
+        user = refreshed and refreshed.user_id
+        assert refreshed.status == "published"
+        assert refreshed.error is None
+        owner = db.get(User, user)
+        assert owner is not None
+        assert clip.id not in {item["id"] for item in tiktok_publications(user=owner, db=db)["clips"]}
+    finally:
+        db.close()

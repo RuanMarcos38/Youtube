@@ -1,3 +1,4 @@
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..models import SystemSetting, TikTokPost
@@ -62,20 +63,27 @@ def clear_legacy_unaudited_state(db: Session, *, user_id: int) -> None:
     recover_legacy_unaudited_pauses(db, user_id=user_id)
 
 
-def release_unaudited_public_queue(db: Session, *, user_id: int, current_post_id: int) -> int:
+def release_unaudited_public_queue(
+    db: Session,
+    *,
+    user_id: int,
+    current_post_id: int,
+    current_error: str | None = None,
+) -> int:
     """Undo a public batch after TikTok authoritatively rejects an unaudited client.
 
     The first failed Direct Post is enough to prove the client-level restriction. All
     queued clips are returned to a clean, retryable state instead of showing the same
-    red error dozens of times. No video is silently changed to private, and public
-    visibility is not hidden locally when TikTok's current Creator Info allows it.
+    red error dozens of times. The clip that proved the rejection keeps a visible
+    error so a failed public attempt is never silent.
     """
     clear_legacy_unaudited_public_block(db, user_id=user_id)
     rows = (
         db.query(TikTokPost)
         .filter(
             TikTokPost.user_id == user_id,
-            TikTokPost.status.in_(["queued", "uploading", "paused_limit"]),
+            TikTokPost.status.in_(["queued", "uploading", "processing", "submitted", "paused_limit"]),
+            or_(TikTokPost.privacy_level == "PUBLIC_TO_EVERYONE", TikTokPost.id == current_post_id),
         )
         .all()
     )
@@ -85,8 +93,16 @@ def release_unaudited_public_queue(db: Session, *, user_id: int, current_post_id
         # active queue rows and old audit-specific pauses are released.
         if post.status == "paused_limit" and post.id != current_post_id and not is_unaudited_error_text(post.error):
             continue
-        post.status = "ready"
-        post.error = None
+        if post.id == current_post_id:
+            post.status = "failed"
+            post.error = current_error or (
+                "O TikTok recusou a publicação pública porque o app da Content Posting API ainda "
+                "não está auditado para posts públicos. Use 'Somente eu' para testar ou conclua "
+                "a auditoria no TikTok for Developers."
+            )
+        else:
+            post.status = "ready"
+            post.error = None
         post.publish_id = None
         changed += 1
     db.commit()

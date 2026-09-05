@@ -68,14 +68,14 @@ def run_tiktok_upload(post_id: int) -> None:
         post.publish_id = publish_id
         post.error = "TikTok recebeu o arquivo e está processando/moderando a publicação."
         db.commit()
-    except TikTokUnauditedClientError:
+    except TikTokUnauditedClientError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
         if post:
             # One authoritative rejection is enough. Return the whole pending
             # batch to a clean retryable state instead of copying the same red
             # error to every clip or hiding public posting locally.
-            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post_id)
+            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post_id, current_error=str(exc))
     except TikTokPostLimitError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
@@ -102,16 +102,11 @@ def refresh_tiktok_post(post_id: int) -> None:
         result = fetch_post_status(db, user_id=post.user_id, publish_id=post.publish_id)
         remote = result["status"]
         if remote == "PUBLISH_COMPLETE":
-            public_ids = result.get("post_ids") or []
-            if post.privacy_level == "PUBLIC_TO_EVERYONE" and not public_ids:
-                # TikTok can finish the Direct Post before moderation makes a
-                # public video visible in the feed. Keep it on-screen until the
-                # status endpoint returns a publicly available post id.
-                post.status = "processing"
-                post.error = "TikTok concluiu o envio, mas a postagem pública ainda aguarda moderação para aparecer no feed."
-            else:
-                post.status = "published"
-                post.error = None
+            # TikTok documents PUBLISH_COMPLETE as the Direct Post confirmation
+            # that the content has been posted. The Publications screen clears
+            # only after this authoritative status.
+            post.status = "published"
+            post.error = None
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"
             message = _failed_message(reason)
@@ -127,11 +122,11 @@ def refresh_tiktok_post(post_id: int) -> None:
             post.status = "processing"
             post.error = f"Aguardando confirmação do TikTok ({remote or 'status pendente'})."
         db.commit()
-    except TikTokUnauditedClientError:
+    except TikTokUnauditedClientError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
         if post:
-            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post.id)
+            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post.id, current_error=str(exc))
     except TikTokPostLimitError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
