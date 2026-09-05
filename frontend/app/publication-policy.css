@@ -1,11 +1,13 @@
 /* YouTube uploads are public-only in ShortsFlow.
-   Hide the legacy selector from the existing Dashboard without changing its
-   card/layout structure. The new batch panel displays the enforced policy. */
+   Hide only the legacy YouTube privacy control from the original Dashboard.
+   Do not hide selects rendered by the TikTok publishing panel. */
 #cortes > .sf-card > div:first-child > label {
   display: none !important;
 }
 
-/* Defensive fallback for older Dashboard markup. */
-#cortes label:has(> select) > select {
+/* Defensive fallback restricted to the original Dashboard header only.
+   The previous broad selector matched every select inside #cortes and was also
+   hiding the TikTok privacy selector, which kept the publish button disabled. */
+#cortes > .sf-card > div:first-child label:has(> select) > select {
   display: none !important;
 }
