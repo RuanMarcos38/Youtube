@@ -97,6 +97,49 @@ def test_youtube_daily_block_records_retry_window():
         db.close()
 
 
+def test_tiktok_inbox_delivery_stays_visible_until_user_finishes_post(monkeypatch):
+    initialize_database()
+    db = SessionLocal()
+    try:
+        user, clip = _fixture(db)
+        post = TikTokPost(
+            user_id=user.id,
+            clip_id=clip.id,
+            privacy_level="DRAFT_INBOX",
+            status="processing",
+            publish_id=f"pub-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(post)
+        db.commit()
+        post_id = post.id
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        "app.services.tiktok_upload_task.fetch_post_status",
+        lambda db, user_id, publish_id: {
+            "status": "SEND_TO_USER_INBOX",
+            "fail_reason": "",
+            "post_ids": [],
+            "uploaded_bytes": 100,
+        },
+    )
+    refresh_tiktok_post(post_id)
+
+    db = SessionLocal()
+    try:
+        refreshed = db.get(TikTokPost, post_id)
+        owner = db.get(User, refreshed.user_id)
+        assert refreshed.status == "processing"
+        assert "Rascunho entregue ao TikTok" in (refreshed.error or "")
+        queue = tiktok_publications(user=owner, db=db)["clips"]
+        item = next(value for value in queue if value["id"] == clip.id)
+        assert item["tiktok_status"] == "processing"
+        assert "Caixa de Entrada" in (item["tiktok_error"] or "")
+    finally:
+        db.close()
+
+
 def test_tiktok_post_only_disappears_after_publish_complete(monkeypatch):
     initialize_database()
     db = SessionLocal()
