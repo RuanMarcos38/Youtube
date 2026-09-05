@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .tiktok_oauth import get_access_token
 
 DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+POST_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 MAX_CHUNK_BYTES = 64 * 1024 * 1024
 
 
@@ -124,3 +125,38 @@ def direct_post_video(
                 offset += current_size
 
     return publish_id
+
+
+def fetch_post_status(db: Session, *, user_id: int, publish_id: str) -> dict:
+    """Ask TikTok whether a Direct Post actually reached the creator's feed.
+
+    Uploading the bytes only creates a publish job. A post is considered
+    published by ShortsFlow only after TikTok reports PUBLISH_COMPLETE.
+    """
+    publish_id = str(publish_id or "").strip()
+    if not publish_id:
+        raise TikTokUploadError("Publicação TikTok sem publish_id para consultar o status.")
+    access_token = get_access_token(db, user_id)
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(
+            POST_STATUS_URL,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
+            json={"publish_id": publish_id},
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise TikTokUploadError("TikTok retornou uma resposta inválida ao consultar a publicação.") from exc
+    error = payload.get("error") or {}
+    if response.is_error or error.get("code") not in {None, "ok", 0}:
+        _raise_tiktok_error(response, payload)
+    data = payload.get("data") or {}
+    return {
+        "status": str(data.get("status") or "").strip().upper(),
+        "fail_reason": str(data.get("fail_reason") or "").strip(),
+        "post_ids": [str(value) for value in (data.get("publicaly_available_post_id") or [])],
+        "uploaded_bytes": int(data.get("uploaded_bytes") or 0),
+    }
