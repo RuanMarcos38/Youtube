@@ -19,6 +19,11 @@ class TikTokPostLimitError(TikTokUploadError):
     pass
 
 
+class TikTokUnauditedClientError(TikTokUploadError):
+    """TikTok blocks public Direct Post while the API client is unaudited."""
+
+
+
 def _chunk_plan(size: int) -> tuple[int, int]:
     if size <= 0:
         raise TikTokUploadError("O arquivo do vídeo está vazio.")
@@ -36,6 +41,17 @@ def _raise_tiktok_error(response: httpx.Response, payload: dict) -> None:
     if code in {"spam_risk_too_many_posts", "reached_active_user_cap"}:
         raise TikTokPostLimitError(
             "O TikTok atingiu o limite de publicações disponível para esta conta/app nas últimas 24 horas. A fila restante foi pausada."
+        )
+    if code == "unaudited_client_can_only_post_to_private_accounts":
+        raise TikTokUnauditedClientError(
+            "O TikTok identificou este cliente da Content Posting API como não auditado. "
+            "Enquanto a auditoria do app não for concluída, o TikTok bloqueia publicação pública. "
+            "Para teste, use a opção 'Somente eu' quando ela estiver disponível; para publicar publicamente, conclua a auditoria do app no TikTok for Developers."
+        )
+    if code in {"scope_not_authorized", "scope_permission_missed"}:
+        raise TikTokUploadError(
+            "A conexão atual do TikTok não possui a permissão exigida para publicar. "
+            "A credencial existente foi preservada; reconecte somente se o TikTok solicitar a autorização de video.publish."
         )
     raise TikTokUploadError(f"TikTok ({code}): {message}")
 
