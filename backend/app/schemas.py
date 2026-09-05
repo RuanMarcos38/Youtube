@@ -183,6 +183,8 @@ class TikTokOAuthStatusResponse(BaseModel):
     connected: bool
     display_name: str | None = None
     redirect_uri: str
+    publish_authorized: bool = False
+    metrics_authorized: bool = False
 
 
 class TikTokCreatorInfoResponse(BaseModel):
