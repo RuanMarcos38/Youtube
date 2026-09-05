@@ -131,7 +131,8 @@ def test_tiktok_inbox_delivery_stays_visible_until_user_finishes_post(monkeypatc
         refreshed = db.get(TikTokPost, post_id)
         owner = db.get(User, refreshed.user_id)
         assert refreshed.status == "processing"
-        assert "Rascunho entregue ao TikTok" in (refreshed.error or "")
+        assert "SEND_TO_USER_INBOX" in (refreshed.error or "")
+        assert "não confirma que o rascunho está visível" in (refreshed.error or "")
         queue = tiktok_publications(user=owner, db=db)["clips"]
         item = next(value for value in queue if value["id"] == clip.id)
         assert item["tiktok_status"] == "processing"
