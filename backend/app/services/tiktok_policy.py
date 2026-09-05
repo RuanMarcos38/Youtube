@@ -135,10 +135,13 @@ def release_unaudited_public_queue(db: Session, *, user_id: int, current_post_id
     )
     changed = 0
     for post in rows:
-        if post.id == current_post_id or post.status in {"queued", "paused_limit", "uploading"}:
-            post.status = "ready"
-            post.error = None
-            post.publish_id = None
-            changed += 1
+        # Keep genuine rate/cap pauses untouched. Only the current failed item,
+        # active queue rows and old audit-specific pauses are released.
+        if post.status == "paused_limit" and post.id != current_post_id and not is_unaudited_error_text(post.error):
+            continue
+        post.status = "ready"
+        post.error = None
+        post.publish_id = None
+        changed += 1
     db.commit()
     return changed
