@@ -1,0 +1,193 @@
+name: Configure TikTok EasyPanel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Apply TikTok environment safely
+        shell: bash
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          TIKTOK_OAUTH_REDIRECT_URI: https://shorts.r2rmarketingdigital.com.br/api/tiktok/oauth/callback
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          BASE_URL = os.environ["EASYPANEL_URL"].rstrip("/")
+          API_KEY = os.environ["EASYPANEL_API_KEY"].strip()
+          PROJECT = "r2rmarketingdigital"
+          SERVICE = "shortsia"
+          TIKTOK_CLIENT_KEY = os.environ["TIKTOK_CLIENT_KEY"].strip()
+          TIKTOK_CLIENT_SECRET = os.environ["TIKTOK_CLIENT_SECRET"].strip()
+          TIKTOK_OAUTH_REDIRECT_URI = os.environ["TIKTOK_OAUTH_REDIRECT_URI"].strip()
+
+          if not API_KEY:
+              raise SystemExit("EASYPANEL_API_KEY is missing")
+          if not TIKTOK_CLIENT_KEY or not TIKTOK_CLIENT_SECRET:
+              raise SystemExit("TikTok credentials are missing")
+
+          def request_json(method, path, payload=None, timeout=60):
+              body = None if payload is None else json.dumps(payload).encode("utf-8")
+              req = Request(
+                  f"{BASE_URL}/api/{path}",
+                  data=body,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {API_KEY}",
+                      "Accept": "application/json",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urlopen(req, timeout=timeout) as response:
+                      raw = response.read().decode("utf-8").strip()
+                      return None if not raw else json.loads(raw)
+              except HTTPError as exc:
+                  detail = exc.read().decode("utf-8", errors="replace")[:1000]
+                  raise RuntimeError(f"EasyPanel API {method} {path} failed with HTTP {exc.code}: {detail}") from exc
+              except URLError as exc:
+                  raise RuntimeError(f"EasyPanel API {method} {path} failed: {exc.reason}") from exc
+
+          def walk(value, path="$"):
+              yield path, value
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      yield from walk(child, f"{path}.{key}")
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      yield from walk(child, f"{path}[{index}]")
+
+          def find_env(service):
+              candidates = []
+              for path, value in walk(service):
+                  if not isinstance(value, str):
+                      continue
+                  key = path.rsplit(".", 1)[-1]
+                  if key not in {"env", "content"}:
+                      continue
+                  key_count = len(re.findall(r"(?m)^\s*(?:export\s+)?[A-Z][A-Z0-9_]*\s*=", value))
+                  known_count = sum(
+                      marker in value
+                      for marker in (
+                          "FRONTEND_URL=",
+                          "OPENAI_API_KEY=",
+                          "GOOGLE_OAUTH_CLIENT_ID=",
+                          "GOOGLE_OAUTH_CLIENT_SECRET=",
+                          "YOUTUBE_",
+                          "ADMIN_BOOTSTRAP_",
+                      )
+                  )
+                  if key_count:
+                      candidates.append((known_count, key_count, path, value))
+              candidates.sort(reverse=True)
+              if not candidates:
+                  raise RuntimeError("Could not locate current app environment in EasyPanel response")
+              known_count, key_count, path, value = candidates[0]
+              if key_count < 3 or known_count < 1:
+                  raise RuntimeError(f"Refusing to replace suspicious environment at {path}: only {key_count} variables detected")
+              masked = []
+              for line in value.splitlines():
+                  match = re.match(r"\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$", line)
+                  if not match:
+                      continue
+                  name, val = match.groups()
+                  clean = val.strip().strip('"').strip("'")
+                  if name not in {"TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"} and re.fullmatch(r"\*{4,}|x{4,}|REDACTED|redacted", clean):
+                      masked.append(name)
+              if masked:
+                  raise RuntimeError("Refusing to update because existing environment appears redacted")
+              return path, value
+
+          def find_dotenv_path(service):
+              for path, value in walk(service):
+                  if path.endswith(".dotEnvPath") and isinstance(value, str) and value.strip():
+                      return value.strip()
+              return None
+
+          def upsert_dotenv(env_text):
+              remove = {"TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "TIKTOK_OAUTH_REDIRECT_URI"}
+              kept = []
+              for line in env_text.splitlines():
+                  match = re.match(r"\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=", line)
+                  if match and match.group(1) in remove:
+                      continue
+                  kept.append(line)
+              new_lines = [
+                  "",
+                  "# TikTok OAuth / Content Posting API",
+                  f"TIKTOK_CLIENT_KEY={TIKTOK_CLIENT_KEY}",
+                  f"TIKTOK_CLIENT_SECRET={TIKTOK_CLIENT_SECRET}",
+                  f"TIKTOK_OAUTH_REDIRECT_URI={TIKTOK_OAUTH_REDIRECT_URI}",
+              ]
+              return "\n".join(kept).rstrip() + "\n" + "\n".join(new_lines).rstrip() + "\n"
+
+          query = urlencode({"projectName": PROJECT, "serviceName": SERVICE})
+          current = request_json("GET", f"inspectAppService?{query}")
+          if not current:
+              raise RuntimeError("EasyPanel service r2rmarketingdigital/shortsia was not found")
+
+          env_path, current_env = find_env(current)
+          dot_env_path = find_dotenv_path(current)
+          current_names = sorted(set(re.findall(r"(?m)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=", current_env)))
+          print(f"Current EasyPanel environment located at {env_path}; preserving {len(current_names)} variables.")
+
+          updated_env = upsert_dotenv(current_env)
+          payload = {"projectName": PROJECT, "serviceName": SERVICE, "env": updated_env}
+          if dot_env_path:
+              payload["dotEnvPath"] = dot_env_path
+          request_json("POST", "updateAppEnv", payload, timeout=120)
+          print("TikTok variables applied to EasyPanel environment without changing other variables.")
+
+          after = request_json("GET", f"inspectAppService?{query}")
+          _, after_env = find_env(after)
+          for required in ("TIKTOK_CLIENT_KEY=", "TIKTOK_CLIENT_SECRET=", "TIKTOK_OAUTH_REDIRECT_URI="):
+              if required not in after_env:
+                  raise RuntimeError(f"{required.rstrip('=')} was not present after update")
+          print("TikTok environment presence verified in EasyPanel.")
+
+          request_json(
+              "POST",
+              "deployAppService",
+              {"projectName": PROJECT, "serviceName": SERVICE, "forceRebuild": True},
+              timeout=600,
+          )
+          print("EasyPanel accepted the force rebuild request.")
+
+          for attempt in range(1, 37):
+              try:
+                  with urlopen("https://shorts.r2rmarketingdigital.com.br/api/health", timeout=12) as response:
+                      health = json.loads(response.read().decode("utf-8"))
+                  checks = health.get("checks") or {}
+                  ok = (
+                      checks.get("worker_alive") is True
+                      and checks.get("ffmpeg_available") is True
+                      and checks.get("ffprobe_available") is True
+                  )
+                  if ok:
+                      print("ShortsFlow backend is healthy after TikTok environment update.")
+                      break
+              except Exception:
+                  pass
+              print(f"Waiting for ShortsFlow runtime after rebuild... attempt {attempt}/36")
+              time.sleep(10)
+          else:
+              raise RuntimeError("ShortsFlow did not become healthy after rebuild")
+          PY
