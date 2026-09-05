@@ -16,13 +16,14 @@ export default function DataDeletionPage() {
 
         <div className="mt-10 space-y-8 leading-7 text-[#303934]">
           <section>
-            <h2 className="text-xl font-bold text-[#111815]">Desconectar o YouTube</h2>
-            <p className="mt-2">Dentro do ShortsFlow AI, utilize a opção de desconexão/troca de conta do YouTube. Isso interrompe o uso da autorização pelo perfil correspondente.</p>
+            <h2 className="text-xl font-bold text-[#111815]">Desconectar integrações</h2>
+            <p className="mt-2">Dentro do ShortsFlow AI, utilize as opções de desconexão ou troca de conta do YouTube e do TikTok quando disponíveis para o perfil correspondente. Isso interrompe o uso da autorização pela plataforma.</p>
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-[#111815]">Revogar o acesso no Google</h2>
+            <h2 className="text-xl font-bold text-[#111815]">Revogar o acesso nas plataformas</h2>
             <p className="mt-2">Você também pode remover o acesso do ShortsFlow AI diretamente nas configurações de segurança da sua Conta Google em <a className="font-bold text-[#5f8500] underline" href="https://security.google.com/settings/security/permissions" target="_blank" rel="noreferrer">Apps e serviços conectados</a>.</p>
+            <p className="mt-2">Para o TikTok, revogue o acesso nas configurações de privacidade, segurança ou aplicativos conectados da sua conta TikTok, conforme as opções disponibilizadas pela própria plataforma.</p>
           </section>
 
           <section>

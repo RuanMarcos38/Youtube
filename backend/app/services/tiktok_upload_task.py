@@ -189,11 +189,11 @@ def refresh_tiktok_post(post_id: int) -> None:
             # TikTok says it sent an inbox notification; it does not let the
             # ShortsFlow independently prove that the notification is visible
             # on the creator's phone.
-            post.status = "processing"
+            post.status = "draft_sent"
             post.error = (
-                "A API do TikTok informou SEND_TO_USER_INBOX (notificação enviada à Caixa de Entrada), mas isso não confirma que o rascunho está visível no seu celular. "
-                "Se a notificação não aparecer, para testar publicação automática use uma conta TikTok privada com 'Somente eu'. "
-                "Para publicação pública automática, o app precisa concluir a auditoria do TikTok."
+                "TikTok confirmou SEND_TO_USER_INBOX: o video foi enviado para a Caixa de Entrada/Rascunhos. "
+                "Abra a notificacao no app TikTok e conclua a postagem por la. "
+                "O ShortsFlow so removera este corte quando o TikTok retornar PUBLISH_COMPLETE."
             )
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"

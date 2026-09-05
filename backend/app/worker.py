@@ -59,15 +59,14 @@ def _recover_interrupted() -> None:
         for post in db.query(TikTokPost).filter(TikTokPost.status == "submitted", TikTokPost.publish_id.is_not(None)).all():
             post.status = "processing"
             post.error = "Aguardando confirmação final do TikTok."
-        # A draft delivered to TikTok is not a completed post. Previous builds
-        # stopped polling at draft_sent and hid the clip too early. Recover
-        # those rows so they remain visible until TikTok says PUBLISH_COMPLETE.
+        # A draft delivered to TikTok is not a completed post. Keep those rows
+        # polling and visible until TikTok says PUBLISH_COMPLETE.
         for post in db.query(TikTokPost).filter(TikTokPost.status == "draft_sent", TikTokPost.publish_id.is_not(None)).all():
-            post.status = "processing"
-            post.error = (
-                "Rascunho entregue ao TikTok. Abra a notificação na Caixa de Entrada do aplicativo e conclua a publicação. "
-                "O ShortsFlow continuará acompanhando este envio."
-            )
+            if not post.error:
+                post.error = (
+                    "Rascunho entregue ao TikTok. Abra a notificacao na Caixa de Entrada do aplicativo e conclua a publicacao. "
+                    "O ShortsFlow continuara acompanhando este envio ate PUBLISH_COMPLETE."
+                )
         db.commit()
     finally:
         db.close()

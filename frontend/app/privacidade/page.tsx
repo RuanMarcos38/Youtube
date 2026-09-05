@@ -35,7 +35,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-bold text-[#111815]">4. Integração com TikTok</h2>
             <p className="mt-2">O ShortsFlow AI utiliza recursos oficiais do TikTok for Developers, incluindo Login Kit e Content Posting API. Quando autorizado pelo usuário, a plataforma pode receber identificadores da conta TikTok, nome de exibição, token de acesso e permissões necessárias para iniciar publicações solicitadas pelo próprio usuário.</p>
-            <p className="mt-2">Para publicação, o usuário escolhe explicitamente os vídeos, a privacidade disponibilizada pelo TikTok, opções permitidas para comentários/dueto/stitch e confirma o envio. O ShortsFlow AI não publica automaticamente sem uma ação de envio do usuário.</p>
+            <p className="mt-2">Para publicação, o usuário escolhe explicitamente os vídeos, a privacidade disponibilizada pelo TikTok, opções permitidas para comentários/dueto/stitch e confirma o envio. O ShortsFlow AI não publica automaticamente sem uma ação de envio do usuário e acompanha o status até a confirmação final da plataforma.</p>
             <p className="mt-2">Se o aplicativo tiver aprovação para recursos adicionais do TikTok, como Display API, poderemos consultar dados de perfil e desempenho compatíveis com os escopos concedidos, como informações básicas do perfil e métricas de vídeos. Escopos não aprovados ou não autorizados não são utilizados.</p>
           </section>
 

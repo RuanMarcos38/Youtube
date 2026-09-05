@@ -73,6 +73,7 @@ function tiktokStatusLabel(status?: string) {
     uploading: "Enviando ao TikTok",
     processing: "TikTok processando",
     submitted: "TikTok processando",
+    draft_sent: "Rascunho no TikTok",
     failed: "Falhou no TikTok",
     paused_limit: "TikTok pausado",
   };
@@ -80,7 +81,7 @@ function tiktokStatusLabel(status?: string) {
 }
 
 const YOUTUBE_BUSY_STATUSES = new Set(["upload_queued", "uploading", "uploaded"]);
-const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted"]);
+const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted", "draft_sent"]);
 
 function isYouTubeSelectable(clip: Clip) {
   return !YOUTUBE_BUSY_STATUSES.has(clip.status || "");
@@ -585,6 +586,8 @@ export default function PublishingEnhancements() {
           const statusText = tab === "youtube" ? youtubeStatusLabel(clip.status) : tiktokStatusLabel(tt.tiktok_status);
           const clipError = tab === "youtube" ? clip.upload_error : tt.tiktok_error;
           const selectable = tab === "youtube" ? isYouTubeSelectable(clip) : isTikTokSelectable(tt);
+          const isFailureMessage = tab === "youtube" ? clip.status === "upload_failed" : ["failed", "paused_limit"].includes(tt.tiktok_status || "");
+          const messageClass = isFailureMessage ? "border-red-100 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800";
           return (
             <article key={`${tab}-${clip.id}`} className="rounded-xl border border-[#e7e7e7] bg-white p-3 shadow-sm">
               <div className="flex items-start gap-3">
@@ -595,7 +598,7 @@ export default function PublishingEnhancements() {
                 </div>
               </div>
               <video src={clip.media_url} controls preload="metadata" className="mt-3 aspect-[9/16] max-h-[420px] w-full rounded-xl bg-black object-contain" />
-              {clipError && <div className="mt-3 rounded-lg border border-red-100 bg-red-50 p-2 text-[10px] leading-4 text-red-700">{clipError}</div>}
+              {clipError && <div className={`mt-3 rounded-lg border p-2 text-[10px] leading-4 ${messageClass}`}>{clipError}</div>}
               <button type="button" onClick={() => void editClip(clip)} disabled={Boolean(busy)} className="sf-button sf-button-outline mt-3 w-full disabled:opacity-40">{busy === `edit-${clip.id}` ? "Abrindo editor..." : "Editar vídeo"}</button>
             </article>
           );

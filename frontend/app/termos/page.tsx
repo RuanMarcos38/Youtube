@@ -36,8 +36,10 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-[#111815]">5. YouTube e Google</h2>
-            <p className="mt-2">Ao conectar uma Conta Google/YouTube e utilizar os Serviços de API do YouTube, o usuário concorda também em obedecer aos <a className="font-bold text-[#5f8500] underline" href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">Termos de Serviço do YouTube</a> e às políticas aplicáveis do Google.</p>
+            <h2 className="text-xl font-bold text-[#111815]">5. YouTube, Google e TikTok</h2>
+            <p className="mt-2">Ao conectar uma Conta Google/YouTube e utilizar recursos dos Serviços de API do YouTube, o usuário concorda também em obedecer aos <a className="font-bold text-[#5f8500] underline" href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">Termos de Serviço do YouTube</a> e às políticas aplicáveis do Google.</p>
+            <p className="mt-2">Ao conectar uma conta TikTok e utilizar recursos do Login Kit ou da Content Posting API, o usuário concorda em obedecer aos termos, políticas de conteúdo e diretrizes aplicáveis do TikTok e do TikTok for Developers.</p>
+            <p className="mt-2">A disponibilidade de publicação direta no TikTok depende das permissões concedidas pelo usuário, das opções retornadas pela API para a conta conectada e da aprovação do aplicativo pelo TikTok quando exigida pela plataforma.</p>
           </section>
 
           <section>
