@@ -9,13 +9,14 @@ from ..models import SystemSetting, TikTokPost
 PUBLIC_AUDIT_SETTING_PREFIX = "tiktok_public_audit_block_user_"
 PUBLIC_AUDIT_BLOCK_HOURS = 6
 PUBLIC_AUDIT_BLOCK_REASON = (
-    "O TikTok recusou o Direct Post porque o app da Content Posting API ainda não está auditado. "
-    "Clientes não auditados só conseguem testar Direct Post em contas TikTok privadas; nesta conta pública, "
-    "até 'Somente eu' é recusado pelo TikTok. Conclua a auditoria do app no TikTok for Developers ou torne a conta TikTok privada para teste."
+    "O TikTok bloqueou o Direct Post público porque o app da Content Posting API ainda não está auditado. "
+    "O ShortsFlow usará o fluxo oficial de Upload para enviar o vídeo à Caixa de Entrada/Rascunhos do TikTok, "
+    "onde você poderá revisar e concluir a publicação no app. Se o envio de rascunho pedir nova permissão, "
+    "clique em 'Trocar conta TikTok' e autorize video.upload."
 )
 PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON = (
-    "O TikTok recusou publicação pública porque o app da Content Posting API ainda não está auditado. "
-    "Nesta conta TikTok privada, teste somente com 'Somente eu'. Para publicar publicamente, conclua a auditoria do app no TikTok for Developers."
+    "O TikTok ainda restringe o Direct Post deste app. O ShortsFlow mantém 'Somente eu' disponível para teste e, "
+    "quando necessário, usa o fluxo oficial de Upload/Rascunhos. Para publicação pública automática, conclua a auditoria do app."
 )
 UNAUDITED_CODE = "unaudited_client_can_only_post_to_private_accounts"
 UNAUDITED_MARKERS = (
@@ -59,7 +60,7 @@ def is_unaudited_error_text(value: str | None) -> bool:
 
 
 def mark_unaudited_public_block(db: Session, *, user_id: int, commit: bool = True) -> datetime:
-    """Temporarily hide public posting after TikTok proves the client is unaudited."""
+    """Remember that Direct Post is audit-blocked so queued items can use Upload instead."""
     blocked_until = _utcnow() + timedelta(hours=PUBLIC_AUDIT_BLOCK_HOURS)
     key = _setting_key(user_id)
     marker = db.get(SystemSetting, key)
@@ -75,7 +76,7 @@ def mark_unaudited_public_block(db: Session, *, user_id: int, commit: bool = Tru
 
 
 def clear_unaudited_public_block(db: Session, *, user_id: int, commit: bool = True) -> bool:
-    """Remove the local TikTok public-posting audit gate."""
+    """Remove the local TikTok Direct Post audit gate."""
     key = _setting_key(user_id)
     marker = db.get(SystemSetting, key)
     if marker is None:
@@ -124,7 +125,12 @@ def sync_unaudited_public_block_from_recent_failure(db: Session, *, user_id: int
 
 
 def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) -> dict:
-    """Return Creator Info adjusted after TikTok proves the client is unaudited."""
+    """Keep the TikTok controls usable while routing audit-blocked Direct Posts to Upload.
+
+    SELF_ONLY acts as the UI-safe choice while the worker uses the local audit
+    marker to select TikTok's official inbox/draft Upload flow. It is not used
+    to pretend that a public Direct Post succeeded.
+    """
     active = unaudited_public_block_active(db, user_id=user_id)
     if not active:
         active = sync_unaudited_public_block_from_recent_failure(db, user_id=user_id)
@@ -135,7 +141,7 @@ def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) ->
     adjusted = dict(creator)
     adjusted["public_posting_blocked"] = True
     if public_account:
-        adjusted["privacy_level_options"] = []
+        adjusted["privacy_level_options"] = ["SELF_ONLY"]
         adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON
     else:
         adjusted["privacy_level_options"] = [value for value in options if value == "SELF_ONLY"]
@@ -179,13 +185,7 @@ def release_unaudited_public_queue(
     current_post_id: int,
     current_error: str | None = None,
 ) -> int:
-    """Undo a Direct Post batch after TikTok authoritatively rejects an unaudited client.
-
-    The first failed Direct Post is enough to prove the client/account-level
-    restriction. Pending clips are returned to a clean, retryable state instead
-    of showing the same red error dozens of times. The clip that proved the
-    rejection keeps a visible error so the failed attempt is never silent.
-    """
+    """Undo a batch when neither Direct Post nor the Upload fallback can proceed."""
     mark_unaudited_public_block(db, user_id=user_id, commit=False)
     rows = (
         db.query(TikTokPost)
@@ -201,16 +201,13 @@ def release_unaudited_public_queue(
     )
     changed = 0
     for post in rows:
-        # Keep genuine rate/cap pauses untouched. Only the current failed item,
-        # active queue rows and old audit-specific pauses are released.
         if post.status == "paused_limit" and post.id != current_post_id and not is_unaudited_error_text(post.error):
             continue
         if post.id == current_post_id:
             post.status = "failed"
             post.error = current_error or (
-                "O TikTok recusou a publicação pública porque o app da Content Posting API ainda "
-                "não está auditado para posts públicos. Use 'Somente eu' para testar ou conclua "
-                "a auditoria no TikTok for Developers."
+                "O Direct Post está bloqueado pela auditoria do TikTok e o envio para Rascunhos não pôde ser concluído. "
+                "Reconecte o TikTok autorizando video.upload ou conclua a auditoria no TikTok for Developers."
             )
         else:
             post.status = "ready"
