@@ -48,13 +48,48 @@ def record_unaudited_public_block(db: Session, *, user_id: int, when: datetime |
         marker.secret = False
 
 
+def recover_legacy_unaudited_pauses(db: Session, *, user_id: int | None = None) -> int:
+    """Clean the old behavior that copied one audit error to every queued clip."""
+    query = db.query(TikTokPost).filter(
+        TikTokPost.status == "paused_limit",
+        TikTokPost.error.is_not(None),
+    )
+    if user_id is not None:
+        query = query.filter(TikTokPost.user_id == int(user_id))
+    rows = query.order_by(TikTokPost.user_id.asc(), TikTokPost.id.asc()).all()
+
+    affected_users: set[int] = set()
+    changed = 0
+    for post in rows:
+        if not is_unaudited_error_text(post.error):
+            continue
+        affected_users.add(int(post.user_id))
+        post.status = "ready"
+        post.error = None
+        post.publish_id = None
+        changed += 1
+
+    if changed:
+        now = datetime.now(timezone.utc)
+        for affected_user_id in affected_users:
+            record_unaudited_public_block(db, user_id=affected_user_id, when=now)
+        db.commit()
+    return changed
+
+
 def recent_unaudited_public_block(
     db: Session,
     *,
     user_id: int,
     max_age_seconds: int = PUBLIC_AUDIT_RECHECK_SECONDS,
 ) -> bool:
+    # First access after this fix also repairs the rows already paused by the
+    # previous implementation. This makes the current production queue clean
+    # immediately, without a schema migration or manual database operation.
     marker = db.get(SystemSetting, _setting_key(user_id))
+    if not marker or not marker.value:
+        recover_legacy_unaudited_pauses(db, user_id=user_id)
+        marker = db.get(SystemSetting, _setting_key(user_id))
     if not marker or not marker.value:
         return False
     try:
@@ -106,30 +141,4 @@ def release_unaudited_public_queue(db: Session, *, user_id: int, current_post_id
             post.publish_id = None
             changed += 1
     db.commit()
-    return changed
-
-
-def recover_legacy_unaudited_pauses(db: Session) -> int:
-    """Clean the old behavior that copied one audit error to every queued clip."""
-    rows = (
-        db.query(TikTokPost)
-        .filter(TikTokPost.status == "paused_limit", TikTokPost.error.is_not(None))
-        .order_by(TikTokPost.user_id.asc(), TikTokPost.id.asc())
-        .all()
-    )
-    affected_users: set[int] = set()
-    changed = 0
-    for post in rows:
-        if not is_unaudited_error_text(post.error):
-            continue
-        affected_users.add(int(post.user_id))
-        post.status = "ready"
-        post.error = None
-        post.publish_id = None
-        changed += 1
-
-    if changed:
-        now = datetime.now(timezone.utc)
-        for user_id in affected_users:
-            record_unaudited_public_block(db, user_id=user_id, when=now)
     return changed
