@@ -50,7 +50,8 @@ def _finish_submission(db, post: TikTokPost, publish_id: str, *, draft: bool) ->
     if draft:
         post.privacy_level = "DRAFT_INBOX"
         post.error = (
-            "TikTok recebeu o vídeo como rascunho. Aguarde a notificação na Caixa de Entrada do TikTok para revisar e concluir a publicação no app."
+            "TikTok recebeu o vídeo e está preparando o envio para a Caixa de Entrada/Rascunhos. "
+            "O ShortsFlow continuará acompanhando este publish_id até a confirmação final."
         )
     else:
         post.error = "TikTok recebeu o arquivo e está processando/moderando a publicação."
@@ -152,7 +153,7 @@ def refresh_tiktok_post(post_id: int) -> None:
     db = SessionLocal()
     try:
         post = db.get(TikTokPost, post_id)
-        if not post or not post.publish_id or post.status not in {"processing", "submitted"}:
+        if not post or not post.publish_id or post.status not in {"processing", "submitted", "draft_sent"}:
             return
         result = fetch_post_status(db, user_id=post.user_id, publish_id=post.publish_id)
         remote = result["status"]
@@ -160,11 +161,14 @@ def refresh_tiktok_post(post_id: int) -> None:
             post.status = "published"
             post.error = None
         elif remote == "SEND_TO_USER_INBOX":
-            # This is the documented successful terminal state for the Upload
-            # flow: the creator must open TikTok's inbox notification and finish
-            # the post inside TikTok. It is not a failed Direct Post.
-            post.status = "draft_sent"
-            post.error = None
+            # TikTok documents this only as delivery to the creator's inbox,
+            # not as a completed post. Keep the item visible and keep polling
+            # the same publish_id until TikTok later confirms PUBLISH_COMPLETE.
+            post.status = "processing"
+            post.error = (
+                "Rascunho entregue ao TikTok. Abra o aplicativo TikTok, toque na notificação da Caixa de Entrada, "
+                "revise o vídeo e conclua a publicação. O vídeo continuará nesta tela até o TikTok confirmar PUBLISH_COMPLETE."
+            )
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"
             message = _failed_message(reason)
@@ -193,7 +197,7 @@ def refresh_tiktok_post(post_id: int) -> None:
     except Exception as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
-        if post and post.status in {"processing", "submitted"}:
+        if post and post.status in {"processing", "submitted", "draft_sent"}:
             post.error = f"Aguardando confirmação do TikTok: {exc}"
             db.commit()
     finally:

@@ -62,9 +62,9 @@ def tiktok_publications(user: User = Depends(get_current_user), db: Session = De
     """Return the same generated Shorts for TikTok without sharing YouTube status.
 
     No video file is duplicated on disk: both platform tabs reference the same
-    rendered Short while keeping publication state independent. Direct Posts
-    confirmed as published and Upload-flow videos delivered to TikTok's inbox
-    are removed from this active queue.
+    rendered Short while keeping publication state independent. A TikTok item
+    is removed only after TikTok confirms PUBLISH_COMPLETE. Inbox/draft delivery
+    is not treated as a completed publication.
     """
     clips = [clip for clip in _base_clips(user, db) if clip.status != "archived"]
     ids = [clip.id for clip in clips]
@@ -81,7 +81,7 @@ def tiktok_publications(user: User = Depends(get_current_user), db: Session = De
     items = []
     for clip in clips:
         post = posts.get(clip.id)
-        if post and post.status in {"published", "draft_sent"}:
+        if post and post.status == "published":
             continue
         payload = clip_to_dict(clip)
         payload["tiktok_status"] = post.status if post else "ready"
