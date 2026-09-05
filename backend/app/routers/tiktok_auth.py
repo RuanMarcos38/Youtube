@@ -48,6 +48,20 @@ def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(ge
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.get("/oauth/authorize")
+def oauth_authorize(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Start TikTok OAuth through a normal same-origin browser redirect.
+
+    This route is used for both first connection and account switching. The
+    current token is kept until the new OAuth callback succeeds, so a cancelled
+    account change does not destroy the working connection.
+    """
+    try:
+        return RedirectResponse(url=build_authorization_url(db, user), status_code=302)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/oauth/callback")
 def oauth_callback(
     code: str | None = Query(default=None),
