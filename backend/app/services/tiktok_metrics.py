@@ -21,22 +21,50 @@ def _history_key(user_id: int) -> str:
     return f"{HISTORY_PREFIX}{int(user_id)}"
 
 
+def _safe_payload(response: httpx.Response, fallback: str) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        status_code = int(response.status_code or 0)
+        if status_code >= 500:
+            raise RuntimeError(
+                f"TikTok está temporariamente indisponível para métricas (HTTP {status_code}). A publicação continua independente do dashboard."
+            ) from exc
+        raise RuntimeError(
+            f"TikTok retornou uma resposta inválida para métricas (HTTP {status_code or 'desconhecido'})."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(fallback)
+    return payload
+
+
 def _request_error(response: httpx.Response, payload: dict, fallback: str) -> RuntimeError:
     error = payload.get("error") or {}
     code = str(error.get("code") or "unknown")
     message = str(error.get("message") or response.text or fallback)
+    if code == "access_token_invalid":
+        return RuntimeError("A sessão do TikTok expirou. Reconecte a conta para atualizar as métricas.")
+    if code == "scope_not_authorized":
+        return RuntimeError("O TikTok não autorizou os escopos de métricas desta conexão. Ative as métricas novamente.")
+    if code == "rate_limit_exceeded" or response.status_code == 429:
+        return RuntimeError("O TikTok limitou temporariamente as consultas de métricas. O envio de vídeos continua disponível.")
     return RuntimeError(f"TikTok ({code}): {message}")
 
 
 def _user_stats(access_token: str) -> dict:
     fields = "open_id,display_name,avatar_url,follower_count,following_count,likes_count,video_count"
-    with httpx.Client(timeout=25.0) as client:
-        response = client.get(
-            USER_INFO_URL,
-            params={"fields": fields},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    payload = response.json()
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            response = client.get(
+                USER_INFO_URL,
+                params={"fields": fields},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.RequestError as exc:
+        raise RuntimeError(
+            "Não foi possível consultar as métricas do TikTok agora. A publicação continua disponível; tente o dashboard novamente em alguns instantes."
+        ) from exc
+    payload = _safe_payload(response, "Falha ao consultar estatísticas do perfil TikTok.")
     error = payload.get("error") or {}
     if response.is_error or error.get("code") not in {None, "ok", 0}:
         raise _request_error(response, payload, "Falha ao consultar estatísticas do perfil TikTok.")
@@ -47,32 +75,37 @@ def _recent_videos(access_token: str, *, max_pages: int = 5) -> list[dict]:
     fields = "id,create_time,title,video_description,duration,cover_image_url,share_url,view_count,like_count,comment_count,share_count"
     videos: list[dict] = []
     cursor = None
-    with httpx.Client(timeout=30.0) as client:
-        for _ in range(max(1, min(10, max_pages))):
-            body: dict[str, int] = {"max_count": 20}
-            if cursor is not None:
-                body["cursor"] = int(cursor)
-            response = client.post(
-                VIDEO_LIST_URL,
-                params={"fields": fields},
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            payload = response.json()
-            error = payload.get("error") or {}
-            if response.is_error or error.get("code") not in {None, "ok", 0}:
-                raise _request_error(response, payload, "Falha ao listar vídeos do TikTok.")
-            data = payload.get("data") or {}
-            page = data.get("videos") or []
-            videos.extend(item for item in page if isinstance(item, dict))
-            if not data.get("has_more"):
-                break
-            cursor = data.get("cursor")
-            if cursor is None:
-                break
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            for _ in range(max(1, min(10, max_pages))):
+                body: dict[str, int] = {"max_count": 20}
+                if cursor is not None:
+                    body["cursor"] = int(cursor)
+                response = client.post(
+                    VIDEO_LIST_URL,
+                    params={"fields": fields},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                payload = _safe_payload(response, "Falha ao listar vídeos do TikTok.")
+                error = payload.get("error") or {}
+                if response.is_error or error.get("code") not in {None, "ok", 0}:
+                    raise _request_error(response, payload, "Falha ao listar vídeos do TikTok.")
+                data = payload.get("data") or {}
+                page = data.get("videos") or []
+                videos.extend(item for item in page if isinstance(item, dict))
+                if not data.get("has_more"):
+                    break
+                cursor = data.get("cursor")
+                if cursor is None:
+                    break
+    except httpx.RequestError as exc:
+        raise RuntimeError(
+            "Não foi possível listar os vídeos do TikTok para métricas agora. A publicação continua disponível."
+        ) from exc
     return videos
 
 
