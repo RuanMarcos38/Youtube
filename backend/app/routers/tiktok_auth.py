@@ -26,9 +26,7 @@ from ..services.tiktok_oauth import (
     get_creator_info,
 )
 from ..services.tiktok_policy import (
-    PUBLIC_AUDIT_BLOCK_MESSAGE,
-    guard_creator_info_for_audit,
-    recent_unaudited_public_block,
+    clear_legacy_unaudited_state,
 )
 
 router = APIRouter(prefix="/tiktok", tags=["tiktok"])
@@ -120,11 +118,8 @@ def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depen
 def creator_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         creator = get_creator_info(db, user.id, force=True)
-        # Creator Info reflects account privacy settings, while Direct Post can
-        # still reject public visibility when the API client is unaudited. A
-        # recent authoritative init rejection temporarily limits the UI to the
-        # safe SELF_ONLY option without changing credentials or account data.
-        return guard_creator_info_for_audit(db, user_id=user.id, creator=creator)
+        clear_legacy_unaudited_state(db, user_id=user.id)
+        return creator
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -170,12 +165,9 @@ def upload_batch(
 
     try:
         creator = get_creator_info(db, user.id, force=True)
-        creator = guard_creator_info_for_audit(db, user_id=user.id, creator=creator)
+        clear_legacy_unaudited_state(db, user_id=user.id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    if payload.privacy_level == "PUBLIC_TO_EVERYONE" and recent_unaudited_public_block(db, user_id=user.id):
-        raise HTTPException(status_code=409, detail=PUBLIC_AUDIT_BLOCK_MESSAGE)
 
     options = creator.get("privacy_level_options") or []
     if payload.privacy_level not in options:

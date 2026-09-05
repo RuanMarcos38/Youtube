@@ -73,8 +73,8 @@ def run_tiktok_upload(post_id: int) -> None:
         post = db.get(TikTokPost, post_id)
         if post:
             # One authoritative rejection is enough. Return the whole pending
-            # batch to a clean retryable state and record a short-lived policy
-            # marker, instead of copying the same red error to every clip.
+            # batch to a clean retryable state instead of copying the same red
+            # error to every clip or hiding public posting locally.
             release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post_id)
     except TikTokPostLimitError as exc:
         db.rollback()
