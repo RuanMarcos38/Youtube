@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.models import Clip, Job, SourceVideo, Tenant, TikTokPost, User
@@ -97,7 +98,7 @@ def test_youtube_daily_block_records_retry_window():
         db.close()
 
 
-def test_tiktok_inbox_delivery_stays_visible_until_user_finishes_post(monkeypatch):
+def test_tiktok_inbox_delivery_is_released_for_retry(monkeypatch):
     initialize_database()
     db = SessionLocal()
     try:
@@ -130,13 +131,43 @@ def test_tiktok_inbox_delivery_stays_visible_until_user_finishes_post(monkeypatc
     try:
         refreshed = db.get(TikTokPost, post_id)
         owner = db.get(User, refreshed.user_id)
-        assert refreshed.status == "draft_sent"
+        assert refreshed.status == "ready"
+        assert refreshed.publish_id is None
         assert "SEND_TO_USER_INBOX" in (refreshed.error or "")
         assert "PUBLISH_COMPLETE" in (refreshed.error or "")
         queue = tiktok_publications(user=owner, db=db)["clips"]
         item = next(value for value in queue if value["id"] == clip.id)
-        assert item["tiktok_status"] == "draft_sent"
-        assert "Caixa de Entrada" in (item["tiktok_error"] or "")
+        assert item["tiktok_status"] == "ready"
+        assert "reenvio" in (item["tiktok_error"] or "")
+    finally:
+        db.close()
+
+
+def test_tiktok_publications_release_stale_draft_upload_processing():
+    initialize_database()
+    db = SessionLocal()
+    try:
+        user, clip = _fixture(db)
+        post = TikTokPost(
+            user_id=user.id,
+            clip_id=clip.id,
+            privacy_level="DRAFT_INBOX",
+            status="processing",
+            publish_id=f"pub-{uuid.uuid4().hex[:8]}",
+            error="O arquivo foi aceito pelo endpoint de Upload do TikTok.",
+        )
+        post.updated_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        db.add(post)
+        db.commit()
+
+        queue = tiktok_publications(user=user, db=db)["clips"]
+        item = next(value for value in queue if value["id"] == clip.id)
+        refreshed = db.get(TikTokPost, post.id)
+
+        assert refreshed.status == "ready"
+        assert refreshed.publish_id is None
+        assert item["tiktok_status"] == "ready"
+        assert "reenvio" in (item["tiktok_error"] or "")
     finally:
         db.close()
 

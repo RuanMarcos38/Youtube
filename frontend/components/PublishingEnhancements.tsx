@@ -73,15 +73,15 @@ function tiktokStatusLabel(status?: string) {
     uploading: "Enviando ao TikTok",
     processing: "TikTok processando",
     submitted: "TikTok processando",
-    draft_sent: "Rascunho no TikTok",
+    draft_sent: "Reenvio disponível",
     failed: "Falhou no TikTok",
-    paused_limit: "TikTok pausado",
+    paused_limit: "Limite TikTok",
   };
   return labels[status || "ready"] || status || "Pronto";
 }
 
 const YOUTUBE_BUSY_STATUSES = new Set(["upload_queued", "uploading", "uploaded"]);
-const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted", "draft_sent"]);
+const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted"]);
 
 function isYouTubeSelectable(clip: Clip) {
   return !YOUTUBE_BUSY_STATUSES.has(clip.status || "");
@@ -377,7 +377,7 @@ export default function PublishingEnhancements() {
       }
       if (result.queued) {
         const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
-        setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow aguarda PUBLISH_COMPLETE do TikTok antes de considerar publicado e remover da aba.${skipped}`);
+        setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok enviar apenas para Caixa de Entrada/Rascunho, o corte volta liberado para reenvio.${skipped}`);
       } else {
         setError("Nenhum corte novo foi enviado ao TikTok. Os selecionados já estavam em fila/processamento, publicados ou sem arquivo válido.");
       }

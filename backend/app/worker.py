@@ -10,6 +10,7 @@ from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
 from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
+from .services.tiktok_policy import recover_retryable_draft_uploads
 from .services.tiktok_upload_task import refresh_tiktok_post, run_tiktok_upload
 from .services.upload_task import run_upload
 
@@ -59,15 +60,8 @@ def _recover_interrupted() -> None:
         for post in db.query(TikTokPost).filter(TikTokPost.status == "submitted", TikTokPost.publish_id.is_not(None)).all():
             post.status = "processing"
             post.error = "Aguardando confirmação final do TikTok."
-        # A draft delivered to TikTok is not a completed post. Keep those rows
-        # polling and visible until TikTok says PUBLISH_COMPLETE.
-        for post in db.query(TikTokPost).filter(TikTokPost.status == "draft_sent", TikTokPost.publish_id.is_not(None)).all():
-            if not post.error:
-                post.error = (
-                    "Rascunho entregue ao TikTok. Abra a notificacao na Caixa de Entrada do aplicativo e conclua a publicacao. "
-                    "O ShortsFlow continuara acompanhando este envio ate PUBLISH_COMPLETE."
-                )
         db.commit()
+        recover_retryable_draft_uploads(db)
     finally:
         db.close()
     recover_interrupted_editor_tasks()
@@ -121,9 +115,10 @@ def _claim_next_tiktok_post() -> int | None:
 def _tiktok_status_batch() -> list[int]:
     db = SessionLocal()
     try:
+        recover_retryable_draft_uploads(db)
         rows = (
             db.query(TikTokPost)
-            .filter(TikTokPost.status.in_(["processing", "submitted", "draft_sent"]), TikTokPost.publish_id.is_not(None))
+            .filter(TikTokPost.status.in_(["processing", "submitted"]), TikTokPost.publish_id.is_not(None))
             .order_by(TikTokPost.updated_at.asc(), TikTokPost.id.asc())
             .limit(TIKTOK_STATUS_BATCH_SIZE)
             .all()

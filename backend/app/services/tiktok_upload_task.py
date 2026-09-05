@@ -4,6 +4,7 @@ from ..database import SessionLocal
 from ..models import Clip, TikTokPost
 from .tiktok_oauth import get_creator_info
 from .tiktok_policy import (
+    DRAFT_RETRY_MESSAGE,
     mark_unaudited_public_block,
     release_unaudited_public_queue,
     unaudited_public_block_active,
@@ -23,7 +24,7 @@ FAIL_REASON_MESSAGES = {
     "frame_rate_check_failed": "O TikTok recusou a taxa de quadros do vídeo.",
     "picture_size_check_failed": "O TikTok recusou as dimensões/resolução do vídeo.",
     "spam_risk_too_many_posts": "O TikTok bloqueou temporariamente novas publicações por excesso de posts nas últimas 24 horas.",
-    "spam_risk_too_many_pending_share": "O TikTok atingiu o limite de rascunhos pendentes. Finalize ou descarte os rascunhos recebidos no app e tente novamente.",
+    "spam_risk_too_many_pending_share": "O TikTok atingiu o limite de rascunhos pendentes enviados pela API. O ShortsFlow manteve os cortes visíveis para nova tentativa; se o erro repetir, aguarde a janela do TikTok ou finalize/descarte notificações pendentes no app.",
     "reached_active_user_cap": "O aplicativo TikTok atingiu o limite atual de usuários/publicações permitido.",
     "internal": "O TikTok informou uma falha interna durante a publicação. Tente novamente mais tarde.",
 }
@@ -34,9 +35,11 @@ def _pause_user_queue(db, user_id: int, message: str, current_post_id: int) -> N
     if current:
         current.status = "paused_limit"
         current.error = message
+        current.publish_id = None
     for queued in db.query(TikTokPost).filter(TikTokPost.user_id == user_id, TikTokPost.status == "queued").all():
         queued.status = "paused_limit"
         queued.error = message
+        queued.publish_id = None
     db.commit()
 
 
@@ -189,12 +192,9 @@ def refresh_tiktok_post(post_id: int) -> None:
             # TikTok says it sent an inbox notification; it does not let the
             # ShortsFlow independently prove that the notification is visible
             # on the creator's phone.
-            post.status = "draft_sent"
-            post.error = (
-                "TikTok confirmou SEND_TO_USER_INBOX: o video foi enviado para a Caixa de Entrada/Rascunhos. "
-                "Abra a notificacao no app TikTok e conclua a postagem por la. "
-                "O ShortsFlow so removera este corte quando o TikTok retornar PUBLISH_COMPLETE."
-            )
+            post.status = "ready"
+            post.publish_id = None
+            post.error = DRAFT_RETRY_MESSAGE
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"
             message = _failed_message(reason)

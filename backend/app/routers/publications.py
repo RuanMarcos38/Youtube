@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models import Clip, SystemSetting, TikTokPost, User
 from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
 from ..services.serializers import clip_to_dict
+from ..services.tiktok_policy import recover_retryable_draft_uploads
 from ..services.youtube_upload_availability import upload_availability
 
 
@@ -66,6 +67,7 @@ def tiktok_publications(user: User = Depends(get_current_user), db: Session = De
     is removed only after TikTok confirms PUBLISH_COMPLETE. Inbox/draft delivery
     is not treated as a completed publication.
     """
+    recover_retryable_draft_uploads(db, user_id=user.id)
     clips = [clip for clip in _base_clips(user, db) if clip.status != "archived"]
     ids = [clip.id for clip in clips]
     posts = {

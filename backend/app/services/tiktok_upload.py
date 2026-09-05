@@ -46,7 +46,7 @@ def _raise_tiktok_error(response: httpx.Response, payload: dict) -> None:
     if code == "spam_risk_too_many_pending_share":
         raise TikTokPostLimitError(
             "O TikTok atingiu o limite de rascunhos pendentes enviados pela API. "
-            "Abra o TikTok, finalize ou descarte os rascunhos recebidos na Caixa de Entrada e depois tente novamente."
+            "O ShortsFlow vai liberar os cortes para nova seleção, mas se o TikTok repetir este erro será necessário aguardar a janela da plataforma ou finalizar/descartar notificações pendentes no app."
         )
     if code == "unaudited_client_can_only_post_to_private_accounts":
         raise TikTokUnauditedClientError(

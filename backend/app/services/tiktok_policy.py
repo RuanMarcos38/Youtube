@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from ..models import SystemSetting, TikTokPost
@@ -19,6 +19,12 @@ PUBLIC_AUDIT_BLOCK_REASON = (
 PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON = (
     "O app da Content Posting API ainda não está auditado, mas esta conta TikTok foi identificada como privada. "
     "O ShortsFlow pode testar o Direct Post real em 'Somente eu'. Para publicação pública automática, conclua a auditoria do app."
+)
+DRAFT_UPLOAD_RETRY_GRACE_MINUTES = 5
+DRAFT_RETRY_MESSAGE = (
+    "O TikTok retornou SEND_TO_USER_INBOX para este envio, mas isso confirma apenas uma notificação de Caixa de Entrada/Rascunho; "
+    "não confirma que o vídeo apareceu no celular nem que foi publicado. Como o TikTok não retornou PUBLISH_COMPLETE, "
+    "o ShortsFlow liberou este corte para seleção e reenvio. Ele só será removido da tela quando o TikTok confirmar a publicação."
 )
 UNAUDITED_CODE = "unaudited_client_can_only_post_to_private_accounts"
 UNAUDITED_MARKERS = (
@@ -180,6 +186,39 @@ def clear_legacy_unaudited_state(db: Session, *, user_id: int) -> None:
     recover_legacy_unaudited_pauses(db, user_id=user_id)
 
 
+def recover_retryable_draft_uploads(db: Session, *, user_id: int | None = None, commit: bool = True) -> int:
+    """Release TikTok Upload/inbox attempts that cannot become automatic posts.
+
+    The Upload endpoint can only place a notification in TikTok's inbox. If the
+    app is unaudited and the creator does not see that notification, keeping the
+    clip locked as "processing" leaves the user with no recovery path.
+    """
+    cutoff = _utcnow() - timedelta(minutes=DRAFT_UPLOAD_RETRY_GRACE_MINUTES)
+    query = db.query(TikTokPost).filter(
+        or_(
+            TikTokPost.status == "draft_sent",
+            and_(
+                TikTokPost.status.in_(["processing", "submitted"]),
+                TikTokPost.privacy_level == "DRAFT_INBOX",
+                TikTokPost.updated_at <= cutoff,
+            ),
+        )
+    )
+    if user_id is not None:
+        query = query.filter(TikTokPost.user_id == int(user_id))
+
+    changed = 0
+    for post in query.order_by(TikTokPost.user_id.asc(), TikTokPost.id.asc()).all():
+        post.status = "ready"
+        post.publish_id = None
+        post.error = DRAFT_RETRY_MESSAGE
+        changed += 1
+
+    if changed and commit:
+        db.commit()
+    return changed
+
+
 def release_unaudited_public_queue(
     db: Session,
     *,
@@ -196,7 +235,7 @@ def release_unaudited_public_queue(
             or_(
                 TikTokPost.id == current_post_id,
                 TikTokPost.status.in_(["queued", "uploading", "paused_limit"]),
-                TikTokPost.status.in_(["processing", "submitted"]) & TikTokPost.publish_id.is_(None),
+                and_(TikTokPost.status.in_(["processing", "submitted"]), TikTokPost.publish_id.is_(None)),
             ),
         )
         .all()

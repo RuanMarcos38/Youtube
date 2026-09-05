@@ -29,6 +29,7 @@ from ..services.tiktok_policy import (
     apply_unaudited_public_block,
     clear_legacy_unaudited_state,
     clear_unaudited_public_block,
+    recover_retryable_draft_uploads,
 )
 
 router = APIRouter(prefix="/tiktok", tags=["tiktok"])
@@ -170,6 +171,7 @@ def upload_batch(
     try:
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
+        recover_retryable_draft_uploads(db, user_id=user.id)
         creator = apply_unaudited_public_block(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
