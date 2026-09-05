@@ -8,6 +8,7 @@ from ..errors import YouTubeUploadLimitError
 from ..models import Clip, Job
 from .seo_service import build_publish_metadata
 from .youtube_upload import upload_video
+from .youtube_upload_availability import mark_upload_blocked
 
 
 def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: int) -> None:
@@ -21,6 +22,10 @@ def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: in
         queued.upload_error = message
         queued.upload_privacy = "public"
     db.commit()
+    # The provider error is a rolling daily upload cap. Store an estimated
+    # retry window separately from credentials/tokens so the UI can count down
+    # and stop users from repeatedly sending requests during the block.
+    mark_upload_blocked(db, user_id, message, hours=24)
 
 
 def run_upload(clip_id: int, privacy_status: str) -> None:
@@ -56,13 +61,10 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
             hook=clip.hook,
         )
 
-        # Persist normalized title/tags so the review UI and the actual upload stay aligned.
         clip.title = metadata.title
         clip.tags_json = json.dumps(metadata.tags, ensure_ascii=False)
         db.commit()
 
-        # Public is enforced here as the final safety layer, even if an older
-        # queued record still contains a legacy private/unlisted value.
         privacy_status = "public"
         video_id = upload_video(
             Path(clip.file_path),
@@ -74,6 +76,7 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         )
         clip.status = "uploaded"
         clip.youtube_video_id = video_id
+        clip.upload_error = None
         db.commit()
     except YouTubeUploadLimitError as exc:
         db.rollback()
