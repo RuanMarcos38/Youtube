@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   listClips,
   tiktokCreatorInfo,
-  tiktokStart,
   tiktokStatus,
   tiktokUploadBatch,
   updateClipCaptions,
@@ -172,15 +171,12 @@ export default function PublishingEnhancements() {
     }
   }
 
-  async function connectTikTok() {
+  function connectTikTok() {
     setBusy("tiktok-connect"); setError(""); setNotice("");
-    try {
-      const result = await tiktokStart();
-      window.location.href = result.authorization_url;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível iniciar a conexão do TikTok.");
-      setBusy("");
-    }
+    // Use the same-origin redirect route for both the first connection and
+    // account switching. The current token is only replaced after a successful
+    // TikTok callback, so cancelling the picker does not delete the old account.
+    window.location.assign("/api/tiktok/oauth/authorize");
   }
 
   async function loadCreatorOptions() {
@@ -277,7 +273,12 @@ export default function PublishingEnhancements() {
           </div>
           {!ttStatus?.connected && (
             <button type="button" onClick={connectTikTok} disabled={!ttStatus?.configured || Boolean(busy)} className="sf-button sf-button-outline mt-3 disabled:opacity-40">
-              {busy === "tiktok-connect" ? "Conectando..." : "Conectar TikTok"}
+              {busy === "tiktok-connect" ? "Abrindo TikTok..." : "Conectar TikTok"}
+            </button>
+          )}
+          {ttStatus?.connected && (
+            <button type="button" onClick={connectTikTok} disabled={Boolean(busy)} className="sf-button sf-button-outline mt-3 disabled:opacity-40">
+              {busy === "tiktok-connect" ? "Abrindo TikTok..." : "Trocar conta TikTok"}
             </button>
           )}
           {ttStatus?.connected && !creator && (

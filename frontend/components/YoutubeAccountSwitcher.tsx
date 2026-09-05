@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { youtubeStart, youtubeStatus } from "@/lib/api";
+import { youtubeStatus } from "@/lib/api";
 
 function YoutubeIcon() {
   return <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true"><rect x="2.2" y="5.2" width="19.6" height="13.6" rx="4" fill="#ef4444"/><path d="m10 9 5.2 3-5.2 3V9Z" fill="white"/></svg>;
@@ -12,7 +12,6 @@ export default function YoutubeAccountSwitcher() {
   const [connected, setConnected] = useState(false);
   const [channelTitle, setChannelTitle] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   async function refreshStatus() {
     try {
@@ -29,16 +28,12 @@ export default function YoutubeAccountSwitcher() {
 
   useEffect(() => { void refreshStatus(); }, []);
 
-  async function chooseAccount() {
+  function chooseAccount() {
     setLoading(true);
-    setError("");
-    try {
-      const result = await youtubeStart();
-      window.location.assign(result.authorization_url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível abrir o seletor de contas do Google.");
-      setLoading(false);
-    }
+    // Use a normal same-origin navigation instead of fetch -> redirect. This
+    // keeps the ShortsFlow session cookie attached and avoids CORS/network
+    // failures when NEXT_PUBLIC_API_URL points to another host.
+    window.location.assign("/api/youtube/oauth/authorize");
   }
 
   if (!configured) return null;
@@ -62,7 +57,6 @@ export default function YoutubeAccountSwitcher() {
       >
         {loading ? "Abrindo Google..." : connected ? "Trocar conta" : "Conectar canal"}
       </button>
-      {error && <div className="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-[10px] font-medium text-red-700">{error}</div>}
     </div>
   );
 }
