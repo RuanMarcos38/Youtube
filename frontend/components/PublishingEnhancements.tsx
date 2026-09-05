@@ -79,6 +79,17 @@ function tiktokStatusLabel(status?: string) {
   return labels[status || "ready"] || status || "Pronto";
 }
 
+const YOUTUBE_BUSY_STATUSES = new Set(["upload_queued", "uploading", "uploaded"]);
+const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted"]);
+
+function isYouTubeSelectable(clip: Clip) {
+  return !YOUTUBE_BUSY_STATUSES.has(clip.status || "");
+}
+
+function isTikTokSelectable(clip: TikTokPublicationClip) {
+  return !TIKTOK_BUSY_STATUSES.has(clip.tiktok_status || "");
+}
+
 function youtubeStatusLabel(status?: string) {
   const labels: Record<string, string> = {
     ready: "Pronto para YouTube",
@@ -173,19 +184,30 @@ export default function PublishingEnhancements() {
     };
   }, []);
 
-  async function refreshQueues() {
-    try {
-      const [youtube, tiktok] = await Promise.all([youtubePublicationClips(), tiktokPublicationClips()]);
-      setYoutubeClips(youtube.clips);
-      setTiktokClips(tiktok.clips);
-      setAvailability(youtube.availability);
-      setRemaining(youtube.availability.seconds_remaining || 0);
-      const yVisible = new Set(youtube.clips.map((clip) => clip.id));
-      const tVisible = new Set(tiktok.clips.map((clip) => clip.id));
+  async function refreshQueues({ silent = true }: { silent?: boolean } = {}) {
+    const [youtube, tiktok] = await Promise.allSettled([youtubePublicationClips(), tiktokPublicationClips()]);
+    const failures: string[] = [];
+
+    if (youtube.status === "fulfilled") {
+      const yVisible = new Set(youtube.value.clips.filter(isYouTubeSelectable).map((clip) => clip.id));
+      setYoutubeClips(youtube.value.clips);
+      setAvailability(youtube.value.availability);
+      setRemaining(youtube.value.availability.seconds_remaining || 0);
       setYoutubeSelected((current) => new Set([...current].filter((id) => yVisible.has(id))));
+    } else {
+      failures.push(`YouTube: ${youtube.reason instanceof Error ? youtube.reason.message : "não foi possível atualizar"}`);
+    }
+
+    if (tiktok.status === "fulfilled") {
+      const tVisible = new Set(tiktok.value.clips.filter(isTikTokSelectable).map((clip) => clip.id));
+      setTiktokClips(tiktok.value.clips);
       setTiktokSelected((current) => new Set([...current].filter((id) => tVisible.has(id))));
-    } catch {
-      // Keep the last good queue visible during a transient refresh failure.
+    } else {
+      failures.push(`TikTok: ${tiktok.reason instanceof Error ? tiktok.reason.message : "não foi possível atualizar"}`);
+    }
+
+    if (failures.length && !silent) {
+      setError(`A fila foi aceita, mas a atualização da tela falhou em ${failures.join(" / ")}. Recarregue a página se o status não mudar.`);
     }
   }
 
@@ -252,17 +274,23 @@ export default function PublishingEnhancements() {
   const clips = tab === "youtube" ? youtubeClips : tiktokClips;
   const selected = tab === "youtube" ? youtubeSelected : tiktokSelected;
   const setSelected = tab === "youtube" ? setYoutubeSelected : setTiktokSelected;
-  const selectedClips = useMemo(() => clips.filter((clip) => selected.has(clip.id)), [clips, selected]);
-  const allSelected = clips.length > 0 && selected.size === clips.length;
+  const selectableClips = useMemo(
+    () => clips.filter((clip) => tab === "youtube" ? isYouTubeSelectable(clip as Clip) : isTikTokSelectable(clip as TikTokPublicationClip)),
+    [clips, tab],
+  );
+  const selectedClips = useMemo(() => selectableClips.filter((clip) => selected.has(clip.id)), [selectableClips, selected]);
+  const allSelected = selectableClips.length > 0 && selectedClips.length === selectableClips.length;
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(clips.map((clip) => clip.id)));
+    setSelected(allSelected ? new Set() : new Set(selectableClips.map((clip) => clip.id)));
   }
 
-  function toggleOne(id: number) {
+  function toggleOne(clip: Clip | TikTokPublicationClip) {
+    const selectable = tab === "youtube" ? isYouTubeSelectable(clip as Clip) : isTikTokSelectable(clip as TikTokPublicationClip);
+    if (!selectable) return;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(clip.id)) next.delete(clip.id); else next.add(clip.id);
       return next;
     });
   }
@@ -282,7 +310,7 @@ export default function PublishingEnhancements() {
         });
         changed += 1;
       }
-      await refreshQueues();
+      await refreshQueues({ silent: false });
       setNotice(changed ? `Legenda gerada removida de ${changed} corte(s).` : "Os cortes selecionados já estão sem legenda gerada.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível remover as legendas.");
@@ -302,13 +330,14 @@ export default function PublishingEnhancements() {
   }
 
   async function publishYouTube() {
-    if (!youtubeSelected.size) return setError("Selecione pelo menos um corte para o YouTube.");
+    const selectedIds = youtubeClips.filter((clip) => youtubeSelected.has(clip.id) && isYouTubeSelectable(clip)).map((clip) => clip.id);
+    if (!selectedIds.length) return setError("Selecione pelo menos um corte para o YouTube.");
     if (availability.blocked && remaining > 0) return setError(`YouTube bloqueado temporariamente. Nova tentativa estimada em ${fmtCountdown(remaining)}.`);
     setBusy("youtube"); setError(""); setNotice("");
     try {
-      const result = await uploadClipsBatch([...youtubeSelected]);
+      const result = await uploadClipsBatch(selectedIds);
       setNotice(`${result.queued} corte(s) colocado(s) na fila do YouTube. Eles somem desta aba somente após a publicação ser confirmada.`);
-      await refreshQueues();
+      await refreshQueues({ silent: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao criar a fila do YouTube.");
     } finally { setBusy(""); }
@@ -320,7 +349,8 @@ export default function PublishingEnhancements() {
   }
 
   async function publishTikTok() {
-    if (!tiktokSelected.size) return setError("Selecione pelo menos um corte para o TikTok.");
+    const selectedIds = tiktokClips.filter((clip) => tiktokSelected.has(clip.id) && isTikTokSelectable(clip)).map((clip) => clip.id);
+    if (!selectedIds.length) return setError("Selecione pelo menos um corte para o TikTok.");
     if (!privacy) return setError("Selecione manualmente a privacidade do TikTok.");
     if (privacy === "PUBLIC_TO_EVERYONE" && creator?.public_posting_blocked) return setError(creator.public_posting_block_reason || "Publicação pública ainda aguarda liberação do TikTok.");
     if (!musicConfirmed) return setError("Confirme a declaração de uso de música exigida pelo TikTok.");
@@ -328,15 +358,29 @@ export default function PublishingEnhancements() {
     try {
       // The backend validates Creator Info immediately before queueing. Do not
       // make a duplicate TikTok Creator Info request from the browser.
-      const result = await tiktokUploadBatch([...tiktokSelected], {
+      const result = await tiktokUploadBatch(selectedIds, {
         privacy_level: privacy,
         allow_comment: allowComment,
         allow_duet: allowDuet,
         allow_stitch: allowStitch,
         music_usage_confirmed: musicConfirmed,
       });
-      setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow aguarda PUBLISH_COMPLETE do TikTok antes de considerar publicado e remover da aba.`);
-      await refreshQueues();
+      const queuedIds = new Set(result.clip_ids);
+      if (queuedIds.size) {
+        setTiktokClips((current) => current.map((clip) => (
+          queuedIds.has(clip.id)
+            ? { ...clip, tiktok_status: "queued", tiktok_error: null, tiktok_publish_id: null }
+            : clip
+        )));
+        setTiktokSelected((current) => new Set([...current].filter((id) => !queuedIds.has(id))));
+      }
+      if (result.queued) {
+        const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
+        setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow aguarda PUBLISH_COMPLETE do TikTok antes de considerar publicado e remover da aba.${skipped}`);
+      } else {
+        setError("Nenhum corte novo foi enviado ao TikTok. Os selecionados já estavam em fila/processamento, publicados ou sem arquivo válido.");
+      }
+      await refreshQueues({ silent: false });
       void refreshMetrics(metricDays);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao criar a fila do TikTok.");
@@ -522,13 +566,13 @@ export default function PublishingEnhancements() {
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={toggleAll} disabled={!clips.length || Boolean(busy)} className="sf-button sf-button-outline disabled:opacity-40">{allSelected ? "Desmarcar todos" : `Selecionar todos (${clips.length})`}</button>
-          <button type="button" onClick={removeGeneratedCaptions} disabled={!selected.size || Boolean(busy)} className="sf-button sf-button-outline disabled:opacity-40">{busy === "captions" ? "Removendo..." : "Remover legenda gerada"}</button>
+          <button type="button" onClick={toggleAll} disabled={!selectableClips.length || Boolean(busy)} className="sf-button sf-button-outline disabled:opacity-40">{allSelected ? "Desmarcar todos" : `Selecionar todos (${selectableClips.length})`}</button>
+          <button type="button" onClick={removeGeneratedCaptions} disabled={!selectedClips.length || Boolean(busy)} className="sf-button sf-button-outline disabled:opacity-40">{busy === "captions" ? "Removendo..." : "Remover legenda gerada"}</button>
         </div>
         {tab === "youtube" ? (
-          <button type="button" onClick={publishYouTube} disabled={!youtubeSelected.size || Boolean(busy) || (availability.blocked && remaining > 0)} className="sf-button sf-button-youtube disabled:opacity-40">{busy === "youtube" ? "Criando fila..." : `Publicar ${youtubeSelected.size || ""} no YouTube`}</button>
+          <button type="button" onClick={publishYouTube} disabled={!selectedClips.length || Boolean(busy) || (availability.blocked && remaining > 0)} className="sf-button sf-button-youtube disabled:opacity-40">{busy === "youtube" ? "Criando fila..." : `Publicar ${selectedClips.length || ""} no YouTube`}</button>
         ) : (
-          <button type="button" onClick={publishTikTok} disabled={!tiktokSelected.size || !privacy || !musicConfirmed || Boolean(busy) || !ttStatus?.connected || !creator} className="sf-button sf-button-primary disabled:opacity-40">{busy === "tiktok" ? "Criando fila..." : `Publicar ${tiktokSelected.size || ""} no TikTok`}</button>
+          <button type="button" onClick={publishTikTok} disabled={!selectedClips.length || !privacy || !musicConfirmed || Boolean(busy) || !ttStatus?.connected || !creator} className="sf-button sf-button-primary disabled:opacity-40">{busy === "tiktok" ? "Criando fila..." : `Publicar ${selectedClips.length || ""} no TikTok`}</button>
         )}
       </div>
 
@@ -540,10 +584,11 @@ export default function PublishingEnhancements() {
           const tt = clip as TikTokPublicationClip;
           const statusText = tab === "youtube" ? youtubeStatusLabel(clip.status) : tiktokStatusLabel(tt.tiktok_status);
           const clipError = tab === "youtube" ? clip.upload_error : tt.tiktok_error;
+          const selectable = tab === "youtube" ? isYouTubeSelectable(clip) : isTikTokSelectable(tt);
           return (
             <article key={`${tab}-${clip.id}`} className="rounded-xl border border-[#e7e7e7] bg-white p-3 shadow-sm">
               <div className="flex items-start gap-3">
-                <input type="checkbox" checked={selected.has(clip.id)} onChange={() => toggleOne(clip.id)} className="mt-1 h-4 w-4 accent-[#ff0000]" />
+                <input type="checkbox" checked={selected.has(clip.id)} disabled={!selectable} onChange={() => toggleOne(clip)} className="mt-1 h-4 w-4 accent-[#ff0000] disabled:opacity-40" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2"><span className="rounded-md bg-[#f5f5f5] px-2 py-1 text-[9px] font-black">{statusText}</span><span className="text-[10px] text-[#777]">{Math.round(clip.end_seconds - clip.start_seconds)}s</span></div>
                   <h4 className="mt-2 line-clamp-2 text-sm font-black text-[#111]">{clip.title}</h4>
