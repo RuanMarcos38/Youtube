@@ -8,7 +8,7 @@ from ..errors import YouTubeUploadLimitError
 from ..models import Clip, Job
 from .seo_service import build_publish_metadata
 from .youtube_upload import upload_video
-from .youtube_upload_availability import mark_upload_blocked
+from .youtube_upload_availability import ensure_upload_available, mark_upload_blocked
 
 
 def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: int) -> None:
@@ -22,9 +22,6 @@ def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: in
         queued.upload_error = message
         queued.upload_privacy = "public"
     db.commit()
-    # The provider error is a rolling daily upload cap. Store an estimated
-    # retry window separately from credentials/tokens so the UI can count down
-    # and stop users from repeatedly sending requests during the block.
     mark_upload_blocked(db, user_id, message, hours=24)
 
 
@@ -39,6 +36,15 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         )
         if not clip:
             return
+
+        allowed, availability = ensure_upload_available(db, clip.user_id)
+        if not allowed:
+            clip.status = "approved"
+            clip.upload_error = availability["message"]
+            clip.upload_privacy = "public"
+            db.commit()
+            return
+
         clip.status = "uploading"
         clip.upload_error = None
         clip.upload_privacy = "public"
