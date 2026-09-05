@@ -1,11 +1,13 @@
 const VERIFICATION_FILE = "tiktokYiYmxWvT4YcoPaT72exrsOcPmWJagL9I.txt";
 const VERIFICATION_BODY = "tiktok-developers-site-verification=YiYmxWvT4YcoPaT72exrsOcPmWJagL9I";
 
-export function GET(
+export async function GET(
   _request: Request,
-  { params }: { params: { verification: string } },
+  { params }: { params: Promise<{ verification: string }> },
 ) {
-  if (params.verification !== VERIFICATION_FILE) {
+  const { verification } = await params;
+
+  if (verification !== VERIFICATION_FILE) {
     return new Response("Not Found", { status: 404 });
   }
 
