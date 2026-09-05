@@ -130,7 +130,7 @@ def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) ->
     adjusted["privacy_level_options"] = [
         value
         for value in (creator.get("privacy_level_options") or [])
-        if value != "PUBLIC_TO_EVERYONE"
+        if value == "SELF_ONLY"
     ]
     adjusted["public_posting_blocked"] = True
     adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON

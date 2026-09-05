@@ -45,7 +45,7 @@ def test_unaudited_public_block_filters_public_option():
         )
 
         assert creator["public_posting_blocked"] is True
-        assert creator["privacy_level_options"] == ["MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"]
+        assert creator["privacy_level_options"] == ["SELF_ONLY"]
     finally:
         db.close()
 
