@@ -2,6 +2,7 @@ from pathlib import Path
 
 from ..database import SessionLocal
 from ..models import Clip, TikTokPost
+from .tiktok_oauth import get_creator_info
 from .tiktok_policy import (
     mark_unaudited_public_block,
     release_unaudited_public_queue,
@@ -50,11 +51,11 @@ def _finish_submission(db, post: TikTokPost, publish_id: str, *, draft: bool) ->
     if draft:
         post.privacy_level = "DRAFT_INBOX"
         post.error = (
-            "TikTok recebeu o vídeo e está preparando o envio para a Caixa de Entrada/Rascunhos. "
-            "O ShortsFlow continuará acompanhando este publish_id até a confirmação final."
+            "O arquivo foi aceito pelo endpoint de Upload do TikTok. Isso ainda não significa que existe um rascunho visível no aplicativo. "
+            "O ShortsFlow continuará consultando o publish_id até o TikTok informar o estado final."
         )
     else:
-        post.error = "TikTok recebeu o arquivo e está processando/moderando a publicação."
+        post.error = "TikTok recebeu o arquivo por Direct Post e está processando/moderando a publicação."
     db.commit()
 
 
@@ -74,7 +75,7 @@ def _fallback_to_draft(db, post: TikTokPost, clip: Clip) -> bool:
             user_id=post.user_id,
             current_post_id=post.id,
             current_error=(
-                "O Direct Post público está bloqueado pela auditoria do TikTok e o envio para Rascunhos ainda não pôde ser autorizado. "
+                "O Direct Post está bloqueado pela auditoria do TikTok e o envio para Caixa de Entrada também não pôde ser concluído. "
                 f"{exc}"
             ),
         )
@@ -82,6 +83,28 @@ def _fallback_to_draft(db, post: TikTokPost, clip: Clip) -> bool:
 
     _finish_submission(db, post, publish_id, draft=True)
     return True
+
+
+def _unaudited_account_requires_upload_fallback(db, post: TikTokPost) -> bool:
+    """Return True when TikTok's unaudited rules do not allow Direct Post.
+
+    TikTok currently permits unaudited Direct Post only when the creator account
+    itself is private and the selected viewership is SELF_ONLY. Creator Info is
+    cached by the OAuth service, so this normally does not add an extra network
+    request immediately after queue creation.
+    """
+    if post.privacy_level != "SELF_ONLY":
+        return True
+    try:
+        creator = get_creator_info(db, post.user_id)
+    except Exception:
+        # When the account state cannot be confirmed, keep the conservative
+        # official Upload route instead of sending a Direct Post that TikTok is
+        # known to reject for public accounts while the client is unaudited.
+        return True
+    options = {str(value).strip() for value in (creator.get("privacy_level_options") or []) if str(value).strip()}
+    account_is_private = "FOLLOWER_OF_CREATOR" in options and "PUBLIC_TO_EVERYONE" not in options
+    return not account_is_private
 
 
 def run_tiktok_upload(post_id: int) -> None:
@@ -101,10 +124,11 @@ def run_tiktok_upload(post_id: int) -> None:
         post.error = None
         db.commit()
 
-        # After TikTok has already proved that this public account cannot use
-        # Direct Post while the client is unaudited, do not repeat the same
-        # failing request for every queued clip. Use the official Upload flow.
-        if unaudited_public_block_active(db, user_id=post.user_id):
+        # A previous public-account failure proves that this client is still
+        # unaudited. Do not blindly route SELF_ONLY to the inbox: if Creator
+        # Info now shows that the TikTok account itself is private, Direct Post
+        # is the correct test path and produces a real private post.
+        if unaudited_public_block_active(db, user_id=post.user_id) and _unaudited_account_requires_upload_fallback(db, post):
             _fallback_to_draft(db, post, clip)
             return
 
@@ -120,8 +144,8 @@ def run_tiktok_upload(post_id: int) -> None:
                 disable_stitch=post.disable_stitch,
             )
         except TikTokUnauditedClientError:
-            # The TikTok response is authoritative. Mark the temporary local
-            # gate and immediately fall back to the official inbox/draft flow.
+            # TikTok remains authoritative. Remember the restriction and use
+            # the Upload endpoint only as a fallback for this attempt.
             db.rollback()
             post = db.get(TikTokPost, post_id)
             clip = db.query(Clip).filter(Clip.id == post.clip_id, Clip.user_id == post.user_id).first() if post else None
@@ -161,13 +185,15 @@ def refresh_tiktok_post(post_id: int) -> None:
             post.status = "published"
             post.error = None
         elif remote == "SEND_TO_USER_INBOX":
-            # TikTok documents this only as delivery to the creator's inbox,
-            # not as a completed post. Keep the item visible and keep polling
-            # the same publish_id until TikTok later confirms PUBLISH_COMPLETE.
+            # This is what TikTok's API reports for the Upload flow. It means
+            # TikTok says it sent an inbox notification; it does not let the
+            # ShortsFlow independently prove that the notification is visible
+            # on the creator's phone.
             post.status = "processing"
             post.error = (
-                "Rascunho entregue ao TikTok. Abra o aplicativo TikTok, toque na notificação da Caixa de Entrada, "
-                "revise o vídeo e conclua a publicação. O vídeo continuará nesta tela até o TikTok confirmar PUBLISH_COMPLETE."
+                "A API do TikTok informou SEND_TO_USER_INBOX (notificação enviada à Caixa de Entrada), mas isso não confirma que o rascunho está visível no seu celular. "
+                "Se a notificação não aparecer, para testar publicação automática use uma conta TikTok privada com 'Somente eu'. "
+                "Para publicação pública automática, o app precisa concluir a auditoria do TikTok."
             )
         elif remote == "FAILED":
             reason = result.get("fail_reason") or "unknown"
@@ -179,7 +205,7 @@ def refresh_tiktok_post(post_id: int) -> None:
             post.error = message
         elif remote in {"PROCESSING_UPLOAD", "PROCESSING_DOWNLOAD"}:
             post.status = "processing"
-            post.error = "TikTok ainda está processando/moderando este envio."
+            post.error = "TikTok ainda está processando este envio."
         else:
             post.status = "processing"
             post.error = f"Aguardando confirmação do TikTok ({remote or 'status pendente'})."
