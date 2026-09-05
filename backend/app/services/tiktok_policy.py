@@ -40,6 +40,14 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _as_utc(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def is_unaudited_error_text(value: str | None) -> bool:
     text = str(value or "").strip().lower()
     return bool(text) and any(marker in text for marker in UNAUDITED_MARKERS)
@@ -86,9 +94,37 @@ def unaudited_public_block_active(db: Session, *, user_id: int) -> bool:
     return True
 
 
+def sync_unaudited_public_block_from_recent_failure(db: Session, *, user_id: int, commit: bool = True) -> bool:
+    """Restore the public gate from a recent failed public attempt."""
+    cutoff = _utcnow() - timedelta(hours=PUBLIC_AUDIT_BLOCK_HOURS)
+    rows = (
+        db.query(TikTokPost)
+        .filter(
+            TikTokPost.user_id == user_id,
+            TikTokPost.privacy_level == "PUBLIC_TO_EVERYONE",
+            TikTokPost.status == "failed",
+            TikTokPost.error.is_not(None),
+        )
+        .order_by(TikTokPost.updated_at.desc(), TikTokPost.id.desc())
+        .limit(20)
+        .all()
+    )
+    for post in rows:
+        if _as_utc(post.updated_at) < cutoff:
+            continue
+        if not is_unaudited_error_text(post.error):
+            continue
+        mark_unaudited_public_block(db, user_id=user_id, commit=commit)
+        return True
+    return False
+
+
 def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) -> dict:
     """Return Creator Info with public posting hidden while the local block is active."""
-    if not unaudited_public_block_active(db, user_id=user_id):
+    active = unaudited_public_block_active(db, user_id=user_id)
+    if not active:
+        active = sync_unaudited_public_block_from_recent_failure(db, user_id=user_id)
+    if not active:
         return creator
     adjusted = dict(creator)
     adjusted["privacy_level_options"] = [

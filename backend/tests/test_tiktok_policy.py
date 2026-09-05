@@ -11,6 +11,7 @@ from app.services.tiktok_policy import (
     is_unaudited_error_text,
     mark_unaudited_public_block,
     release_unaudited_public_queue,
+    sync_unaudited_public_block_from_recent_failure,
     unaudited_public_block_active,
 )
 
@@ -76,6 +77,76 @@ def test_clear_legacy_unaudited_state_keeps_current_public_gate():
         clear_legacy_unaudited_state(db, user_id=user_id)
 
         assert db.get(SystemSetting, key) is not None
+    finally:
+        db.close()
+
+
+def test_sync_unaudited_public_block_from_recent_failure():
+    initialize_database()
+    suffix = uuid.uuid4().hex[:12]
+    db = SessionLocal()
+    try:
+        tenant = Tenant(name=f"TikTok recent failure {suffix}", billing_status="active")
+        db.add(tenant)
+        db.flush()
+        user = User(
+            tenant_id=tenant.id,
+            email=f"tiktok-recent-failure-{suffix}@example.com",
+            password_hash="test-only",
+            display_name="TikTok Recent Failure",
+            role="member",
+            active=True,
+        )
+        db.add(user)
+        db.flush()
+        source = SourceVideo(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            youtube_id=f"recent-source-{suffix}",
+            title="Source",
+            channel_title="Channel",
+            original_url="https://www.youtube.com/watch?v=test",
+            thumbnail_url="",
+            duration_seconds=60,
+            rights_confirmed=True,
+        )
+        db.add(source)
+        db.flush()
+        job = Job(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            source_video_id=source.id,
+            requested_clips=1,
+            status="ready_for_review",
+            progress=100,
+        )
+        db.add(job)
+        db.flush()
+        clip = Clip(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            job_id=job.id,
+            start_seconds=0,
+            end_seconds=30,
+            title="Recent failure",
+            file_path=f"/tmp/{suffix}.mp4",
+            status="ready",
+        )
+        db.add(clip)
+        db.flush()
+        db.add(
+            TikTokPost(
+                user_id=user.id,
+                clip_id=clip.id,
+                privacy_level="PUBLIC_TO_EVERYONE",
+                status="failed",
+                error="O TikTok identificou este cliente da Content Posting API como não auditado.",
+            )
+        )
+        db.commit()
+
+        assert sync_unaudited_public_block_from_recent_failure(db, user_id=user.id) is True
+        assert unaudited_public_block_active(db, user_id=user.id) is True
     finally:
         db.close()
 
