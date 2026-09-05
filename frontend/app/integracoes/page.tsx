@@ -30,7 +30,7 @@ export default function IntegrationsPage() {
       <div className="mx-auto max-w-6xl">
         <header className="rounded-[28px] border border-black/5 bg-white p-8 shadow-sm md:p-12">
           <a href="/" className="text-sm font-bold text-[#5f8500]">ShortsFlow AI</a>
-          <p className="mt-10 text-xs font-black uppercase tracking-[0.2em] text-red-600">Plataforma de automação de vídeos curtos</p>
+          <p className="mt-10 text-xs font-black uppercase tracking-[0.2em] text-red-600">Site público oficial · Plataforma de automação de vídeos curtos</p>
           <h1 className="mt-4 max-w-4xl text-4xl font-black tracking-tight md:text-6xl">Crie, revise e publique Shorts em um único fluxo.</h1>
           <p className="mt-6 max-w-3xl text-base leading-8 text-[#5f6762]">O ShortsFlow AI transforma vídeos em cortes verticais, organiza a revisão e conecta contas autorizadas do YouTube e TikTok para publicação. O usuário mantém controle sobre a conta conectada, os vídeos selecionados e as opções de publicação.</p>
 
