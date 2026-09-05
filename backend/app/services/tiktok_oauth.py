@@ -41,6 +41,23 @@ def _connection(db: Session, user_id: int) -> TikTokConnection:
     return connection
 
 
+def _json_response(response: httpx.Response, context: str) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        status_code = int(response.status_code or 0)
+        if status_code >= 500:
+            raise RuntimeError(
+                f"TikTok está temporariamente indisponível ao {context} (HTTP {status_code}). O ShortsFlow tentará novamente; aguarde alguns segundos."
+            ) from exc
+        raise RuntimeError(
+            f"TikTok retornou uma resposta inválida ao {context} (HTTP {status_code or 'desconhecido'})."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"TikTok retornou uma resposta inesperada ao {context}.")
+    return payload
+
+
 def build_authorization_url(db: Session, user: User, *, include_metrics: bool = False) -> str:
     if not oauth_configured():
         raise RuntimeError(
@@ -63,9 +80,12 @@ def build_authorization_url(db: Session, user: User, *, include_metrics: bool = 
 
 
 def _token_request(data: dict[str, str]) -> dict:
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(TOKEN_URL, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
-    payload = response.json()
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(TOKEN_URL, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    except httpx.RequestError as exc:
+        raise RuntimeError("Não foi possível comunicar com o TikTok para concluir a autenticação. Tente novamente.") from exc
+    payload = _json_response(response, "concluir a autenticação")
     if response.is_error or not payload.get("access_token"):
         detail = payload.get("error_description") or payload.get("message") or payload.get("error") or response.text
         raise RuntimeError(f"TikTok OAuth não foi concluído: {detail}")
@@ -81,13 +101,16 @@ def _stamp_token(payload: dict, previous: dict | None = None) -> dict:
 
 
 def _profile(access_token: str) -> dict:
-    with httpx.Client(timeout=20.0) as client:
-        response = client.get(
-            USER_INFO_URL,
-            params={"fields": "open_id,display_name,avatar_url"},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    payload = response.json()
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(
+                USER_INFO_URL,
+                params={"fields": "open_id,display_name,avatar_url"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        payload = _json_response(response, "consultar o perfil")
+    except (RuntimeError, httpx.RequestError):
+        return {}
     error = payload.get("error") or {}
     if response.is_error or error.get("code") not in {None, "ok", 0}:
         return {}
@@ -181,29 +204,74 @@ def metrics_authorized(db: Session, user_id: int) -> bool:
 
 def get_creator_info(db: Session, user_id: int) -> dict:
     access_token = get_access_token(db, user_id)
-    with httpx.Client(timeout=20.0) as client:
-        response = client.post(
-            CREATOR_INFO_URL,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json; charset=UTF-8",
-            },
-            json={},
+    scopes = token_scopes(db, user_id)
+    if scopes and "video.publish" not in scopes:
+        raise RuntimeError(
+            "A conta TikTok está conectada, mas não autorizou video.publish. Clique em Trocar conta TikTok e autorize a publicação novamente."
         )
-    payload = response.json()
+
+    response: httpx.Response | None = None
+    last_network_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                response = client.post(
+                    CREATOR_INFO_URL,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json; charset=UTF-8",
+                    },
+                )
+        except httpx.RequestError as exc:
+            last_network_error = exc
+            if attempt < 2:
+                time.sleep(1.0 + attempt)
+                continue
+            raise RuntimeError(
+                "Não foi possível consultar as opções de publicação do TikTok agora. Aguarde alguns segundos e tente novamente."
+            ) from exc
+
+        if response.status_code >= 500 and attempt < 2:
+            time.sleep(1.0 + attempt)
+            continue
+        break
+
+    if response is None:
+        raise RuntimeError("Não foi possível consultar as opções de publicação do TikTok.") from last_network_error
+
+    payload = _json_response(response, "consultar as opções de publicação")
     error = payload.get("error") or {}
-    if response.is_error or error.get("code") not in {None, "ok", 0}:
-        detail = error.get("message") or response.text
+    code = str(error.get("code") or "").strip()
+    if response.is_error or code not in {"", "ok", "0"}:
+        detail = str(error.get("message") or response.text or "Falha no TikTok").strip()
+        if code == "scope_not_authorized":
+            raise RuntimeError(
+                "O TikTok não autorizou o escopo video.publish nesta conexão. Clique em Trocar conta TikTok e autorize a publicação novamente."
+            )
+        if code == "access_token_invalid":
+            raise RuntimeError("A sessão do TikTok expirou. Clique em Trocar conta TikTok e conecte novamente.")
+        if code == "rate_limit_exceeded" or response.status_code == 429:
+            raise RuntimeError("O TikTok limitou temporariamente a consulta da conta. Aguarde cerca de 1 minuto e tente novamente.")
         raise RuntimeError(f"TikTok não retornou as opções atuais do criador: {detail}")
+
     data = payload.get("data") or {}
+    privacy_options = [str(item) for item in data.get("privacy_level_options") or [] if str(item).strip()]
+    if not privacy_options:
+        raise RuntimeError(
+            "O TikTok não retornou opções de privacidade para esta conta. Atualize a tela ou reconecte o TikTok antes de publicar."
+        )
+    try:
+        max_duration = max(1, int(data.get("max_video_post_duration_sec") or 60))
+    except (TypeError, ValueError):
+        max_duration = 60
     return {
         "creator_username": str(data.get("creator_username") or ""),
         "creator_nickname": str(data.get("creator_nickname") or ""),
-        "privacy_level_options": [str(item) for item in data.get("privacy_level_options") or []],
+        "privacy_level_options": privacy_options,
         "comment_disabled": bool(data.get("comment_disabled", False)),
         "duet_disabled": bool(data.get("duet_disabled", False)),
         "stitch_disabled": bool(data.get("stitch_disabled", False)),
-        "max_video_post_duration_sec": int(data.get("max_video_post_duration_sec") or 60),
+        "max_video_post_duration_sec": max_duration,
     }
 
 
@@ -217,12 +285,14 @@ def get_connection_status(db: Session, user_id: int) -> dict:
             connected = True
         except Exception:
             connected = False
+    scopes = token_scopes(db, user_id) if connected else set()
     return {
         "configured": configured,
         "connected": connected,
         "display_name": connection.display_name if connected and connection else None,
         "redirect_uri": oauth_redirect_uri(),
-        "metrics_authorized": metrics_authorized(db, user_id) if connected else False,
+        "publish_authorized": ("video.publish" in scopes) if scopes else connected,
+        "metrics_authorized": {"user.info.stats", "video.list"}.issubset(scopes) if connected else False,
     }
 
 
