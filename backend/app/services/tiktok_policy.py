@@ -14,7 +14,7 @@ PUBLIC_AUDIT_BLOCK_REASON = (
     "e a privacidade do vídeo for 'Somente eu'. Sua conta foi identificada como pública. "
     "Para testar a publicação automática agora, deixe a conta TikTok privada, volte ao ShortsFlow e recarregue as opções. "
     "Para publicar automaticamente em modo público, conclua a auditoria do app no TikTok for Developers. "
-    "Enquanto a conta permanecer pública, o TikTok só permite ao ShortsFlow tentar o fluxo de Upload/Caixa de Entrada."
+    "Enquanto a conta permanecer pública, o TikTok só permite ao ShortsFlow tentar o fluxo de Upload/Caixa de Entrada/Rascunhos com o escopo video.upload."
 )
 PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON = (
     "O app da Content Posting API ainda não está auditado, mas esta conta TikTok foi identificada como privada. "
