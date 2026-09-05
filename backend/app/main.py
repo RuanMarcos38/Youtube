@@ -1,6 +1,10 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
 from .config import settings
 from .routers import admin, auth, billing, clips, diagnostics, editor_ai, jobs, media, publications, system, tiktok_auth, videos, youtube_auth
 from .services.bootstrap import ensure_superadmin
@@ -21,7 +25,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="2.6.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.6.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -29,6 +33,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(SQLAlchemyTimeoutError)
+async def database_pool_timeout(_: Request, __: SQLAlchemyTimeoutError):
+    """Never expose a raw 500 when every SQL connection is momentarily busy."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "O banco está momentaneamente ocupado. Aguarde alguns segundos e tente novamente; nenhuma configuração foi perdida."
+        },
+    )
+
 
 app.include_router(system.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
@@ -47,4 +63,4 @@ app.include_router(tiktok_auth.router, prefix=settings.api_prefix)
 
 @app.get("/")
 def root():
-    return {"message": settings.app_name, "version": "2.6.0", "docs": "/docs"}
+    return {"message": settings.app_name, "version": "2.6.1", "docs": "/docs"}
