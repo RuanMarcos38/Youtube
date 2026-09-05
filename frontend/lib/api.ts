@@ -172,6 +172,8 @@ export type TikTokCreatorInfo = {
   creator_username: string;
   creator_nickname: string;
   privacy_level_options: string[];
+  public_posting_blocked?: boolean;
+  public_posting_block_reason?: string;
   comment_disabled: boolean;
   duet_disabled: boolean;
   stitch_disabled: boolean;

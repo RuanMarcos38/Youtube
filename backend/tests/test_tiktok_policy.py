@@ -1,13 +1,17 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.models import Clip, Job, SourceVideo, SystemSetting, Tenant, TikTokPost, User
 from app.services.database_bootstrap import initialize_database
 from app.services.tiktok_policy import (
     PUBLIC_AUDIT_SETTING_PREFIX,
+    apply_unaudited_public_block,
     clear_legacy_unaudited_state,
     is_unaudited_error_text,
+    mark_unaudited_public_block,
     release_unaudited_public_queue,
+    unaudited_public_block_active,
 )
 
 
@@ -23,35 +27,55 @@ def test_does_not_confuse_rate_limit_with_audit_restriction():
     assert not is_unaudited_error_text("rate_limit_exceeded")
 
 
-def test_clear_legacy_unaudited_state_removes_old_public_gate():
+def test_unaudited_public_block_filters_public_option():
+    initialize_database()
+    user_id = int(uuid.uuid4().hex[:8], 16)
+    db = SessionLocal()
+    try:
+        mark_unaudited_public_block(db, user_id=user_id)
+
+        creator = apply_unaudited_public_block(
+            db,
+            user_id=user_id,
+            creator={
+                "creator_username": "ruan",
+                "privacy_level_options": ["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"],
+            },
+        )
+
+        assert creator["public_posting_blocked"] is True
+        assert creator["privacy_level_options"] == ["MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"]
+    finally:
+        db.close()
+
+
+def test_expired_unaudited_public_block_is_cleared():
     initialize_database()
     user_id = int(uuid.uuid4().hex[:8], 16)
     db = SessionLocal()
     try:
         key = f"{PUBLIC_AUDIT_SETTING_PREFIX}{user_id}"
-        db.add(SystemSetting(key=key, value="2026-09-05T12:00:00+00:00", secret=False))
+        expired = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.add(SystemSetting(key=key, value=expired.isoformat(), secret=False))
         db.commit()
 
-        clear_legacy_unaudited_state(db, user_id=user_id)
-
+        assert unaudited_public_block_active(db, user_id=user_id) is False
         assert db.get(SystemSetting, key) is None
     finally:
         db.close()
 
 
-def test_release_unaudited_public_queue_does_not_keep_local_public_gate():
+def test_clear_legacy_unaudited_state_keeps_current_public_gate():
     initialize_database()
     user_id = int(uuid.uuid4().hex[:8], 16)
     db = SessionLocal()
     try:
         key = f"{PUBLIC_AUDIT_SETTING_PREFIX}{user_id}"
-        db.add(SystemSetting(key=key, value="2026-09-05T12:00:00+00:00", secret=False))
-        db.commit()
+        mark_unaudited_public_block(db, user_id=user_id)
 
-        changed = release_unaudited_public_queue(db, user_id=user_id, current_post_id=0)
+        clear_legacy_unaudited_state(db, user_id=user_id)
 
-        assert changed == 0
-        assert db.get(SystemSetting, key) is None
+        assert db.get(SystemSetting, key) is not None
     finally:
         db.close()
 
@@ -160,6 +184,7 @@ def test_release_unaudited_public_queue_keeps_current_error_visible():
         )
 
         assert changed == 2
+        assert unaudited_public_block_active(db, user_id=user.id) is True
         assert current.status == "failed"
         assert current.error == "TikTok recusou app não auditado."
         assert queued.status == "ready"

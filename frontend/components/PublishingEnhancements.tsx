@@ -198,7 +198,11 @@ export default function PublishingEnhancements() {
           const info = await tiktokCreatorInfo();
           setCreator(info);
           setCreatorError("");
-          setPrivacy((current) => info.privacy_level_options.includes(current) ? current : "");
+          setPrivacy((current) => {
+            if (info.privacy_level_options.includes(current)) return current;
+            if (info.public_posting_blocked && info.privacy_level_options.includes("SELF_ONLY")) return "SELF_ONLY";
+            return "";
+          });
         } catch (err) {
           // Preserve the last valid creator info during a transient TikTok/API
           // failure. This avoids making the controls disappear after one 5xx.
@@ -318,6 +322,7 @@ export default function PublishingEnhancements() {
   async function publishTikTok() {
     if (!tiktokSelected.size) return setError("Selecione pelo menos um corte para o TikTok.");
     if (!privacy) return setError("Selecione manualmente a privacidade do TikTok.");
+    if (privacy === "PUBLIC_TO_EVERYONE" && creator?.public_posting_blocked) return setError(creator.public_posting_block_reason || "Publicação pública ainda aguarda liberação do TikTok.");
     if (!musicConfirmed) return setError("Confirme a declaração de uso de música exigida pelo TikTok.");
     setBusy("tiktok"); setError(""); setNotice("");
     try {
@@ -377,20 +382,27 @@ export default function PublishingEnhancements() {
           </div>
 
           {ttStatus?.connected && creator && (
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,1fr)_auto_auto] lg:items-end">
-              <label className="text-[11px] font-medium text-[#555]">Privacidade do TikTok
-                <select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="sf-input mt-1 w-full px-3 py-2.5">
-                  <option value="">Selecione manualmente</option>
-                  {creator.privacy_level_options.map((value) => <option key={value} value={value}>{privacyLabel(value)}</option>)}
-                </select>
-              </label>
-              <div className="flex flex-wrap gap-3 text-[11px] text-[#555]">
-                <label className={creator.comment_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowComment} disabled={creator.comment_disabled} onChange={(e) => setAllowComment(e.target.checked)} className="mr-1" />Comentários</label>
-                <label className={creator.duet_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowDuet} disabled={creator.duet_disabled} onChange={(e) => setAllowDuet(e.target.checked)} className="mr-1" />Dueto</label>
-                <label className={creator.stitch_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowStitch} disabled={creator.stitch_disabled} onChange={(e) => setAllowStitch(e.target.checked)} className="mr-1" />Stitch</label>
+            <>
+              {creator.public_posting_blocked && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">
+                  {creator.public_posting_block_reason || "Publicação pública ainda aguarda auditoria do TikTok. O envio automático disponível agora é Somente eu."}
+                </div>
+              )}
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,1fr)_auto_auto] lg:items-end">
+                <label className="text-[11px] font-medium text-[#555]">Privacidade do TikTok
+                  <select value={privacy} onChange={(e) => setPrivacy(e.target.value)} className="sf-input mt-1 w-full px-3 py-2.5">
+                    <option value="">Selecione manualmente</option>
+                    {creator.privacy_level_options.map((value) => <option key={value} value={value}>{privacyLabel(value)}</option>)}
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-3 text-[11px] text-[#555]">
+                  <label className={creator.comment_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowComment} disabled={creator.comment_disabled} onChange={(e) => setAllowComment(e.target.checked)} className="mr-1" />Comentários</label>
+                  <label className={creator.duet_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowDuet} disabled={creator.duet_disabled} onChange={(e) => setAllowDuet(e.target.checked)} className="mr-1" />Dueto</label>
+                  <label className={creator.stitch_disabled ? "opacity-40" : ""}><input type="checkbox" checked={allowStitch} disabled={creator.stitch_disabled} onChange={(e) => setAllowStitch(e.target.checked)} className="mr-1" />Stitch</label>
+                </div>
+                <label className="flex max-w-md items-start gap-2 text-[10px] leading-4 text-[#667085]"><input type="checkbox" checked={musicConfirmed} onChange={(e) => setMusicConfirmed(e.target.checked)} className="mt-0.5" /><span>Confirmo o uso de música conforme exigido pelo TikTok.</span></label>
               </div>
-              <label className="flex max-w-md items-start gap-2 text-[10px] leading-4 text-[#667085]"><input type="checkbox" checked={musicConfirmed} onChange={(e) => setMusicConfirmed(e.target.checked)} className="mt-0.5" /><span>Confirmo o uso de música conforme exigido pelo TikTok.</span></label>
-            </div>
+            </>
           )}
 
           {ttStatus?.connected && !creator && (

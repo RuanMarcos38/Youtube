@@ -191,6 +191,8 @@ class TikTokCreatorInfoResponse(BaseModel):
     creator_username: str = ""
     creator_nickname: str = ""
     privacy_level_options: list[str] = []
+    public_posting_blocked: bool = False
+    public_posting_block_reason: str = ""
     comment_disabled: bool = False
     duet_disabled: bool = False
     stitch_disabled: bool = False

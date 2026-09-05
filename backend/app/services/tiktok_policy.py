@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -5,6 +7,11 @@ from ..models import SystemSetting, TikTokPost
 
 
 PUBLIC_AUDIT_SETTING_PREFIX = "tiktok_public_audit_block_user_"
+PUBLIC_AUDIT_BLOCK_HOURS = 6
+PUBLIC_AUDIT_BLOCK_REASON = (
+    "O TikTok recusou publicação pública porque o app da Content Posting API ainda não está auditado. "
+    "Até a próxima verificação, publique como 'Somente eu'."
+)
 UNAUDITED_CODE = "unaudited_client_can_only_post_to_private_accounts"
 UNAUDITED_MARKERS = (
     UNAUDITED_CODE,
@@ -17,20 +24,81 @@ def _setting_key(user_id: int) -> str:
     return f"{PUBLIC_AUDIT_SETTING_PREFIX}{int(user_id)}"
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def is_unaudited_error_text(value: str | None) -> bool:
     text = str(value or "").strip().lower()
     return bool(text) and any(marker in text for marker in UNAUDITED_MARKERS)
 
 
-def clear_legacy_unaudited_public_block(db: Session, *, user_id: int) -> bool:
-    """Remove the old short-lived local gate for TikTok public posting."""
+def mark_unaudited_public_block(db: Session, *, user_id: int, commit: bool = True) -> datetime:
+    """Temporarily hide public posting after TikTok proves the client is unaudited."""
+    blocked_until = _utcnow() + timedelta(hours=PUBLIC_AUDIT_BLOCK_HOURS)
+    key = _setting_key(user_id)
+    marker = db.get(SystemSetting, key)
+    if marker is None:
+        marker = SystemSetting(key=key, value=blocked_until.isoformat(), secret=False)
+        db.add(marker)
+    else:
+        marker.value = blocked_until.isoformat()
+        marker.secret = False
+    if commit:
+        db.commit()
+    return blocked_until
+
+
+def clear_unaudited_public_block(db: Session, *, user_id: int, commit: bool = True) -> bool:
+    """Remove the local TikTok public-posting audit gate."""
     key = _setting_key(user_id)
     marker = db.get(SystemSetting, key)
     if marker is None:
         return False
     db.delete(marker)
-    db.commit()
+    if commit:
+        db.commit()
     return True
+
+
+def unaudited_public_block_active(db: Session, *, user_id: int) -> bool:
+    key = _setting_key(user_id)
+    marker = db.get(SystemSetting, key)
+    if marker is None:
+        return False
+    blocked_until = _parse_iso(marker.value)
+    if blocked_until is None or blocked_until <= _utcnow():
+        db.delete(marker)
+        db.commit()
+        return False
+    return True
+
+
+def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) -> dict:
+    """Return Creator Info with public posting hidden while the local block is active."""
+    if not unaudited_public_block_active(db, user_id=user_id):
+        return creator
+    adjusted = dict(creator)
+    adjusted["privacy_level_options"] = [
+        value
+        for value in (creator.get("privacy_level_options") or [])
+        if value != "PUBLIC_TO_EVERYONE"
+    ]
+    adjusted["public_posting_blocked"] = True
+    adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON
+    return adjusted
 
 
 def recover_legacy_unaudited_pauses(db: Session, *, user_id: int | None = None) -> int:
@@ -58,8 +126,7 @@ def recover_legacy_unaudited_pauses(db: Session, *, user_id: int | None = None) 
 
 
 def clear_legacy_unaudited_state(db: Session, *, user_id: int) -> None:
-    """Clear local-only audit state so TikTok Creator Info remains authoritative."""
-    clear_legacy_unaudited_public_block(db, user_id=user_id)
+    """Recover old per-clip audit pauses without clearing the current public gate."""
     recover_legacy_unaudited_pauses(db, user_id=user_id)
 
 
@@ -77,7 +144,7 @@ def release_unaudited_public_queue(
     red error dozens of times. The clip that proved the rejection keeps a visible
     error so a failed public attempt is never silent.
     """
-    clear_legacy_unaudited_public_block(db, user_id=user_id)
+    mark_unaudited_public_block(db, user_id=user_id, commit=False)
     rows = (
         db.query(TikTokPost)
         .filter(

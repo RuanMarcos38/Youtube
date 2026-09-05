@@ -26,7 +26,9 @@ from ..services.tiktok_oauth import (
     get_creator_info,
 )
 from ..services.tiktok_policy import (
+    apply_unaudited_public_block,
     clear_legacy_unaudited_state,
+    clear_unaudited_public_block,
 )
 
 router = APIRouter(prefix="/tiktok", tags=["tiktok"])
@@ -103,7 +105,8 @@ def oauth_callback(
     if not code or not state:
         return _frontend_redirect("error", "oauth_callback_incompleto")
     try:
-        complete_oauth(db, code, state)
+        user_id = complete_oauth(db, code, state)
+        clear_unaudited_public_block(db, user_id=user_id)
     except Exception:
         return _frontend_redirect("error", "oauth_nao_concluido")
     return _frontend_redirect("connected")
@@ -112,6 +115,7 @@ def oauth_callback(
 @router.post("/oauth/disconnect", status_code=204)
 def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     disconnect(db, user.id)
+    clear_unaudited_public_block(db, user_id=user.id)
 
 
 @router.post("/creator-info", response_model=TikTokCreatorInfoResponse)
@@ -119,7 +123,7 @@ def creator_info(user: User = Depends(get_current_user), db: Session = Depends(g
     try:
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
-        return creator
+        return apply_unaudited_public_block(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -166,6 +170,7 @@ def upload_batch(
     try:
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
+        creator = apply_unaudited_public_block(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
