@@ -28,7 +28,7 @@ def test_does_not_confuse_rate_limit_with_audit_restriction():
     assert not is_unaudited_error_text("rate_limit_exceeded")
 
 
-def test_unaudited_public_block_disables_public_account_direct_post():
+def test_unaudited_public_block_routes_public_account_to_draft_bridge():
     initialize_database()
     user_id = int(uuid.uuid4().hex[:8], 16)
     db = SessionLocal()
@@ -45,8 +45,9 @@ def test_unaudited_public_block_disables_public_account_direct_post():
         )
 
         assert creator["public_posting_blocked"] is True
-        assert creator["privacy_level_options"] == []
-        assert "contas TikTok privadas" in creator["public_posting_block_reason"]
+        assert creator["privacy_level_options"] == ["SELF_ONLY"]
+        assert "Rascunhos" in creator["public_posting_block_reason"]
+        assert "video.upload" in creator["public_posting_block_reason"]
     finally:
         db.close()
 
