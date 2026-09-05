@@ -10,7 +10,7 @@ from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
 from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
-from .services.tiktok_upload_task import run_tiktok_upload
+from .services.tiktok_upload_task import refresh_tiktok_post, run_tiktok_upload
 from .services.upload_task import run_upload
 
 PROCESSING_STATES = {
@@ -23,16 +23,13 @@ PROCESSING_STATES = {
 }
 HEARTBEAT_FILE = settings.data_path / "worker_heartbeat.txt"
 DOWNLOAD_PROBE_INTERVAL_SECONDS = 15 * 60
+TIKTOK_STATUS_INTERVAL_SECONDS = 15
+TIKTOK_STATUS_BATCH_SIZE = 6
 MAX_PIPELINE_CONCURRENCY = 5
 
 
 def _pipeline_concurrency() -> int:
-    """Return the configured pipeline capacity, hard-capped at five videos.
-
-    Five jobs can be active at once; the sixth stays with status ``queued`` and
-    is only claimed after one active job finishes. This cap is intentionally
-    independent from YouTube/TikTok upload pools, which remain serialized.
-    """
+    """Return the configured pipeline capacity, hard-capped at five videos."""
     return max(1, min(int(settings.worker_concurrency), MAX_PIPELINE_CONCURRENCY))
 
 
@@ -53,6 +50,11 @@ def _recover_interrupted() -> None:
         for post in db.query(TikTokPost).filter(TikTokPost.status == "uploading").all():
             post.status = "queued"
             post.error = "Recovered after worker restart"
+        # Legacy versions marked TikTok uploads as submitted immediately after
+        # sending the file. Keep them eligible for authoritative status checks.
+        for post in db.query(TikTokPost).filter(TikTokPost.status == "submitted", TikTokPost.publish_id.is_not(None)).all():
+            post.status = "processing"
+            post.error = "Aguardando confirmação final do TikTok."
         db.commit()
     finally:
         db.close()
@@ -60,7 +62,6 @@ def _recover_interrupted() -> None:
 
 
 def _claim_next_job_id() -> int | None:
-    """Claim one queued job before dispatching it to a worker thread."""
     db = SessionLocal()
     try:
         job = db.query(Job).filter(Job.status == "queued").order_by(Job.id.asc()).first()
@@ -81,8 +82,6 @@ def _claim_next_upload() -> tuple[int, str] | None:
         clip = db.query(Clip).filter(Clip.status == "upload_queued").order_by(Clip.id.asc()).first()
         if not clip:
             return None
-        # Public is the only publication mode supported by ShortsFlow.
-        # Legacy values saved before this policy are intentionally ignored.
         privacy = "public"
         clip.upload_privacy = privacy
         clip.status = "uploading"
@@ -105,6 +104,26 @@ def _claim_next_tiktok_post() -> int | None:
         return post.id
     finally:
         db.close()
+
+
+def _tiktok_status_batch() -> list[int]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(TikTokPost)
+            .filter(TikTokPost.status.in_(["processing", "submitted"]), TikTokPost.publish_id.is_not(None))
+            .order_by(TikTokPost.updated_at.asc(), TikTokPost.id.asc())
+            .limit(TIKTOK_STATUS_BATCH_SIZE)
+            .all()
+        )
+        return [row.id for row in rows]
+    finally:
+        db.close()
+
+
+def _refresh_tiktok_batch(post_ids: list[int]) -> None:
+    for post_id in post_ids:
+        refresh_tiktok_post(post_id)
 
 
 def _collect_finished_jobs(active: dict[Future, int]) -> None:
@@ -139,6 +158,7 @@ def main() -> None:
     active_probe: Future | None = None
     active_editor: Future | None = None
     last_probe_started = 0.0
+    last_tiktok_status_started = 0.0
 
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
@@ -198,9 +218,15 @@ def main() -> None:
                     active_upload = upload_pool.submit(run_upload, upload[0], upload[1])
 
             if active_tiktok_upload is None:
-                post_id = _claim_next_tiktok_post()
-                if post_id is not None:
-                    active_tiktok_upload = tiktok_pool.submit(run_tiktok_upload, post_id)
+                status_due = last_tiktok_status_started == 0.0 or now - last_tiktok_status_started >= TIKTOK_STATUS_INTERVAL_SECONDS
+                status_ids = _tiktok_status_batch() if status_due else []
+                if status_ids:
+                    last_tiktok_status_started = now
+                    active_tiktok_upload = tiktok_pool.submit(_refresh_tiktok_batch, status_ids)
+                else:
+                    post_id = _claim_next_tiktok_post()
+                    if post_id is not None:
+                        active_tiktok_upload = tiktok_pool.submit(run_tiktok_upload, post_id)
 
             if active_editor is None:
                 editor_task = claim_next_editor_task()
