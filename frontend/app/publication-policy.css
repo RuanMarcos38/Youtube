@@ -1,13 +1,17 @@
 /* YouTube uploads are public-only in ShortsFlow.
-   Hide only the legacy YouTube privacy control from the original Dashboard.
-   Do not hide selects rendered by the TikTok publishing panel. */
+   Hide only the legacy YouTube privacy control from the original Dashboard. */
 #cortes > .sf-card > div:first-child > label {
   display: none !important;
 }
 
-/* Defensive fallback restricted to the original Dashboard header only.
-   The previous broad selector matched every select inside #cortes and was also
-   hiding the TikTok privacy selector, which kept the publish button disabled. */
 #cortes > .sf-card > div:first-child label:has(> select) > select {
+  display: none !important;
+}
+
+/* The platform-aware publishing panel now owns the publication cards. Keep the
+   original section header intact, but hide the legacy mixed YouTube/TikTok card
+   list that follows our host. This is presentation-only: no project data,
+   credentials, media files or backend routes are removed. */
+#cortes > .sf-card > [data-publishing-enhancements-host] ~ * {
   display: none !important;
 }
