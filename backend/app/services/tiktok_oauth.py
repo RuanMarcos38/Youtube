@@ -13,7 +13,8 @@ AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
 CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
-SCOPES = "user.info.basic,video.publish"
+BASE_SCOPES = "user.info.basic,video.publish"
+METRICS_SCOPES = "user.info.basic,user.info.stats,video.list,video.publish"
 _LOCAL_REDIRECT_URI = "http://localhost:8000/api/tiktok/oauth/callback"
 
 
@@ -22,13 +23,6 @@ def oauth_configured() -> bool:
 
 
 def oauth_redirect_uri() -> str:
-    """Return the exact callback that must be registered in TikTok.
-
-    Production already serves backend and frontend through the same public HTTPS
-    domain. If EasyPanel still inherits the development default callback, derive
-    the production callback from FRONTEND_URL instead of sending users back to
-    localhost. An explicit TIKTOK_OAUTH_REDIRECT_URI always wins.
-    """
     configured = settings.tiktok_oauth_redirect_uri.strip()
     frontend = settings.frontend_url.strip().rstrip("/")
     if configured and configured != _LOCAL_REDIRECT_URI:
@@ -47,7 +41,7 @@ def _connection(db: Session, user_id: int) -> TikTokConnection:
     return connection
 
 
-def build_authorization_url(db: Session, user: User) -> str:
+def build_authorization_url(db: Session, user: User, *, include_metrics: bool = False) -> str:
     if not oauth_configured():
         raise RuntimeError(
             "TikTok ainda não está configurado no servidor. Cadastre TIKTOK_CLIENT_KEY e TIKTOK_CLIENT_SECRET do app aprovado no TikTok for Developers."
@@ -60,7 +54,7 @@ def build_authorization_url(db: Session, user: User) -> str:
         {
             "client_key": settings.tiktok_client_key,
             "response_type": "code",
-            "scope": SCOPES,
+            "scope": METRICS_SCOPES if include_metrics else BASE_SCOPES,
             "redirect_uri": oauth_redirect_uri(),
             "state": state,
         }
@@ -144,9 +138,7 @@ def _refresh(db: Session, connection: TikTokConnection, token: dict) -> dict:
     return stamped
 
 
-def get_access_token(db: Session, user_id: int) -> str:
-    if not oauth_configured():
-        raise RuntimeError("TikTok ainda não está configurado no servidor.")
+def _stored_token(db: Session, user_id: int) -> tuple[TikTokConnection, dict]:
     connection = db.query(TikTokConnection).filter(TikTokConnection.user_id == user_id).first()
     if not connection or not connection.token_json:
         raise RuntimeError("TikTok não está conectado para este perfil.")
@@ -156,10 +148,35 @@ def get_access_token(db: Session, user_id: int) -> str:
         raise RuntimeError("Credencial do TikTok inválida. Reconecte a conta.") from exc
     if time.time() >= float(token.get("_expires_at") or 0):
         token = _refresh(db, connection, token)
+    return connection, token
+
+
+def get_access_token(db: Session, user_id: int) -> str:
+    if not oauth_configured():
+        raise RuntimeError("TikTok ainda não está configurado no servidor.")
+    _, token = _stored_token(db, user_id)
     access_token = str(token.get("access_token") or "").strip()
     if not access_token:
         raise RuntimeError("Credencial do TikTok inválida. Reconecte a conta.")
     return access_token
+
+
+def token_scopes(db: Session, user_id: int) -> set[str]:
+    if not oauth_configured():
+        return set()
+    try:
+        _, token = _stored_token(db, user_id)
+    except RuntimeError:
+        return set()
+    raw = token.get("scope") or token.get("scopes") or ""
+    if isinstance(raw, list):
+        return {str(item).strip() for item in raw if str(item).strip()}
+    return {item.strip() for item in str(raw).replace(" ", ",").split(",") if item.strip()}
+
+
+def metrics_authorized(db: Session, user_id: int) -> bool:
+    scopes = token_scopes(db, user_id)
+    return {"user.info.stats", "video.list"}.issubset(scopes)
 
 
 def get_creator_info(db: Session, user_id: int) -> dict:
@@ -205,6 +222,7 @@ def get_connection_status(db: Session, user_id: int) -> dict:
         "connected": connected,
         "display_name": connection.display_name if connected and connection else None,
         "redirect_uri": oauth_redirect_uri(),
+        "metrics_authorized": metrics_authorized(db, user_id) if connected else False,
     }
 
 
