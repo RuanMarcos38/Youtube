@@ -2,6 +2,7 @@ from pathlib import Path
 
 from ..database import SessionLocal
 from ..models import Clip, TikTokPost
+from .tiktok_policy import release_unaudited_public_queue
 from .tiktok_upload import (
     TikTokPostLimitError,
     TikTokUnauditedClientError,
@@ -30,15 +31,6 @@ def _pause_user_queue(db, user_id: int, message: str, current_post_id: int) -> N
         queued.status = "paused_limit"
         queued.error = message
     db.commit()
-
-
-def _pause_unaudited_queue(db, user_id: int, current_post_id: int) -> None:
-    message = (
-        "TikTok: o app da Content Posting API ainda está marcado como não auditado. "
-        "A fila foi pausada para evitar que os demais vídeos falhem. "
-        "Para teste, selecione 'Somente eu' quando disponível; publicação pública só é liberada pelo TikTok após a auditoria do app."
-    )
-    _pause_user_queue(db, user_id, message, current_post_id)
 
 
 def _failed_message(reason: str) -> str:
@@ -80,7 +72,10 @@ def run_tiktok_upload(post_id: int) -> None:
         db.rollback()
         post = db.get(TikTokPost, post_id)
         if post:
-            _pause_unaudited_queue(db, post.user_id, post_id)
+            # One authoritative rejection is enough. Return the whole pending
+            # batch to a clean retryable state and record a short-lived policy
+            # marker, instead of copying the same red error to every clip.
+            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post_id)
     except TikTokPostLimitError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)
@@ -136,7 +131,7 @@ def refresh_tiktok_post(post_id: int) -> None:
         db.rollback()
         post = db.get(TikTokPost, post_id)
         if post:
-            _pause_unaudited_queue(db, post.user_id, post.id)
+            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post.id)
     except TikTokPostLimitError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)

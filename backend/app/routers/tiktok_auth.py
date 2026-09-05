@@ -25,6 +25,11 @@ from ..services.tiktok_oauth import (
     get_connection_status,
     get_creator_info,
 )
+from ..services.tiktok_policy import (
+    PUBLIC_AUDIT_BLOCK_MESSAGE,
+    guard_creator_info_for_audit,
+    recent_unaudited_public_block,
+)
 
 router = APIRouter(prefix="/tiktok", tags=["tiktok"])
 
@@ -114,10 +119,12 @@ def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depen
 @router.post("/creator-info", response_model=TikTokCreatorInfoResponse)
 def creator_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        # Always use the current Creator Info returned by TikTok. Historical
-        # failures must not permanently hide PUBLIC_TO_EVERYONE after the app
-        # receives approval or TikTok changes the account permissions.
-        return get_creator_info(db, user.id, force=True)
+        creator = get_creator_info(db, user.id, force=True)
+        # Creator Info reflects account privacy settings, while Direct Post can
+        # still reject public visibility when the API client is unaudited. A
+        # recent authoritative init rejection temporarily limits the UI to the
+        # safe SELF_ONLY option without changing credentials or account data.
+        return guard_creator_info_for_audit(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -162,12 +169,14 @@ def upload_batch(
         raise HTTPException(status_code=409, detail="Conecte o TikTok deste perfil antes de publicar.")
 
     try:
-        # Validate the live Creator Info immediately before queueing. This means
-        # public posting becomes available automatically as soon as TikTok
-        # returns PUBLIC_TO_EVERYONE for the connected account/app.
         creator = get_creator_info(db, user.id, force=True)
+        creator = guard_creator_info_for_audit(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if payload.privacy_level == "PUBLIC_TO_EVERYONE" and recent_unaudited_public_block(db, user_id=user.id):
+        raise HTTPException(status_code=409, detail=PUBLIC_AUDIT_BLOCK_MESSAGE)
+
     options = creator.get("privacy_level_options") or []
     if payload.privacy_level not in options:
         raise HTTPException(
