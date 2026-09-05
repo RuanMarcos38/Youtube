@@ -54,6 +54,21 @@ def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(ge
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.get("/oauth/authorize")
+def oauth_authorize(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Open Google's account picker with a normal browser navigation.
+
+    Account switching must not depend on a client-side fetch before redirecting.
+    Keeping the browser on the same-origin /api route also preserves the current
+    ShortsFlow session and avoids CORS/network failures caused by an external
+    NEXT_PUBLIC_API_URL.
+    """
+    try:
+        return RedirectResponse(url=build_authorization_url(db, user), status_code=302)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _frontend_redirect(status_value: str, reason: str = "") -> RedirectResponse:
     query = {"youtube": status_value}
     if reason:
