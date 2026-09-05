@@ -143,7 +143,9 @@ def upload_batch(
         raise HTTPException(status_code=409, detail="Conecte o TikTok deste perfil antes de publicar.")
 
     try:
-        creator = get_creator_info(db, user.id)
+        # Creator Info is checked once, server-side, immediately before the
+        # batch is queued. The browser does not make a duplicate validation.
+        creator = get_creator_info(db, user.id, force=True)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     options = creator.get("privacy_level_options") or []
