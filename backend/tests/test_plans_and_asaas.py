@@ -3,9 +3,10 @@ import uuid
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import Job, SourceVideo, Tenant, TenantPlan, User
+from app.services import asaas as asaas_service
 from app.services.asaas import apply_asaas_webhook, external_reference
 from app.services.database_bootstrap import initialize_database
-from app.services.plans import get_plan_definition, quota_payload
+from app.services.plans import EXTRA_CHANNEL_PRICE_CENTS, get_plan_definition, quota_payload
 
 
 def _tenant_with_owner(db, suffix: str):
@@ -26,10 +27,22 @@ def _tenant_with_owner(db, suffix: str):
 
 
 def test_plan_catalog_has_expected_commercial_limits():
-    assert get_plan_definition("creator")["monthly_price_cents"] == 7990
-    assert get_plan_definition("pro")["processing_minutes_limit"] == 600
-    assert get_plan_definition("business")["shorts_limit"] == 350
-    assert get_plan_definition("agency")["channel_limit"] == 20
+    expected = {
+        "trial": (0, 0, 30, 3, 1),
+        "creator": (7990, 79900, 180, 30, 1),
+        "pro": (14990, 149900, 600, 120, 3),
+        "business": (29990, 299900, 1500, 350, 7),
+        "agency": (59990, 599900, 4000, 1000, 20),
+    }
+    for code, (monthly, yearly, minutes, shorts, channels) in expected.items():
+        plan = get_plan_definition(code)
+        assert plan["monthly_price_cents"] == monthly
+        assert plan["yearly_price_cents"] == yearly
+        assert plan["processing_minutes_limit"] == minutes
+        assert plan["shorts_limit"] == shorts
+        assert plan["channel_limit"] == channels
+    assert get_plan_definition("pro")["featured"] is True
+    assert EXTRA_CHANNEL_PRICE_CENTS == 2990
 
 
 def test_asaas_paid_checkout_activates_exact_plan_idempotently():
@@ -70,6 +83,49 @@ def test_asaas_paid_checkout_activates_exact_plan_idempotently():
         assert plan.billing_provider == "asaas"
         assert plan.subscription_value_cents == 14990
         assert tenant.billing_status == "active"
+    finally:
+        db.close()
+
+
+def test_asaas_checkout_uses_founder_pricing_plan_summary(monkeypatch):
+    initialize_database()
+    suffix = uuid.uuid4().hex[:12]
+    captured = {}
+
+    def fake_request(method, path, *, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"id": f"checkout_{suffix}", "link": "https://asaas.example/checkout"}
+
+    monkeypatch.setattr(asaas_service, "_request", fake_request)
+    db = SessionLocal()
+    try:
+        tenant, owner = _tenant_with_owner(db, suffix)
+        plan = TenantPlan(
+            tenant_id=tenant.id,
+            plan_code="trial",
+            billing_status="trial",
+            billing_provider="shortsflow",
+            monthly_job_limit=999999,
+        )
+        db.add(plan)
+        db.commit()
+
+        result = asaas_service.create_checkout(db, owner, "agency", "yearly")
+        item = captured["payload"]["items"][0]
+
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/checkouts"
+        assert result["amount_cents"] == 599900
+        assert result["billing_cycle"] == "yearly"
+        assert item["name"] == "ShortsFlow Agency"
+        assert item["value"] == 5999.0
+        assert "4.000 minutos/mês" in item["description"]
+        assert "1.000 Shorts/mês" in item["description"]
+        assert "até 20 canal(is) do YouTube" in item["description"]
+        assert "pague 10 meses e use 12" in item["description"]
+        assert captured["payload"]["subscription"]["cycle"] == "YEARLY"
     finally:
         db.close()
 

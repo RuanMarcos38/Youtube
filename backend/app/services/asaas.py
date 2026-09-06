@@ -99,6 +99,10 @@ def parse_external_reference(value: str | None) -> tuple[int, str, str] | None:
     return tenant_id, plan_code, billing_cycle
 
 
+def _pt_int(value: int) -> str:
+    return f"{int(value):,}".replace(",", ".")
+
+
 def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str) -> dict:
     plan_code = (plan_code or "").strip().lower()
     billing_cycle = (billing_cycle or "monthly").strip().lower()
@@ -131,6 +135,14 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
     now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
     first_due = now_br.strftime("%Y-%m-%d %H:%M:%S")
     cycle = "MONTHLY" if billing_cycle == "monthly" else "YEARLY"
+    cycle_label = "mensal" if billing_cycle == "monthly" else "anual"
+    plan_summary = (
+        f"{_pt_int(definition['processing_minutes_limit'])} minutos/mês, "
+        f"{_pt_int(definition['shorts_limit'])} Shorts/mês e até {definition['channel_limit']} canal(is) do YouTube."
+    )
+    description = f"Assinatura {cycle_label} ShortsFlow {definition['name']}: {plan_summary}"
+    if billing_cycle == "yearly":
+        description += " Plano anual: pague 10 meses e use 12."
 
     payload = {
         "billingTypes": ["CREDIT_CARD"],
@@ -146,7 +158,7 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
             {
                 "externalReference": plan_code,
                 "name": f"ShortsFlow {definition['name']}",
-                "description": f"Assinatura {billing_cycle} do ShortsFlow {definition['name']}",
+                "description": description,
                 "quantity": 1,
                 "value": round(price_cents / 100, 2),
             }

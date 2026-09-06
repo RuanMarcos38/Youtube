@@ -17,7 +17,7 @@ from ..services.asaas import (
     webhook_configured,
 )
 from ..services.billing import apply_kiwify_webhook, plan_payload
-from ..services.plans import public_plans
+from ..services.plans import EXTRA_CHANNEL_PRICE_CENTS, public_plans
 from ..services.system_config import get_public_config_safe
 
 
@@ -61,7 +61,7 @@ def billing_plans():
         "plans": public_plans(),
         "asaas_enabled": asaas_configured(),
         "webhook_ready": webhook_configured(),
-        "extra_channel_price_cents": 2990,
+        "extra_channel_price_cents": EXTRA_CHANNEL_PRICE_CENTS,
     }
 
 

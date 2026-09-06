@@ -94,19 +94,19 @@ export default function PricingPlans() {
         </header>
 
         <section className="mx-auto mt-14 max-w-3xl text-center">
-          <div className="inline-flex rounded-full bg-red-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-red-700">Planos ShortsFlow</div>
-          <h1 className="mt-5 text-4xl font-black leading-tight md:text-6xl">Produza mais Shorts sem aumentar sua operação.</h1>
-          <p className="mx-auto mt-5 max-w-2xl text-sm leading-7 text-[#626262] md:text-base">Escolha o volume ideal de processamento, Shorts, canais e usuários. Os limites protegem sua operação e deixam o custo previsível.</p>
+          <div className="inline-flex rounded-full bg-red-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-red-700">Preço de fundador</div>
+          <h1 className="mt-5 text-4xl font-black leading-tight md:text-6xl">Transforme horas de conteúdo em Shorts prontos e publicados automaticamente.</h1>
+          <p className="mx-auto mt-5 max-w-2xl text-sm leading-7 text-[#626262] md:text-base">Escolha o volume ideal de processamento, Shorts, canais e usuários. 1 crédito equivale a 1 minuto de vídeo original processado.</p>
           <div className="mt-8 inline-flex rounded-xl border border-black/10 bg-white p-1 shadow-sm">
             <button onClick={() => setCycle("monthly")} className={`rounded-lg px-5 py-2.5 text-sm font-black ${cycle === "monthly" ? "bg-[#111] text-white" : "text-[#666]"}`}>Mensal</button>
-            <button onClick={() => setCycle("yearly")} className={`rounded-lg px-5 py-2.5 text-sm font-black ${cycle === "yearly" ? "bg-[#111] text-white" : "text-[#666]"}`}>Anual · economize</button>
+            <button onClick={() => setCycle("yearly")} className={`rounded-lg px-5 py-2.5 text-sm font-black ${cycle === "yearly" ? "bg-[#111] text-white" : "text-[#666]"}`}>Anual · pague 10 e use 12</button>
           </div>
         </section>
 
         {trial && (
           <section className="mt-10 grid items-center gap-5 rounded-2xl border border-[#ddecbb] bg-white p-6 shadow-sm md:grid-cols-[1fr_auto] md:p-8">
             <div>
-              <div className="text-xs font-black uppercase text-[#729b19]">Teste gratuito · uso único</div>
+              <div className="text-xs font-black uppercase text-[#729b19]">Teste grátis · uso único</div>
               <h2 className="mt-1 text-2xl font-black">{trial.name}: {trial.processing_minutes_limit} min + {trial.shorts_limit} Shorts</h2>
               <p className="mt-2 text-sm leading-6 text-[#666]">Crie sua conta sem cobrança e valide o fluxo antes de escolher um plano pago. A franquia de teste não renova mensalmente.</p>
             </div>
@@ -146,13 +146,15 @@ export default function PricingPlans() {
                   <strong className="text-3xl font-black">{money(price)}</strong>
                   <span className="text-xs font-bold text-[#777]"> /{cycle === "monthly" ? "mês" : "ano"}</span>
                 </div>
-                {cycle === "yearly" && <div className="mt-1 text-[11px] font-bold text-[#729b19]">Equivale a {money(Math.round(price / 12))}/mês</div>}
+                {cycle === "yearly" && <div className="mt-1 text-[11px] font-bold text-[#729b19]">Pague 10 meses e use 12. Equivale a {money(Math.round(price / 12))}/mês</div>}
+                {plan.featured && <div className="mt-2 text-[11px] font-black text-red-700">Plano âncora de lançamento</div>}
 
                 <div className="mt-6 grid gap-2 rounded-xl bg-[#f7f7f7] p-4 text-xs font-bold">
                   <div>{plan.processing_minutes_limit.toLocaleString("pt-BR")} minutos/mês</div>
                   <div>{plan.shorts_limit.toLocaleString("pt-BR")} Shorts/mês</div>
                   <div>{plan.channel_limit} canal(is) do YouTube</div>
                   <div>{plan.user_limit} usuário(s)</div>
+                  <div className="text-[10px] text-[#777]">1 crédito = 1 minuto processado</div>
                 </div>
 
                 <div className="mt-5 flex-1 space-y-2 text-xs leading-5 text-[#555]">
@@ -167,7 +169,7 @@ export default function PricingPlans() {
           })}
         </section>
 
-        <div className="mt-5 text-center text-xs font-bold text-[#777]">Canal adicional: {money(catalog?.extra_channel_price_cents || 2990)}/mês, sujeito à disponibilidade do plano.</div>
+        <div className="mt-5 text-center text-xs font-bold text-[#777]">Canal adicional: + {money(catalog?.extra_channel_price_cents || 2990)}/mês, sujeito à disponibilidade do plano.</div>
 
         {!user && (
           <section ref={registerRef} className="mx-auto mt-14 max-w-xl rounded-2xl border border-[#e6e6e6] bg-white p-6 shadow-sm md:p-8">
@@ -186,7 +188,7 @@ export default function PricingPlans() {
 
         {error && <div className="mx-auto mt-6 max-w-2xl rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm font-bold text-red-700">{error}</div>}
 
-        <footer className="py-12 text-center text-xs text-[#777]">Cobrança recorrente segura. O acesso pago é liberado somente após a confirmação financeira recebida pelo webhook.</footer>
+        <footer className="py-12 text-center text-xs text-[#777]">Cobrança recorrente segura via Asaas. O acesso pago é liberado somente após a confirmação financeira recebida pelo webhook.</footer>
       </div>
     </main>
   );
