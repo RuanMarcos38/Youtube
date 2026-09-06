@@ -12,11 +12,18 @@ from ..config import settings
 from ..database import SessionLocal
 from ..models import User, YouTubeConnection
 
-SCOPES = [
+# Keep the permissions already used by ShortsFlow unchanged for existing
+# connections. The management scope is requested only on a new/reconnected
+# authorization so current upload tokens are never rewritten or escalated in
+# memory simply because the application code was updated.
+BASE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
-    "https://www.googleapis.com/auth/youtube.force-ssl",
     "https://www.googleapis.com/auth/yt-analytics.readonly",
+]
+SCOPES = [
+    *BASE_SCOPES,
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 
@@ -111,11 +118,27 @@ def complete_oauth(db: Session, code: str, state: str) -> int:
     return connection.user_id
 
 
+def _stored_scopes(info: dict) -> list[str]:
+    """Use exactly the scopes granted to the stored token when available."""
+    value = info.get("scopes")
+    if isinstance(value, list):
+        scopes = [str(item).strip() for item in value if str(item).strip()]
+        if scopes:
+            return scopes
+    if isinstance(value, str):
+        scopes = [item.strip() for item in value.replace(",", " ").split() if item.strip()]
+        if scopes:
+            return scopes
+    # Old token JSON may not persist the scope list. In that case preserve the
+    # exact legacy permission set instead of silently adding management access.
+    return list(BASE_SCOPES)
+
+
 def _credentials_from_connection(connection: YouTubeConnection, db: Session) -> Credentials:
     if not connection.token_json:
         raise RuntimeError("YouTube não está conectado para este perfil.")
     info = json.loads(connection.token_json)
-    creds = Credentials.from_authorized_user_info(info, SCOPES)
+    creds = Credentials.from_authorized_user_info(info, _stored_scopes(info))
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
         connection.token_json = creds.to_json()
