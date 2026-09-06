@@ -7,8 +7,12 @@ export const metadata: Metadata = {
 
 const integrations = [
   {
+    title: "Google OAuth / YouTube",
+    description: "Cada usuário escolhe explicitamente a própria Conta Google no seletor oficial do Google. O ShortsFlow não direciona o cliente para uma conta do administrador e não solicita a senha da Conta Google.",
+  },
+  {
     title: "YouTube",
-    description: "Conexão autorizada via Google OAuth para identificar o canal, acompanhar dados disponíveis e publicar Shorts após revisão do usuário.",
+    description: "Com autorização do próprio usuário, o ShortsFlow identifica o canal conectado, consulta dados compatíveis com as permissões concedidas e publica Shorts selecionados pelo usuário.",
   },
   {
     title: "TikTok Login Kit",
@@ -52,6 +56,17 @@ export default function IntegrationsPage() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-black/5 bg-white p-8 shadow-sm md:p-10">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-red-600">Fluxo Google / YouTube</p>
+          <h2 className="mt-3 text-3xl font-black">A conta conectada é sempre escolhida pelo próprio usuário</h2>
+          <ol className="mt-6 grid gap-4 text-sm leading-7 text-[#505853]">
+            <li><strong className="text-[#111]">1. Entrar no ShortsFlow.</strong> O usuário acessa o próprio perfil da plataforma com suas credenciais do ShortsFlow.</li>
+            <li><strong className="text-[#111]">2. Conectar ou trocar canal.</strong> O ShortsFlow abre a página oficial do Google com o seletor de contas; nenhuma Conta Google do administrador é predefinida.</li>
+            <li><strong className="text-[#111]">3. Escolher a própria Conta Google.</strong> O usuário seleciona o e-mail que possui o canal do YouTube que deseja conectar e analisa as permissões solicitadas pelo Google.</li>
+            <li><strong className="text-[#111]">4. Isolamento por perfil.</strong> Após a autorização, a conexão fica vinculada ao perfil ShortsFlow daquele usuário. Tokens OAuth não são compartilhados entre perfis.</li>
+          </ol>
+        </section>
+
+        <section className="mt-6 rounded-[28px] border border-black/5 bg-white p-8 shadow-sm md:p-10">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-red-600">Fluxo TikTok</p>
           <h2 className="mt-3 text-3xl font-black">Como a integração é utilizada</h2>
           <ol className="mt-6 grid gap-4 text-sm leading-7 text-[#505853]">
@@ -65,10 +80,14 @@ export default function IntegrationsPage() {
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <article className="rounded-2xl border border-black/5 bg-white p-7 shadow-sm">
+            <h2 className="text-xl font-black">Permissões Google / YouTube</h2>
+            <p className="mt-3 text-sm leading-7 text-[#606863]">A integração utiliza somente permissões necessárias às funcionalidades disponíveis, incluindo envio de vídeos, leitura do canal e relatórios de Analytics quando utilizados. O usuário pode revogar o acesso na própria Conta Google ou desconectar o canal no ShortsFlow.</p>
+          </article>
+          <article className="rounded-2xl border border-black/5 bg-white p-7 shadow-sm">
             <h2 className="text-xl font-black">Permissões TikTok</h2>
             <p className="mt-3 text-sm leading-7 text-[#606863]">A conexão principal utiliza permissões compatíveis com Login Kit e publicação, como <code>user.info.basic</code> e <code>video.publish</code>, quando aprovadas e autorizadas. Recursos de métricas somente utilizam escopos adicionais após aprovação do TikTok e autorização do usuário.</p>
           </article>
-          <article className="rounded-2xl border border-black/5 bg-white p-7 shadow-sm">
+          <article className="rounded-2xl border border-black/5 bg-white p-7 shadow-sm lg:col-span-2">
             <h2 className="text-xl font-black">Controle do usuário</h2>
             <p className="mt-3 text-sm leading-7 text-[#606863]">O usuário pode trocar/desconectar a conta conectada e revogar permissões nas plataformas de origem. O ShortsFlow não solicita senhas do Google, YouTube ou TikTok.</p>
           </article>
