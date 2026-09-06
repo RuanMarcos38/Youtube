@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..database import get_db
+from ..errors import YouTubeAuthError
 from ..models import Clip, SystemSetting, TikTokPost, User
 from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
 from ..services.serializers import clip_to_dict
 from ..services.tiktok_policy import recover_retryable_draft_uploads
+from ..services.youtube_upload import delete_video
 from ..services.youtube_upload_availability import upload_availability
 
 
@@ -55,6 +57,63 @@ def youtube_publications(user: User = Depends(get_current_user), db: Session = D
         "platform": "youtube",
         "availability": upload_availability(db, user.id),
         "clips": [clip_to_dict(clip) for clip in rows],
+    }
+
+
+@router.get("/youtube/history")
+def youtube_publication_history(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return only videos that ShortsFlow confirmed as published on YouTube."""
+    rows = [
+        clip
+        for clip in _base_clips(user, db)
+        if clip.status == "uploaded" and bool((clip.youtube_video_id or "").strip())
+    ]
+    return {
+        "platform": "youtube",
+        "clips": [clip_to_dict(clip) for clip in rows],
+    }
+
+
+@router.delete("/youtube/{clip_id}")
+def delete_youtube_publication(
+    clip_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a published Short from YouTube and remove it from ShortsFlow.
+
+    The local record is archived only after YouTube confirms deletion (or says
+    the video no longer exists). Credentials and OAuth secrets are never
+    changed by this operation.
+    """
+    clip = db.query(Clip).filter(Clip.id == clip_id, Clip.user_id == user.id).first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada para este perfil.")
+    if clip.status != "uploaded" or not (clip.youtube_video_id or "").strip():
+        raise HTTPException(status_code=409, detail="Este Short não possui uma publicação confirmada no YouTube para excluir.")
+
+    video_id = str(clip.youtube_video_id).strip()
+    try:
+        result = delete_video(video_id, user.id)
+    except YouTubeAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=f"Não foi possível excluir o vídeo no YouTube: {exc}") from exc
+
+    # Preserve the database row only as an internal audit reference while
+    # removing it from every normal ShortsFlow publication/review listing.
+    # The remote YouTube id remains stored for traceability and is never reused.
+    clip.status = "archived"
+    clip.upload_error = None
+    db.commit()
+
+    return {
+        "ok": True,
+        "clip_id": clip.id,
+        "youtube_video_id": video_id,
+        "already_missing": bool(result.get("already_missing")),
     }
 
 
