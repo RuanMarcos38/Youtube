@@ -14,11 +14,17 @@ PUBLIC_AUDIT_BLOCK_REASON = (
     "e a privacidade do vídeo for 'Somente eu'. Sua conta foi identificada como pública. "
     "Para testar a publicação automática agora, deixe a conta TikTok privada, volte ao ShortsFlow e recarregue as opções. "
     "Para publicar automaticamente em modo público, conclua a auditoria do app no TikTok for Developers. "
-    "Enquanto a conta permanecer pública, o TikTok só permite ao ShortsFlow tentar o fluxo de Upload/Caixa de Entrada/Rascunhos com o escopo video.upload."
+    "O ShortsFlow não enviará este conteúdo como Rascunho/Caixa de Entrada; ele só tentará Direct Post real quando o TikTok permitir."
 )
 PRIVATE_ACCOUNT_AUDIT_BLOCK_REASON = (
     "O app da Content Posting API ainda não está auditado, mas esta conta TikTok foi identificada como privada. "
     "O ShortsFlow pode testar o Direct Post real em 'Somente eu'. Para publicação pública automática, conclua a auditoria do app."
+)
+DIRECT_POST_UNAVAILABLE_MESSAGE = (
+    "O TikTok ainda não permite Direct Post real para esta conta/app. "
+    "Como você pediu publicação direta, o ShortsFlow não enviou para Rascunho/Caixa de Entrada. "
+    "Para postar agora sem rascunho, deixe a conta TikTok privada e use 'Somente eu'. "
+    "Para postar público sem rascunho, aguarde a aprovação do app no TikTok for Developers."
 )
 DRAFT_UPLOAD_RETRY_GRACE_MINUTES = 5
 DRAFT_RETRY_MESSAGE = (
@@ -146,8 +152,8 @@ def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) ->
     """Expose the only policy-compliant test mode while the TikTok client is unaudited.
 
     TikTok requires unaudited Direct Post clients to use a private creator
-    account and SELF_ONLY viewership. A public account can only use the Upload
-    flow until the app is audited or the creator makes the account private.
+    account and SELF_ONLY viewership. A public account cannot use Direct Post
+    until the app is audited or the creator makes the account private.
     """
     active = unaudited_public_block_active(db, user_id=user_id)
     if not active:
@@ -159,7 +165,7 @@ def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) ->
     adjusted = dict(creator)
     adjusted["public_posting_blocked"] = True
     if public_account:
-        adjusted["privacy_level_options"] = ["SELF_ONLY"]
+        adjusted["privacy_level_options"] = []
         adjusted["public_posting_block_reason"] = PUBLIC_AUDIT_BLOCK_REASON
     else:
         adjusted["privacy_level_options"] = [value for value in options if value == "SELF_ONLY"]
@@ -242,7 +248,7 @@ def release_unaudited_public_queue(
     current_post_id: int,
     current_error: str | None = None,
 ) -> int:
-    """Undo a batch when neither Direct Post nor the Upload fallback can proceed."""
+    """Undo a batch when TikTok does not allow Direct Post for the current account/app."""
     mark_unaudited_public_block(db, user_id=user_id, commit=False)
     rows = (
         db.query(TikTokPost)
@@ -262,10 +268,7 @@ def release_unaudited_public_queue(
             continue
         if post.id == current_post_id:
             post.status = "failed"
-            post.error = current_error or (
-                "O Direct Post está bloqueado pela auditoria do TikTok e o envio para Rascunhos não pôde ser concluído. "
-                "Para testar Direct Post, deixe a conta TikTok privada e use 'Somente eu'; para posts públicos, conclua a auditoria do app."
-            )
+            post.error = current_error or DIRECT_POST_UNAVAILABLE_MESSAGE
         else:
             post.status = "ready"
             post.error = None

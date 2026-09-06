@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
-from app.services.tiktok_upload_task import _unaudited_account_requires_upload_fallback
+from app.services.tiktok_upload_task import _unaudited_account_blocks_direct_post
 
 
-def test_private_account_self_only_uses_direct_post(monkeypatch):
+def test_private_account_self_only_allows_direct_post(monkeypatch):
     monkeypatch.setattr(
         "app.services.tiktok_upload_task.get_creator_info",
         lambda db, user_id: {
@@ -11,10 +11,10 @@ def test_private_account_self_only_uses_direct_post(monkeypatch):
         },
     )
     post = SimpleNamespace(user_id=1, privacy_level="SELF_ONLY")
-    assert _unaudited_account_requires_upload_fallback(object(), post) is False
+    assert _unaudited_account_blocks_direct_post(object(), post) is False
 
 
-def test_public_account_self_only_keeps_upload_fallback(monkeypatch):
+def test_public_account_self_only_blocks_direct_post(monkeypatch):
     monkeypatch.setattr(
         "app.services.tiktok_upload_task.get_creator_info",
         lambda db, user_id: {
@@ -22,7 +22,7 @@ def test_public_account_self_only_keeps_upload_fallback(monkeypatch):
         },
     )
     post = SimpleNamespace(user_id=1, privacy_level="SELF_ONLY")
-    assert _unaudited_account_requires_upload_fallback(object(), post) is True
+    assert _unaudited_account_blocks_direct_post(object(), post) is True
 
 
 def test_non_self_only_never_bypasses_unaudited_gate(monkeypatch):
@@ -33,4 +33,4 @@ def test_non_self_only_never_bypasses_unaudited_gate(monkeypatch):
         },
     )
     post = SimpleNamespace(user_id=1, privacy_level="FOLLOWER_OF_CREATOR")
-    assert _unaudited_account_requires_upload_fallback(object(), post) is True
+    assert _unaudited_account_blocks_direct_post(object(), post) is True

@@ -377,7 +377,7 @@ export default function PublishingEnhancements() {
       }
       if (result.queued) {
         const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
-        setNotice(`${result.queued} corte(s) enviados para a fila. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok enviar apenas para Caixa de Entrada/Rascunho, o corte volta liberado para reenvio.${skipped}`);
+        setNotice(`${result.queued} corte(s) enviados para a fila de Direct Post. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok bloquear a publicação direta, o corte volta liberado para nova tentativa.${skipped}`);
       } else {
         setError("Nenhum corte novo foi enviado ao TikTok. Os selecionados já estavam em fila/processamento, publicados ou sem arquivo válido.");
       }
@@ -430,7 +430,7 @@ export default function PublishingEnhancements() {
             <>
               {creator.public_posting_blocked && (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">
-                  {creator.public_posting_block_reason || "O TikTok bloqueou o Direct Post porque o app ainda aguarda auditoria. Conclua a auditoria do app no TikTok for Developers ou teste com uma conta TikTok privada."}
+                  {creator.public_posting_block_reason || "O TikTok bloqueou o Direct Post porque o app ainda aguarda auditoria. Conclua a auditoria do app no TikTok for Developers ou teste com uma conta TikTok privada usando 'Somente eu'."}
                 </div>
               )}
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,1fr)_auto_auto] lg:items-end">

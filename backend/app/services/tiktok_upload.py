@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from .tiktok_oauth import get_access_token
 
 DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
-DRAFT_UPLOAD_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
 POST_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 MAX_CHUNK_BYTES = 64 * 1024 * 1024
 
@@ -51,13 +50,14 @@ def _raise_tiktok_error(response: httpx.Response, payload: dict) -> None:
     if code == "unaudited_client_can_only_post_to_private_accounts":
         raise TikTokUnauditedClientError(
             "O TikTok identificou este cliente da Content Posting API como não auditado. "
-            "O Direct Post público foi bloqueado pelo TikTok; o ShortsFlow tentará o envio oficial para Rascunhos/Caixa de Entrada quando video.upload estiver autorizado."
+            "O Direct Post foi bloqueado pelo TikTok para esta conta/app. "
+            "Como a publicação deve ser direta, o ShortsFlow não enviou para Rascunho/Caixa de Entrada."
         )
     if code in {"scope_not_authorized", "scope_permission_missed"}:
         raise TikTokUploadError(
             "A conexão atual do TikTok não possui a permissão exigida para esta operação. "
-            "Clique em 'Trocar conta TikTok' e autorize novamente os escopos video.publish e video.upload. "
-            "Se o TikTok não oferecer video.upload, habilite/aprove esse escopo no TikTok for Developers antes de reconectar."
+            "Clique em 'Trocar conta TikTok' e autorize novamente o escopo video.publish. "
+            "Se o TikTok não oferecer video.publish, aprove esse escopo no TikTok for Developers antes de reconectar."
         )
     raise TikTokUploadError(f"TikTok ({code}): {message}")
 
@@ -172,52 +172,6 @@ def direct_post_video(
             access_token=access_token,
             body=body,
             context="iniciar a publicação",
-        )
-        _upload_file(
-            client,
-            upload_url=upload_url,
-            file_path=file_path,
-            size=size,
-            chunk_size=chunk_size,
-            total_chunk_count=total_chunk_count,
-        )
-    return publish_id
-
-
-def upload_video_draft(
-    db: Session,
-    *,
-    user_id: int,
-    file_path: Path,
-) -> str:
-    """Upload a video to the creator's TikTok inbox without Direct Post.
-
-    This is TikTok's official Upload flow. The creator receives the video in
-    TikTok and must open the inbox notification to review/edit and finish the
-    post inside the TikTok app. It requires the video.upload scope.
-    """
-    if not file_path.is_file():
-        raise TikTokUploadError("Arquivo do corte não encontrado para enviar ao TikTok.")
-
-    access_token = get_access_token(db, user_id)
-    size = file_path.stat().st_size
-    chunk_size, total_chunk_count = _chunk_plan(size)
-    body = {
-        "source_info": {
-            "source": "FILE_UPLOAD",
-            "video_size": size,
-            "chunk_size": chunk_size,
-            "total_chunk_count": total_chunk_count,
-        }
-    }
-
-    with httpx.Client(timeout=60.0) as client:
-        publish_id, upload_url = _init_upload(
-            client,
-            endpoint=DRAFT_UPLOAD_URL,
-            access_token=access_token,
-            body=body,
-            context="iniciar o envio para Rascunhos/Caixa de Entrada",
         )
         _upload_file(
             client,

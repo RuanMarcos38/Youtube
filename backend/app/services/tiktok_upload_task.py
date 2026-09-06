@@ -5,6 +5,7 @@ from ..models import Clip, TikTokPost
 from .tiktok_oauth import get_creator_info
 from .tiktok_policy import (
     DRAFT_RETRY_MESSAGE,
+    DIRECT_POST_UNAVAILABLE_MESSAGE,
     mark_unaudited_public_block,
     release_unaudited_public_queue,
     unaudited_public_block_active,
@@ -14,7 +15,6 @@ from .tiktok_upload import (
     TikTokUnauditedClientError,
     direct_post_video,
     fetch_post_status,
-    upload_video_draft,
 )
 
 
@@ -48,47 +48,14 @@ def _failed_message(reason: str) -> str:
     return FAIL_REASON_MESSAGES.get(reason, f"O TikTok não concluiu a publicação ({reason}).")
 
 
-def _finish_submission(db, post: TikTokPost, publish_id: str, *, draft: bool) -> None:
+def _finish_submission(db, post: TikTokPost, publish_id: str) -> None:
     post.status = "processing"
     post.publish_id = publish_id
-    if draft:
-        post.privacy_level = "DRAFT_INBOX"
-        post.error = (
-            "O arquivo foi aceito pelo endpoint de Upload do TikTok. Isso ainda não significa que existe um rascunho visível no aplicativo. "
-            "O ShortsFlow continuará consultando o publish_id até o TikTok informar o estado final."
-        )
-    else:
-        post.error = "TikTok recebeu o arquivo por Direct Post e está processando/moderando a publicação."
+    post.error = "TikTok recebeu o arquivo por Direct Post e está processando/moderando a publicação."
     db.commit()
 
 
-def _fallback_to_draft(db, post: TikTokPost, clip: Clip) -> bool:
-    """Try TikTok's official Upload flow after Direct Post is audit-blocked."""
-    try:
-        publish_id = upload_video_draft(
-            db,
-            user_id=post.user_id,
-            file_path=Path(clip.file_path),
-        )
-    except TikTokPostLimitError:
-        raise
-    except Exception as exc:
-        release_unaudited_public_queue(
-            db,
-            user_id=post.user_id,
-            current_post_id=post.id,
-            current_error=(
-                "O Direct Post está bloqueado pela auditoria do TikTok e o envio para Caixa de Entrada também não pôde ser concluído. "
-                f"{exc}"
-            ),
-        )
-        return False
-
-    _finish_submission(db, post, publish_id, draft=True)
-    return True
-
-
-def _unaudited_account_requires_upload_fallback(db, post: TikTokPost) -> bool:
+def _unaudited_account_blocks_direct_post(db, post: TikTokPost) -> bool:
     """Return True when TikTok's unaudited rules do not allow Direct Post.
 
     TikTok currently permits unaudited Direct Post only when the creator account
@@ -101,9 +68,8 @@ def _unaudited_account_requires_upload_fallback(db, post: TikTokPost) -> bool:
     try:
         creator = get_creator_info(db, post.user_id)
     except Exception:
-        # When the account state cannot be confirmed, keep the conservative
-        # official Upload route instead of sending a Direct Post that TikTok is
-        # known to reject for public accounts while the client is unaudited.
+        # When the account state cannot be confirmed, do not send to drafts as a
+        # hidden fallback. Keep the clip visible so the user can retry later.
         return True
     options = {str(value).strip() for value in (creator.get("privacy_level_options") or []) if str(value).strip()}
     account_is_private = "FOLLOWER_OF_CREATOR" in options and "PUBLIC_TO_EVERYONE" not in options
@@ -128,11 +94,16 @@ def run_tiktok_upload(post_id: int) -> None:
         db.commit()
 
         # A previous public-account failure proves that this client is still
-        # unaudited. Do not blindly route SELF_ONLY to the inbox: if Creator
-        # Info now shows that the TikTok account itself is private, Direct Post
-        # is the correct test path and produces a real private post.
-        if unaudited_public_block_active(db, user_id=post.user_id) and _unaudited_account_requires_upload_fallback(db, post):
-            _fallback_to_draft(db, post, clip)
+        # unaudited. Only real Direct Post is allowed here; the Upload/inbox
+        # endpoint is not used as a fallback because the user requested posts,
+        # not drafts.
+        if unaudited_public_block_active(db, user_id=post.user_id) and _unaudited_account_blocks_direct_post(db, post):
+            release_unaudited_public_queue(
+                db,
+                user_id=post.user_id,
+                current_post_id=post.id,
+                current_error=DIRECT_POST_UNAVAILABLE_MESSAGE,
+            )
             return
 
         try:
@@ -147,18 +118,17 @@ def run_tiktok_upload(post_id: int) -> None:
                 disable_stitch=post.disable_stitch,
             )
         except TikTokUnauditedClientError:
-            # TikTok remains authoritative. Remember the restriction and use
-            # the Upload endpoint only as a fallback for this attempt.
+            # TikTok remains authoritative. Remember the restriction and keep
+            # the item visible instead of silently converting it to a draft.
             db.rollback()
             post = db.get(TikTokPost, post_id)
-            clip = db.query(Clip).filter(Clip.id == post.clip_id, Clip.user_id == post.user_id).first() if post else None
-            if not post or not clip:
+            if not post:
                 return
             mark_unaudited_public_block(db, user_id=post.user_id)
-            _fallback_to_draft(db, post, clip)
+            release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post.id)
             return
 
-        _finish_submission(db, post, publish_id, draft=False)
+        _finish_submission(db, post, publish_id)
     except TikTokPostLimitError as exc:
         db.rollback()
         post = db.get(TikTokPost, post_id)

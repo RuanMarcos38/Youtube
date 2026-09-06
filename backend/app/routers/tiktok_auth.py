@@ -178,6 +178,12 @@ def upload_batch(
 
     options = creator.get("privacy_level_options") or []
     if payload.privacy_level not in options:
+        if creator.get("public_posting_blocked"):
+            raise HTTPException(
+                status_code=409,
+                detail=creator.get("public_posting_block_reason")
+                or "O TikTok ainda não liberou Direct Post real para esta conta/app.",
+            )
         raise HTTPException(
             status_code=400,
             detail="Selecione uma opção de privacidade permitida pelo TikTok para esta conta.",
