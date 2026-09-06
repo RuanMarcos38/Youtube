@@ -180,7 +180,16 @@ export default function PricingPlans() {
               <h2 className="mt-1 text-2xl font-black">{trial.name}: {trial.processing_minutes_limit} min + {trial.shorts_limit} Shorts</h2>
               <p className="mt-2 text-sm leading-6 text-[#666]">Crie sua conta sem cobrança e valide o fluxo antes de escolher um plano pago. A franquia de teste não renova mensalmente.</p>
             </div>
-            {!user ? <button onClick={() => registerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} className="rounded-xl bg-[#b8f238] px-6 py-3 text-sm font-black">Começar grátis</button> : <div className="rounded-xl bg-[#f4f4f4] px-5 py-3 text-sm font-black">Plano atual: {user.plan_name || user.plan_code}</div>}
+            {!user ? (
+              <button onClick={() => registerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} className="rounded-xl bg-[#b8f238] px-6 py-3 text-sm font-black">Começar grátis</button>
+            ) : user.plan_code === "trial" ? (
+              <div className="rounded-xl bg-[#edf8d6] px-5 py-3 text-center text-sm font-black text-[#52720f]">Teste grátis ativo</div>
+            ) : (
+              <div className="max-w-[280px] rounded-xl bg-[#f4f4f4] px-5 py-3 text-center">
+                <div className="text-sm font-black">Teste grátis disponível para novas contas</div>
+                <div className="mt-1 text-[11px] font-bold leading-4 text-[#777]">Sua conta atual permanece em {user.plan_name || user.plan_code} e não será rebaixada para o teste.</div>
+              </div>
+            )}
           </section>
         )}
 
