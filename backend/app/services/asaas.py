@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import PaymentEvent, Tenant, TenantPlan, User
+from ..models import PaymentEvent, SystemSetting, Tenant, TenantPlan, User
 from .plans import PAID_PLAN_CODES, get_plan_definition
 
 
@@ -23,6 +23,7 @@ ASAAS_PAYMENT_EVENTS = [
     "PAYMENT_CHARGEBACK_REQUESTED",
 ]
 ASAAS_WEBHOOK_EVENTS = ASAAS_CHECKOUT_EVENTS + ASAAS_SUBSCRIPTION_EVENTS + ASAAS_PAYMENT_EVENTS
+PENDING_CHECKOUT_PREFIX = "billing.asaas.pending."
 
 
 def asaas_configured() -> bool:
@@ -103,6 +104,83 @@ def _pt_int(value: int) -> str:
     return f"{int(value):,}".replace(",", ".")
 
 
+def _pending_checkout_key(checkout_id: str) -> str:
+    key = f"{PENDING_CHECKOUT_PREFIX}{checkout_id.strip()}"
+    if len(key) > 120:
+        raise RuntimeError("O identificador do checkout retornado pelo Asaas é inválido.")
+    return key
+
+
+def _remember_pending_checkout(
+    db: Session,
+    checkout_id: str,
+    tenant_id: int,
+    plan_code: str,
+    billing_cycle: str,
+    amount_cents: int,
+) -> None:
+    key = _pending_checkout_key(checkout_id)
+    value = json.dumps(
+        {
+            "tenant_id": int(tenant_id),
+            "plan_code": plan_code,
+            "billing_cycle": billing_cycle,
+            "amount_cents": int(amount_cents),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    row = db.get(SystemSetting, key)
+    if row:
+        row.value = value
+        row.secret = False
+    else:
+        db.add(SystemSetting(key=key, value=value, secret=False))
+
+
+def _pending_checkout(db: Session, checkout_id: str) -> dict | None:
+    if not checkout_id:
+        return None
+    try:
+        row = db.get(SystemSetting, _pending_checkout_key(checkout_id))
+    except RuntimeError:
+        return None
+    if not row or not row.value:
+        return None
+    try:
+        value = json.loads(row.value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    plan_code = str(value.get("plan_code") or "").strip().lower()
+    billing_cycle = str(value.get("billing_cycle") or "").strip().lower()
+    try:
+        tenant_id = int(value.get("tenant_id"))
+        amount_cents = int(value.get("amount_cents") or 0)
+    except (TypeError, ValueError):
+        return None
+    if plan_code not in PAID_PLAN_CODES or billing_cycle not in {"monthly", "yearly"}:
+        return None
+    return {
+        "tenant_id": tenant_id,
+        "plan_code": plan_code,
+        "billing_cycle": billing_cycle,
+        "amount_cents": amount_cents,
+    }
+
+
+def _forget_pending_checkout(db: Session, checkout_id: str) -> None:
+    if not checkout_id:
+        return
+    try:
+        row = db.get(SystemSetting, _pending_checkout_key(checkout_id))
+    except RuntimeError:
+        return
+    if row:
+        db.delete(row)
+
+
 def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str) -> dict:
     plan_code = (plan_code or "").strip().lower()
     billing_cycle = (billing_cycle or "monthly").strip().lower()
@@ -176,8 +254,10 @@ def create_checkout(db: Session, user: User, plan_code: str, billing_cycle: str)
     checkout_url = str(data.get("link") or "").strip() or f"https://asaas.com/checkoutSession/show?id={checkout_id}"
 
     tenant_plan.asaas_checkout_id = checkout_id
-    # Criar um checkout nunca troca o provedor, ciclo, status ou plano atual.
-    # Essas mudanças acontecem somente depois do CHECKOUT_PAID autenticado.
+    # O plano escolhido fica vinculado ao checkout no banco antes do usuário
+    # sair para o Asaas. Nenhuma credencial ou plano ativo é alterado aqui;
+    # a troca efetiva continua acontecendo somente após CHECKOUT_PAID autenticado.
+    _remember_pending_checkout(db, checkout_id, user.tenant_id, plan_code, billing_cycle, price_cents)
     db.commit()
 
     return {
@@ -235,6 +315,34 @@ def _customer_from_payload(payload: dict) -> str:
     return ""
 
 
+def _plan_from_checkout_items(payload: dict) -> str | None:
+    items = _resource(payload, "checkout").get("items") or []
+    if not isinstance(items, list):
+        return None
+    matches: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        candidate = str(item.get("externalReference") or item.get("external_reference") or "").strip().lower()
+        if candidate in PAID_PLAN_CODES:
+            matches.append(candidate)
+    unique = list(dict.fromkeys(matches))
+    return unique[0] if len(unique) == 1 else None
+
+
+def _cycle_from_checkout(payload: dict) -> str | None:
+    checkout = _resource(payload, "checkout")
+    subscription = checkout.get("subscription") or {}
+    if not isinstance(subscription, dict):
+        subscription = {}
+    cycle = str(subscription.get("cycle") or checkout.get("cycle") or "").strip().upper()
+    if cycle == "MONTHLY":
+        return "monthly"
+    if cycle == "YEARLY":
+        return "yearly"
+    return None
+
+
 def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | None, str | None]:
     parsed = parse_external_reference(_external_from_payload(payload))
     if parsed:
@@ -250,6 +358,12 @@ def _find_plan(db: Session, payload: dict) -> tuple[TenantPlan | None, str | Non
     if checkout_id:
         plan = query.filter(TenantPlan.asaas_checkout_id == checkout_id).first()
         if plan:
+            pending = _pending_checkout(db, checkout_id)
+            if pending and pending["tenant_id"] == plan.tenant_id:
+                return plan, pending["plan_code"], pending["billing_cycle"]
+            item_plan = _plan_from_checkout_items(payload)
+            if item_plan:
+                return plan, item_plan, _cycle_from_checkout(payload) or "monthly"
             return plan, None, None
     if subscription_id:
         plan = query.filter(TenantPlan.asaas_subscription_id == subscription_id).first()
@@ -289,6 +403,19 @@ def _amount_cents(payload: dict) -> int:
     return 0
 
 
+def _validate_checkout_amount(payload: dict, plan_code: str, billing_cycle: str) -> None:
+    definition = get_plan_definition(plan_code)
+    if not definition:
+        raise ValueError("O checkout pago não corresponde a um plano válido do ShortsFlow.")
+    expected = int(definition[f"{billing_cycle}_price_cents"])
+    received = _amount_cents(payload)
+    # Alguns eventos subsequentes do Asaas não repetem o valor. Quando o
+    # CHECKOUT_PAID traz valor/itens, ele precisa corresponder exatamente ao
+    # catálogo que originou o checkout.
+    if received > 0 and received != expected:
+        raise ValueError("O valor confirmado pelo Asaas não corresponde ao plano contratado.")
+
+
 def apply_asaas_webhook(db: Session, payload: dict) -> dict:
     event_id = str(payload.get("id") or "").strip()
     event_type = str(payload.get("event") or "").strip().upper()
@@ -326,22 +453,26 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
         if event_type == "CHECKOUT_PAID":
             plan.billing_provider = "asaas"
             if requested_plan_code:
+                billing_cycle = requested_cycle or "monthly"
+                _validate_checkout_amount(payload, requested_plan_code, billing_cycle)
                 definition = get_plan_definition(requested_plan_code)
                 plan.plan_code = requested_plan_code
-                plan.billing_cycle = requested_cycle or "monthly"
+                plan.billing_cycle = billing_cycle
                 plan.monthly_job_limit = 999999
                 plan.unlimited = False
                 if definition:
-                    plan.subscription_value_cents = int(definition[f"{plan.billing_cycle}_price_cents"])
+                    plan.subscription_value_cents = int(definition[f"{billing_cycle}_price_cents"])
             plan.billing_status = "active"
             plan.current_period_start = datetime.now(timezone.utc)
             tenant = db.get(Tenant, plan.tenant_id)
             if tenant:
                 tenant.billing_status = "active"
+            _forget_pending_checkout(db, checkout_id)
 
         elif event_type in {"CHECKOUT_CANCELED", "CHECKOUT_EXPIRED"}:
             if checkout_id and plan.asaas_checkout_id == checkout_id:
                 plan.asaas_checkout_id = None
+            _forget_pending_checkout(db, checkout_id)
 
         elif event_type in {"PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"} and plan.billing_provider == "asaas":
             plan.billing_status = "active"
@@ -390,4 +521,5 @@ def apply_asaas_webhook(db: Session, payload: dict) -> dict:
         "event": event_type,
         "tenant_id": tenant_id,
         "billing_status": plan.billing_status if plan else None,
+        "plan_code": plan.plan_code if plan else None,
     }

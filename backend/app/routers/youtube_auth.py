@@ -7,14 +7,38 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user
 from ..config import settings
 from ..database import get_db
-from ..models import User
 from ..errors import YouTubeAuthError, YouTubeQuotaError
+from ..models import User, YouTubeConnection
 from ..schemas import OAuthStartResponse, OAuthStatusResponse, YouTubeLiveAudience, YouTubeLiveMetrics
+from ..services.billing import ACTIVE_BILLING, ensure_plan
+from ..services.plans import can_connect_channel
 from ..services.youtube_live_audience import get_live_audience
 from ..services.youtube_metrics import get_live_channel_metrics
 from ..services.youtube_oauth import build_authorization_url, complete_oauth, disconnect, get_connection_status
 
 router = APIRouter(prefix="/youtube", tags=["youtube"])
+
+
+def _ensure_channel_connection_allowed(user: User, db: Session) -> None:
+    if user.role == "superadmin":
+        return
+
+    # Trocar a Conta Google de um perfil que já ocupa uma vaga não aumenta a
+    # quantidade de canais do tenant e, portanto, continua permitido.
+    current = db.query(YouTubeConnection).filter(YouTubeConnection.user_id == user.id).first()
+    if current and current.token_json:
+        return
+
+    plan = ensure_plan(db, user.tenant_id)
+    if settings.billing_require_active and plan.billing_status not in ACTIVE_BILLING:
+        raise HTTPException(
+            status_code=402,
+            detail="Sua assinatura ainda não está ativa. Conclua o pagamento para conectar um canal do YouTube.",
+        )
+
+    allowed, reason = can_connect_channel(db, plan)
+    if not allowed:
+        raise HTTPException(status_code=402, detail=reason)
 
 
 @router.get("/oauth/status", response_model=OAuthStatusResponse)
@@ -48,6 +72,7 @@ def live_audience(user: User = Depends(get_current_user), db: Session = Depends(
 
 @router.get("/oauth/start", response_model=OAuthStartResponse)
 def oauth_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _ensure_channel_connection_allowed(user, db)
     try:
         return {"authorization_url": build_authorization_url(db, user)}
     except RuntimeError as exc:
@@ -63,6 +88,7 @@ def oauth_authorize(user: User = Depends(get_current_user), db: Session = Depend
     ShortsFlow session and avoids CORS/network failures caused by an external
     NEXT_PUBLIC_API_URL.
     """
+    _ensure_channel_connection_allowed(user, db)
     try:
         return RedirectResponse(url=build_authorization_url(db, user), status_code=302)
     except RuntimeError as exc:
