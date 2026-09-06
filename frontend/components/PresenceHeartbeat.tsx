@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
+import { authMe } from "@/lib/api";
 
 export default function PresenceHeartbeat() {
   useEffect(() => {
     let stopped = false;
+    let interval: number | null = null;
 
     async function ping() {
       if (stopped || document.visibilityState === "hidden") return;
@@ -16,20 +18,26 @@ export default function PresenceHeartbeat() {
           headers: { "Content-Type": "application/json" },
         });
       } catch {
-        // Páginas públicas e oscilações de rede não devem interferir na UI.
+        // Oscilações de rede não devem interferir na UI nem na autenticação.
       }
     }
 
-    void ping();
-    const interval = window.setInterval(() => void ping(), 30_000);
     const onVisibility = () => {
       if (document.visibilityState === "visible") void ping();
     };
-    document.addEventListener("visibilitychange", onVisibility);
+
+    authMe()
+      .then(() => {
+        if (stopped) return;
+        void ping();
+        interval = window.setInterval(() => void ping(), 30_000);
+        document.addEventListener("visibilitychange", onVisibility);
+      })
+      .catch(() => undefined);
 
     return () => {
       stopped = true;
-      window.clearInterval(interval);
+      if (interval != null) window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
