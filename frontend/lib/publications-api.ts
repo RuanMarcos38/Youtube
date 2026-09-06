@@ -97,8 +97,13 @@ export type TikTokMetrics = {
   };
 };
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { credentials: "include", cache: "no-store" });
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+  });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try {
@@ -112,6 +117,14 @@ async function request<T>(path: string): Promise<T> {
 
 export const youtubePublicationClips = () =>
   request<{ platform: "youtube"; availability: YouTubeAvailability; clips: Clip[] }>("/api/publications/youtube");
+
+export const youtubePublishedClips = () =>
+  request<{ platform: "youtube"; clips: Clip[] }>("/api/publications/youtube/history");
+
+export const deleteYouTubePublication = (clipId: number) =>
+  request<{ ok: boolean; clip_id: number; youtube_video_id: string; already_missing: boolean }>(`/api/publications/youtube/${clipId}`, {
+    method: "DELETE",
+  });
 
 export const tiktokPublicationClips = () =>
   request<{ platform: "tiktok"; clips: TikTokPublicationClip[] }>("/api/publications/tiktok");
