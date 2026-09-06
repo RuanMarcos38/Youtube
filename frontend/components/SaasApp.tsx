@@ -1,11 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import AdminPanel from "./AdminPanel";
 import Dashboard from "./Dashboard";
 import BrandLogo from "./BrandLogo";
-import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam, publicConfig } from "@/lib/api";
-import type { PublicConfig, TeamUser, UserProfile } from "@/lib/types";
+import { authActivate, authLogin, authLogout, authMe, publicConfig } from "@/lib/api";
+import type { PublicConfig, UserProfile } from "@/lib/types";
 
 const CHECKOUT = "/planos";
 const UPGRADE = "/planos";
@@ -54,13 +53,6 @@ export default function SaasApp() {
   const [activationPassword, setActivationPassword] = useState("");
   const [activationError, setActivationError] = useState("");
   const [activationLoading, setActivationLoading] = useState(false);
-  const [profilesOpen, setProfilesOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [team, setTeam] = useState<TeamUser[]>([]);
-  const [teamName, setTeamName] = useState("");
-  const [teamEmail, setTeamEmail] = useState("");
-  const [teamPassword, setTeamPassword] = useState("");
-  const [teamError, setTeamError] = useState("");
 
   useEffect(() => {
     void publicConfig().then(setConfig).catch(() => setConfig(DEFAULT_CONFIG));
@@ -103,35 +95,6 @@ export default function SaasApp() {
   async function logout() {
     await authLogout().catch(() => undefined);
     setUser(null);
-    setProfilesOpen(false);
-    setAdminOpen(false);
-  }
-
-  async function openProfiles() {
-    const next = !profilesOpen;
-    setProfilesOpen(next);
-    setTeamError("");
-    if (next && user && ["owner", "admin", "superadmin"].includes(user.role)) {
-      try {
-        setTeam(await listTeam());
-      } catch (err) {
-        setTeamError(err instanceof Error ? err.message : "Falha ao carregar perfis.");
-      }
-    }
-  }
-
-  async function addProfile(event: FormEvent) {
-    event.preventDefault();
-    setTeamError("");
-    try {
-      await createTeamUser(teamName, teamEmail, teamPassword, "member");
-      setTeam(await listTeam());
-      setTeamName("");
-      setTeamEmail("");
-      setTeamPassword("");
-    } catch (err) {
-      setTeamError(err instanceof Error ? err.message : "Falha ao criar perfil.");
-    }
   }
 
   if (checking) {
@@ -188,7 +151,6 @@ export default function SaasApp() {
   }
 
   const billingActive = user.role === "superadmin" || ACTIVE_BILLING.has(user.billing_status);
-  const usageLabel = user.unlimited ? `${user.jobs_used} processamentos • ilimitado` : `${user.jobs_used}/${user.monthly_job_limit} processamentos`;
 
   return (
     <div className="min-h-screen bg-[#f7f7f7]">
@@ -200,28 +162,12 @@ export default function SaasApp() {
           <div className="flex items-center gap-2">
             {!billingActive && <a href={user.checkout_url || config.checkout_url || CHECKOUT} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube min-h-9 px-3 py-2">Assine já</a>}
             {billingActive && !user.unlimited && user.role !== "superadmin" && <a href={user.upgrade_url || config.upgrade_url || UPGRADE} target="_blank" rel="noreferrer" className="sf-button sf-button-youtube min-h-9 px-3 py-2">Upgrade ilimitado</a>}
-            {user.role === "superadmin" && <button onClick={() => setAdminOpen((value) => !value)} className="sf-button sf-button-primary min-h-9 px-3 py-2">Administrador</button>}
-            {["owner", "admin", "superadmin"].includes(user.role) && <button onClick={openProfiles} className="sf-button sf-button-outline min-h-9 px-3 py-2">Perfis e limites</button>}
+            <a href="/planos" className="sf-button sf-button-outline min-h-9 px-3 py-2">Planos</a>
+            <a href="/configuracoes" className="sf-button sf-button-primary min-h-9 px-3 py-2">Configurações</a>
             <button onClick={logout} className="sf-button sf-button-outline min-h-9 px-3 py-2">Sair</button>
           </div>
         </div>
       </div>
-
-      {adminOpen && user.role === "superadmin" && <AdminPanel onClose={() => setAdminOpen(false)} />}
-
-      {profilesOpen && ["owner", "admin", "superadmin"].includes(user.role) && (
-        <section className="border-b border-[#e6e6e6] bg-white px-4 py-6 md:px-8">
-          <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1fr_.8fr]">
-            <div>
-              <h3 className="font-black">Perfis desta área de trabalho</h3>
-              <p className="mt-1 text-xs text-[#6e7971]">Cada perfil entra com sua própria senha e conecta seu próprio canal do YouTube.</p>
-              <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-xs font-bold text-red-700">Plano atual: {user.plan_code} · uso mensal: {usageLabel}</div>
-              <div className="mt-4 grid gap-2">{team.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl border border-[#e6e6e6] bg-[#f7f7f7] p-3 text-xs"><div><strong>{member.display_name}</strong><div className="mt-1 text-[#6e7971]">{member.email} • {member.role}</div></div><span className={`rounded-full px-2.5 py-1 font-bold ${member.youtube_connected ? "bg-red-50 text-red-700" : "bg-[#eeeeee] text-[#666]"}`}>{member.youtube_connected ? member.youtube_channel_title || "YouTube conectado" : "Sem canal"}</span></div>)}</div>
-            </div>
-            <form onSubmit={addProfile} className="sf-card p-5 text-[#111]"><h3 className="font-black">Criar novo perfil</h3><div className="mt-4 grid gap-3"><input required placeholder="Nome" value={teamName} onChange={(e) => setTeamName(e.target.value)} className="sf-input px-3 py-2.5" /><input required type="email" placeholder="E-mail" value={teamEmail} onChange={(e) => setTeamEmail(e.target.value)} className="sf-input px-3 py-2.5" /><input required minLength={8} type="password" placeholder="Senha inicial" value={teamPassword} onChange={(e) => setTeamPassword(e.target.value)} className="sf-input px-3 py-2.5" />{teamError && <div className="rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{teamError}</div>}<button className="sf-button sf-button-youtube">Adicionar perfil</button></div></form>
-          </div>
-        </section>
-      )}
 
       {!billingActive ? (
         <main className="mx-auto max-w-4xl px-4 py-16 text-center md:px-8">

@@ -884,8 +884,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               </div>
 
               <div className="sf-card p-5">
-                <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Perfis e limites</div>
-                <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Plano {user.plan_code || "starter"}</h2>
+                <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Uso operacional</div>
+                <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Processamentos do mês</h2>
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs"><span className="font-semibold text-[#222]">Uso mensal</span><span className="text-[#666]">{user.unlimited ? `${fmtExact(user.jobs_used)} processamentos` : `${fmtExact(user.jobs_used)} de ${fmtExact(user.monthly_job_limit)}`}</span></div>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#ececec]"><div className="h-full rounded-full bg-[#ff0000]" style={{ width: `${usagePercent}%` }} /></div>
@@ -895,6 +895,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(readyClips)}</div><div className="text-[#777]">cortes</div></div>
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{user.unlimited ? "∞" : fmtExact(user.jobs_remaining ?? 0)}</div><div className="text-[#777]">restantes</div></div>
                 </div>
+                <a href="/configuracoes" className="sf-button sf-button-outline mt-4 w-full justify-center">Gerenciar conta</a>
               </div>
             </aside>
           </div>
