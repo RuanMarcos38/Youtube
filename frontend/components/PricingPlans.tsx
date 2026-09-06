@@ -5,6 +5,8 @@ import BrandLogo from "./BrandLogo";
 import { createPlanCheckout, getBillingPlans, getCurrentUser, registerTrial } from "@/lib/billing-api";
 import type { BillingPlan, BillingPlansResponse, UserProfile } from "@/lib/types";
 
+const PAID_PLAN_CODES = new Set(["creator", "pro", "business", "agency"]);
+
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 }
@@ -14,6 +16,10 @@ function usageText(used: number | undefined, limit: number | null | undefined, u
   return `${used || 0} de ${limit} ${unit}`;
 }
 
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 export default function PricingPlans() {
   const [catalog, setCatalog] = useState<BillingPlansResponse | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -21,6 +27,8 @@ export default function PricingPlans() {
   const [loadingCode, setLoadingCode] = useState("");
   const [pendingPlan, setPendingPlan] = useState("");
   const [error, setError] = useState("");
+  const [paymentNotice, setPaymentNotice] = useState("");
+  const [paymentSyncing, setPaymentSyncing] = useState(false);
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
@@ -31,6 +39,62 @@ export default function PricingPlans() {
   useEffect(() => {
     void getBillingPlans().then(setCatalog).catch((err) => setError(err instanceof Error ? err.message : "Não foi possível carregar os planos."));
     void getCurrentUser().then(setUser).catch(() => setUser(null));
+  }, []);
+
+  useEffect(() => {
+    const checkout = new URLSearchParams(window.location.search).get("checkout");
+    if (!checkout) return;
+
+    if (checkout === "cancel") {
+      setPaymentNotice("Pagamento cancelado. Nenhuma alteração foi feita no seu plano atual.");
+      window.history.replaceState({}, "", "/planos");
+      return;
+    }
+    if (checkout === "expired") {
+      setPaymentNotice("O checkout expirou sem pagamento. Seu plano atual foi mantido.");
+      window.history.replaceState({}, "", "/planos");
+      return;
+    }
+    if (checkout !== "success") return;
+
+    let stopped = false;
+    setPaymentSyncing(true);
+    setPaymentNotice("Pagamento concluído. Aguardando a confirmação financeira para liberar seu plano automaticamente...");
+
+    async function synchronizePaidPlan() {
+      // O retorno do checkout nunca ativa acesso sozinho. Esta tela apenas
+      // consulta o backend até o webhook autenticado do Asaas confirmar o plano.
+      for (let attempt = 0; attempt < 60 && !stopped; attempt += 1) {
+        try {
+          const current = await getCurrentUser();
+          if (stopped) return;
+          setUser(current);
+          const paid = current.billing_provider === "asaas"
+            && ["active", "paid"].includes(current.billing_status)
+            && PAID_PLAN_CODES.has(current.plan_code);
+          if (paid) {
+            setPaymentSyncing(false);
+            setPaymentNotice(`Pagamento confirmado. Plano ${current.plan_name || current.plan_code} liberado automaticamente.`);
+            window.history.replaceState({}, "", "/planos");
+            return;
+          }
+        } catch {
+          // Durante o retorno do checkout o deploy/rede pode oscilar por alguns
+          // segundos. A próxima consulta continua sem transformar callback em
+          // confirmação de pagamento.
+        }
+        await wait(2000);
+      }
+      if (!stopped) {
+        setPaymentSyncing(false);
+        setPaymentNotice("O pagamento foi concluído e a confirmação do Asaas ainda está em processamento. Esta página continuará reconhecendo o plano ao ser atualizada, sem necessidade de um novo pagamento.");
+      }
+    }
+
+    void synchronizePaidPlan();
+    return () => {
+      stopped = true;
+    };
   }, []);
 
   const paidPlans = (catalog?.plans || []).filter((plan) => plan.code !== "trial");
@@ -103,6 +167,12 @@ export default function PricingPlans() {
           </div>
         </section>
 
+        {paymentNotice && (
+          <div className={`mx-auto mt-8 max-w-3xl rounded-xl border p-4 text-center text-sm font-bold ${paymentSyncing ? "border-amber-200 bg-amber-50 text-amber-800" : "border-[#ddecbb] bg-white text-[#52720f]"}`}>
+            {paymentNotice}
+          </div>
+        )}
+
         {trial && (
           <section className="mt-10 grid items-center gap-5 rounded-2xl border border-[#ddecbb] bg-white p-6 shadow-sm md:grid-cols-[1fr_auto] md:p-8">
             <div>
@@ -161,8 +231,8 @@ export default function PricingPlans() {
                   {plan.features.map((feature) => <div key={feature} className="flex gap-2"><span className="font-black text-[#729b19]">✓</span><span>{feature}</span></div>)}
                 </div>
 
-                <button disabled={loadingCode === plan.code || activeAsaas} onClick={() => void openCheckout(plan)} className={`mt-6 rounded-xl px-5 py-3 text-sm font-black disabled:opacity-50 ${plan.featured ? "bg-[#111] text-white" : "bg-[#b8f238] text-[#111]"}`}>
-                  {loadingCode === plan.code ? "Abrindo checkout..." : currentPlan ? "Plano atual" : activeAsaas ? "Troca protegida" : user ? `Assinar ${plan.name}` : "Criar conta e assinar"}
+                <button disabled={loadingCode === plan.code || activeAsaas || paymentSyncing} onClick={() => void openCheckout(plan)} className={`mt-6 rounded-xl px-5 py-3 text-sm font-black disabled:opacity-50 ${plan.featured ? "bg-[#111] text-white" : "bg-[#b8f238] text-[#111]"}`}>
+                  {paymentSyncing ? "Confirmando pagamento..." : loadingCode === plan.code ? "Abrindo checkout..." : currentPlan ? "Plano atual" : activeAsaas ? "Troca protegida" : user ? `Assinar ${plan.name}` : "Criar conta e assinar"}
                 </button>
               </article>
             );
