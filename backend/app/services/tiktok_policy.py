@@ -32,6 +32,11 @@ UNAUDITED_MARKERS = (
     "não auditado",
     "nao auditado",
 )
+DRAFT_LIMIT_MARKERS = (
+    "spam_risk_too_many_pending_share",
+    "limite de rascunhos pendentes",
+    "rascunhos pendentes",
+)
 
 
 def _setting_key(user_id: int) -> str:
@@ -65,6 +70,11 @@ def _as_utc(value: datetime | None) -> datetime:
 def is_unaudited_error_text(value: str | None) -> bool:
     text = str(value or "").strip().lower()
     return bool(text) and any(marker in text for marker in UNAUDITED_MARKERS)
+
+
+def is_draft_limit_error_text(value: str | None) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text) and any(marker in text for marker in DRAFT_LIMIT_MARKERS)
 
 
 def mark_unaudited_public_block(db: Session, *, user_id: int, commit: bool = True) -> datetime:
@@ -198,6 +208,10 @@ def recover_retryable_draft_uploads(db: Session, *, user_id: int | None = None, 
         or_(
             TikTokPost.status == "draft_sent",
             and_(
+                TikTokPost.status == "paused_limit",
+                TikTokPost.error.is_not(None),
+            ),
+            and_(
                 TikTokPost.status.in_(["processing", "submitted"]),
                 TikTokPost.privacy_level == "DRAFT_INBOX",
                 TikTokPost.updated_at <= cutoff,
@@ -209,6 +223,8 @@ def recover_retryable_draft_uploads(db: Session, *, user_id: int | None = None, 
 
     changed = 0
     for post in query.order_by(TikTokPost.user_id.asc(), TikTokPost.id.asc()).all():
+        if post.status == "paused_limit" and not is_draft_limit_error_text(post.error):
+            continue
         post.status = "ready"
         post.publish_id = None
         post.error = DRAFT_RETRY_MESSAGE

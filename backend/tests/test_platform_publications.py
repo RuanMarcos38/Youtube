@@ -172,6 +172,34 @@ def test_tiktok_publications_release_stale_draft_upload_processing():
         db.close()
 
 
+def test_tiktok_publications_release_pending_share_limit_for_retry():
+    initialize_database()
+    db = SessionLocal()
+    try:
+        user, clip = _fixture(db)
+        post = TikTokPost(
+            user_id=user.id,
+            clip_id=clip.id,
+            privacy_level="DRAFT_INBOX",
+            status="paused_limit",
+            publish_id=f"pub-{uuid.uuid4().hex[:8]}",
+            error="O TikTok atingiu o limite de rascunhos pendentes enviados pela API.",
+        )
+        db.add(post)
+        db.commit()
+
+        queue = tiktok_publications(user=user, db=db)["clips"]
+        item = next(value for value in queue if value["id"] == clip.id)
+        refreshed = db.get(TikTokPost, post.id)
+
+        assert refreshed.status == "ready"
+        assert refreshed.publish_id is None
+        assert item["tiktok_status"] == "ready"
+        assert "reenvio" in (item["tiktok_error"] or "")
+    finally:
+        db.close()
+
+
 def test_tiktok_post_only_disappears_after_publish_complete(monkeypatch):
     initialize_database()
     db = SessionLocal()
