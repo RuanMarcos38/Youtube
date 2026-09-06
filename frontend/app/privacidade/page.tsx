@@ -12,7 +12,7 @@ export default function PrivacyPage() {
         <a href="/integracoes" className="text-sm font-bold text-[#5f8500]">← Voltar às integrações do ShortsFlow AI</a>
         <p className="mt-8 text-xs font-bold uppercase tracking-[0.22em] text-[#75a900]">ShortsFlow AI</p>
         <h1 className="mt-3 text-4xl font-black tracking-tight md:text-5xl">Política de Privacidade</h1>
-        <p className="mt-4 text-sm text-[#6d776f]">Última atualização: 5 de setembro de 2026.</p>
+        <p className="mt-4 text-sm text-[#6d776f]">Última atualização: 6 de setembro de 2026.</p>
 
         <div className="mt-10 space-y-8 leading-7 text-[#303934]">
           <section>
@@ -30,6 +30,14 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-bold text-[#111815]">3. Uso dos Serviços de API do YouTube</h2>
             <p className="mt-2">O ShortsFlow AI utiliza os Serviços de API do YouTube. A conexão do canal ocorre exclusivamente pelo OAuth 2.0 do Google. O ShortsFlow AI não solicita nem armazena a senha da Conta Google ou do YouTube.</p>
             <p className="mt-2">Os dados autorizados são usados para identificar o canal conectado e executar, mediante ação do usuário, funcionalidades de consulta, publicação e gerenciamento compatíveis com as permissões concedidas.</p>
+            <p className="mt-2">Atualmente a integração pode solicitar permissões para enviar vídeos ao YouTube, visualizar informações da conta/canal e consultar relatórios do YouTube Analytics. Cada usuário escolhe explicitamente a própria Conta Google no fluxo oficial do Google; uma conta do administrador da plataforma não é vinculada automaticamente ao perfil do cliente.</p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-bold text-[#111815]">3.1. Uso limitado de dados Google</h2>
+            <p className="mt-2">O uso e a transferência, pelo ShortsFlow AI, de informações recebidas das APIs do Google obedecem à Política de Dados do Usuário dos Serviços de API do Google, incluindo os requisitos de Limited Use.</p>
+            <p className="mt-2">Dados Google/YouTube são utilizados somente para fornecer funcionalidades visíveis e solicitadas pelo usuário, como identificar o canal conectado, consultar métricas autorizadas e publicar conteúdo escolhido pelo próprio usuário. Não utilizamos dados obtidos pelas APIs do Google para publicidade personalizada, criação de perfis publicitários ou venda de dados pessoais.</p>
+            <p className="mt-2">O acesso humano a dados Google do usuário é limitado a situações necessárias para suporte solicitado pelo próprio usuário, segurança, prevenção de abuso ou cumprimento de obrigação legal, sempre restrito ao mínimo necessário.</p>
           </section>
 
           <section>
