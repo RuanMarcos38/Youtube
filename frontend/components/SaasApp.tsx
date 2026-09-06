@@ -7,8 +7,8 @@ import BrandLogo from "./BrandLogo";
 import { authActivate, authLogin, authLogout, authMe, createTeamUser, listTeam, publicConfig } from "@/lib/api";
 import type { PublicConfig, TeamUser, UserProfile } from "@/lib/types";
 
-const CHECKOUT = "https://pay.kiwify.com.br/tBv68U5";
-const UPGRADE = "https://pay.kiwify.com.br/8n30IZ9";
+const CHECKOUT = "/planos";
+const UPGRADE = "/planos";
 
 const DEFAULT_CONFIG: PublicConfig = {
   brand_name: "ShortsFlow AI",

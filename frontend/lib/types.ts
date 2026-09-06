@@ -186,6 +186,7 @@ export type KiwifyAdminSettings = {
   webhook_connected?: boolean;
   checkout_url: string;
   upgrade_url: string;
+  asaas_enabled?: boolean;
   events: string[];
   base_product_mapped?: boolean;
   upgrade_product_mapped?: boolean;

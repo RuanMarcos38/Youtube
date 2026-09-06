@@ -9,6 +9,7 @@ from ..auth import require_superadmin
 from ..config import settings
 from ..database import get_db
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User, YouTubeConnection
+from ..services.asaas import asaas_configured
 from ..services.billing import ensure_plan, jobs_used
 from ..services.download_probe import store_download_probe_result
 from ..services.downloader import validate_download_session
@@ -64,8 +65,8 @@ class PublicConfigUpdate(BaseModel):
     benefits: list[str] = Field(min_length=4, max_length=4)
     login_title: str = Field(min_length=3, max_length=120)
     login_description: str = Field(min_length=5, max_length=300)
-    checkout_url: str = Field(min_length=10, max_length=500)
-    upgrade_url: str = Field(min_length=10, max_length=500)
+    checkout_url: str = Field(min_length=1, max_length=500)
+    upgrade_url: str = Field(min_length=1, max_length=500)
     base_plan_job_limit: int = Field(ge=1, le=100000)
 
 
@@ -100,9 +101,29 @@ def _setting_value(db: Session, key: str) -> str:
     return row.value.strip() if row and row.value else ""
 
 
+def _plans_url() -> str:
+    return f"{settings.frontend_url.rstrip('/')}/planos"
+
+
+def _admin_public_config(db: Session) -> dict:
+    payload = get_public_config(db)
+    asaas_enabled = asaas_configured()
+    payload["asaas_enabled"] = asaas_enabled
+    payload["plans_url"] = "/planos"
+    if asaas_enabled:
+        plans_url = _plans_url()
+        payload["checkout_url"] = plans_url
+        payload["upgrade_url"] = plans_url
+    return payload
+
+
+def _is_checkout_link(value: str) -> bool:
+    return value.startswith("https://") or (value.startswith("/") and not value.startswith("//"))
+
+
 @router.get("/system-config")
 def system_config(_: User = Depends(require_superadmin), db: Session = Depends(get_db)):
-    return get_public_config(db)
+    return _admin_public_config(db)
 
 
 @router.put("/system-config")
@@ -111,11 +132,12 @@ def save_system_config(
     _: User = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
-    if not payload.checkout_url.startswith("https://") or not payload.upgrade_url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="Os links de checkout e upgrade precisam usar HTTPS.")
+    if not _is_checkout_link(payload.checkout_url) or not _is_checkout_link(payload.upgrade_url):
+        raise HTTPException(status_code=400, detail="Os links de checkout e upgrade precisam usar HTTPS ou rota interna iniciada por '/'.")
     if any(not item.strip() for item in payload.benefits):
         raise HTTPException(status_code=400, detail="Preencha os quatro benefícios exibidos na página de entrada.")
-    return update_public_config(db, payload.model_dump())
+    update_public_config(db, payload.model_dump())
+    return _admin_public_config(db)
 
 
 @router.get("/dashboard")
@@ -294,12 +316,16 @@ def kiwify_settings(_: User = Depends(require_superadmin), db: Session = Depends
     public_config = get_public_config(db)
     auth = kiwify_auth_status()
     webhook_id = _setting_value(db, "kiwify_webhook_id")
+    asaas_enabled = asaas_configured()
+    checkout_url = _plans_url() if asaas_enabled else public_config["checkout_url"]
+    upgrade_url = _plans_url() if asaas_enabled else public_config["upgrade_url"]
     return {
         "webhook_url": _kiwify_webhook_url(db),
         "webhook_id": webhook_id,
         "webhook_connected": bool(webhook_id),
-        "checkout_url": public_config["checkout_url"],
-        "upgrade_url": public_config["upgrade_url"],
+        "checkout_url": checkout_url,
+        "upgrade_url": upgrade_url,
+        "asaas_enabled": asaas_enabled,
         "events": [
             "compra_aprovada",
             "compra_reembolsada",

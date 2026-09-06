@@ -44,6 +44,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [testingDownload, setTestingDownload] = useState(false);
   const [connectingKiwify, setConnectingKiwify] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const asaasEnabled = Boolean(systemConfig?.asaas_enabled);
 
   async function refresh() {
     setLoading(true);
@@ -224,8 +225,9 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
             {systemConfig.benefits.slice(0, 4).map((benefit, index) => <label key={index} className="text-xs font-black">Benefício {index + 1}<input value={benefit} onChange={(e) => setBenefit(index, e.target.value)} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>)}
             <label className="text-xs font-black">Título do login<input value={systemConfig.login_title} onChange={(e) => setSystemConfig({ ...systemConfig, login_title: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
             <label className="text-xs font-black">Texto do login<input value={systemConfig.login_description} onChange={(e) => setSystemConfig({ ...systemConfig, login_description: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
-            <label className="text-xs font-black">Checkout assinatura<input value={systemConfig.checkout_url} onChange={(e) => setSystemConfig({ ...systemConfig, checkout_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
-            <label className="text-xs font-black">Checkout Upgrade<input value={systemConfig.upgrade_url} onChange={(e) => setSystemConfig({ ...systemConfig, upgrade_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            {asaasEnabled && <div className="lg:col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-800">Checkout Asaas ativo. Os botões comerciais apontam para a página de planos e cada assinatura é criada pela API do Asaas.</div>}
+            <label className="text-xs font-black">{asaasEnabled ? "Checkout Asaas assinatura" : "Checkout assinatura"}<input value={systemConfig.checkout_url} onChange={(e) => setSystemConfig({ ...systemConfig, checkout_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
+            <label className="text-xs font-black">{asaasEnabled ? "Checkout Asaas upgrade" : "Checkout Upgrade"}<input value={systemConfig.upgrade_url} onChange={(e) => setSystemConfig({ ...systemConfig, upgrade_url: e.target.value })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
             <label className="text-xs font-black">Limite mensal padrão<input type="number" min={1} max={100000} value={systemConfig.base_plan_job_limit} onChange={(e) => setSystemConfig({ ...systemConfig, base_plan_job_limit: Math.max(1, Number(e.target.value) || 1) })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
           </div>
         </form>}
@@ -240,7 +242,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
 
           <div className="sf-card p-5">
             <div className="flex items-start justify-between gap-3">
-              <div><h3 className="font-black">Integração Kiwify</h3><p className="mt-1 text-xs text-[#6e7971]">API + webhook para ativar, renovar e bloquear planos automaticamente conforme os eventos de pagamento.</p></div>
+              <div><h3 className="font-black">Integração Kiwify legado</h3><p className="mt-1 text-xs text-[#6e7971]">Compatibilidade com clientes antigos. Novas assinaturas usam o checkout Asaas pela página de planos.</p></div>
               <span className={`rounded-full px-3 py-1 text-[10px] font-black ${kiwify?.webhook_connected && kiwify?.credentials_configured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{kiwify?.webhook_connected && kiwify?.credentials_configured ? "Conectada" : "Configurar"}</span>
             </div>
             <div className="mt-4 rounded-xl bg-[#f4f7f0] p-3 text-[11px] font-bold break-all">{kiwify?.webhook_url || "Carregando URL do webhook..."}</div>
@@ -252,7 +254,7 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
             </form>
             {kiwifyFeedback.text && <div role="status" aria-live="polite" className={`mt-3 rounded-xl border p-3 text-xs font-bold ${kiwifyFeedback.kind === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : kiwifyFeedback.kind === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-sky-200 bg-sky-50 text-sky-800"}`}>{kiwifyFeedback.text}</div>}
             <p className="mt-3 text-[10px] leading-4 text-[#7b857e]">Após a primeira conexão, as credenciais ficam no volume privado do servidor. O Client Secret não é exibido novamente no navegador. O sistema valida a conta pela API oficial e cria ou atualiza o webhook existente sem duplicar.</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2"><a href={kiwify?.checkout_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#b8f238] px-4 py-3 text-center text-xs font-black">Assine já</a><a href={kiwify?.upgrade_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0d241d] px-4 py-3 text-center text-xs font-black text-white">Upgrade ilimitado</a></div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2"><a href={kiwify?.checkout_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#b8f238] px-4 py-3 text-center text-xs font-black">Abrir planos Asaas</a><a href={kiwify?.upgrade_url} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0d241d] px-4 py-3 text-center text-xs font-black text-white">Upgrade pelo Asaas</a></div>
           </div>
         </div>
 
