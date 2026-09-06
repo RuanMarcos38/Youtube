@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,9 +7,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from .config import settings
-from .routers import admin, auth, billing, clips, diagnostics, editor_ai, jobs, media, publications, system, tiktok_auth, videos, youtube_auth
+from .routers import admin, admin_insights, auth, billing, clips, diagnostics, editor_ai, jobs, media, publications, system, tiktok_auth, videos, youtube_auth
 from .services.bootstrap import ensure_superadmin
 from .services.caption_removal_runtime import install_editor_api_caption_queue
+from .services.daily_admin_audit import daily_admin_audit_loop
 from .services.database_bootstrap import initialize_database
 
 
@@ -22,7 +24,13 @@ async def lifespan(_: FastAPI):
     settings.data_path.mkdir(parents=True, exist_ok=True)
     initialize_database()
     ensure_superadmin()
-    yield
+    audit_task = asyncio.create_task(daily_admin_audit_loop())
+    try:
+        yield
+    finally:
+        audit_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await audit_task
 
 
 app = FastAPI(title=settings.app_name, version="2.6.1", lifespan=lifespan)
@@ -50,6 +58,7 @@ app.include_router(system.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
+app.include_router(admin_insights.router, prefix=settings.api_prefix)
 app.include_router(diagnostics.router, prefix=settings.api_prefix)
 app.include_router(videos.router, prefix=settings.api_prefix)
 app.include_router(jobs.router, prefix=settings.api_prefix)
