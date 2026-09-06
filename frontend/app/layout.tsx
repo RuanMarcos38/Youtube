@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import DiagnosticsAssistant from "@/components/DiagnosticsAssistant";
 import { LanguageRuntime } from "@/components/LanguageSelector";
 import LiveAudienceCard from "@/components/LiveAudienceCard";
 import PlatformNavigation from "@/components/PlatformNavigation";
+import PresenceHeartbeat from "@/components/PresenceHeartbeat";
 import PublishingEnhancements from "@/components/PublishingEnhancements";
 import PublishingUiOrganizer from "@/components/PublishingUiOrganizer";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
@@ -25,12 +27,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="pt-BR" className={inter.variable}>
       <body>
         <LanguageRuntime />
+        <PresenceHeartbeat />
         {children}
         <PublishingEnhancements />
         <PublishingUiOrganizer />
         <LiveAudienceCard />
         <PlatformNavigation />
         <YoutubeAccountSwitcher />
+        <DiagnosticsAssistant />
         <footer className="border-t border-[#e4e7ec] bg-white px-6 py-5 pb-24 text-center text-[11px] text-[#667085] xl:pb-5">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-5 gap-y-2">
             <span>ShortsFlow · R2R Marketing Digital</span>
