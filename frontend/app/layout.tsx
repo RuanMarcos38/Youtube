@@ -7,6 +7,7 @@ import PlatformNavigation from "@/components/PlatformNavigation";
 import PresenceHeartbeat from "@/components/PresenceHeartbeat";
 import PublishingEnhancements from "@/components/PublishingEnhancements";
 import PublishingUiOrganizer from "@/components/PublishingUiOrganizer";
+import YouTubePublishedManager from "@/components/YouTubePublishedManager";
 import YoutubeAccountSwitcher from "@/components/YoutubeAccountSwitcher";
 import "./globals.css";
 import "./publication-policy.css";
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <PresenceHeartbeat />
         {children}
         <PublishingEnhancements />
+        <YouTubePublishedManager />
         <PublishingUiOrganizer />
         <LiveAudienceCard />
         <PlatformNavigation />
