@@ -48,3 +48,20 @@ def test_authorization_forces_google_account_chooser(monkeypatch):
     assert captured["prompt"] == "select_account consent"
     assert connection.oauth_state == "oauth-state"
     assert connection.code_verifier == "pkce-verifier"
+
+
+def test_management_scope_is_requested_only_for_new_authorization():
+    assert "https://www.googleapis.com/auth/youtube.force-ssl" in youtube_oauth.SCOPES
+    assert "https://www.googleapis.com/auth/youtube.force-ssl" not in youtube_oauth.BASE_SCOPES
+
+
+def test_legacy_tokens_keep_legacy_scopes_when_scope_list_is_missing():
+    assert youtube_oauth._stored_scopes({"token": "legacy"}) == youtube_oauth.BASE_SCOPES
+
+
+def test_stored_token_scopes_are_preserved_exactly():
+    stored = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.readonly",
+    ]
+    assert youtube_oauth._stored_scopes({"scopes": stored}) == stored
