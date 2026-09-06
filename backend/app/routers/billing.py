@@ -1,4 +1,5 @@
 import hmac
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -22,6 +23,7 @@ from ..services.system_config import get_public_config_safe
 
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+logger = logging.getLogger(__name__)
 
 
 class AsaasCheckoutRequest(BaseModel):
@@ -41,6 +43,15 @@ def _apply_new_checkout_route(payload: dict) -> dict:
         payload["checkout_url"] = "/planos"
         payload["upgrade_url"] = "/planos"
     return payload
+
+
+def _asaas_environment_label() -> str:
+    base = settings.asaas_base_url.lower()
+    if "api-sandbox.asaas.com" in base:
+        return "sandbox"
+    if "api.asaas.com" in base:
+        return "production"
+    return "custom"
 
 
 @router.get("/public")
@@ -90,6 +101,16 @@ def create_asaas_checkout(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        # Never log the API key or webhook token. The tenant/plan/environment
+        # are enough to diagnose provider failures safely in EasyPanel.
+        logger.warning(
+            "Asaas checkout failed tenant=%s plan=%s cycle=%s environment=%s error=%s",
+            user.tenant_id,
+            payload.plan_code,
+            payload.billing_cycle,
+            _asaas_environment_label(),
+            str(exc),
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -101,6 +122,7 @@ def register_asaas_webhook(user: User = Depends(require_superadmin)):
     try:
         data = register_webhook(url, user.email)
     except RuntimeError as exc:
+        logger.warning("Asaas webhook registration failed environment=%s error=%s", _asaas_environment_label(), str(exc))
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "ok": True,
