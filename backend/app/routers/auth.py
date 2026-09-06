@@ -8,7 +8,7 @@ from ..database import get_db
 from ..models import PaymentEvent, ProvisionedCredential, Tenant, TenantPlan, User, YouTubeConnection
 from ..schemas import ActivationRequest, LoginRequest, RegisterRequest, TeamUserCreate, TeamUserOut, UserOut
 from ..services.asaas import asaas_configured
-from ..services.billing import ensure_plan, plan_payload
+from ..services.billing import ensure_plan, plan_payload_for_user
 from ..services.plans import can_add_user
 from ..services.system_config import get_public_config_safe
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _user_payload(user: User, db: Session) -> dict:
-    plan = plan_payload(db, user.tenant_id)
+    plan = plan_payload_for_user(db, user)
     public_config = get_public_config_safe(db)
     checkout_url = "/planos" if asaas_configured() else public_config["checkout_url"]
     upgrade_url = "/planos" if asaas_configured() else public_config["upgrade_url"]

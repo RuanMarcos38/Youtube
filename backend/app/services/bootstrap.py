@@ -6,6 +6,7 @@ from ..models import ProvisionedCredential, SystemSetting, Tenant, TenantPlan, U
 
 
 ADMIN_CREDENTIAL_VERSION = "2026-08-22-admin-v3"
+ADMIN_JOB_LIMIT = 999999
 
 
 def _ensure_kiwify_webhook_token(db) -> None:
@@ -77,7 +78,7 @@ def ensure_superadmin() -> None:
                     tenant_id=user.tenant_id,
                     plan_code="admin",
                     billing_status="active",
-                    monthly_job_limit=999999,
+                    monthly_job_limit=ADMIN_JOB_LIMIT,
                     unlimited=True,
                 )
                 db.add(plan)
@@ -85,6 +86,7 @@ def ensure_superadmin() -> None:
                 plan.plan_code = "admin"
                 plan.billing_status = "active"
                 plan.unlimited = True
+                plan.monthly_job_limit = max(ADMIN_JOB_LIMIT, int(plan.monthly_job_limit or 0))
             tenant = db.get(Tenant, user.tenant_id)
             if tenant:
                 tenant.billing_status = "active"
@@ -109,7 +111,7 @@ def ensure_superadmin() -> None:
                 tenant_id=tenant.id,
                 plan_code="admin",
                 billing_status="active",
-                monthly_job_limit=999999,
+                monthly_job_limit=ADMIN_JOB_LIMIT,
                 unlimited=True,
             )
         )

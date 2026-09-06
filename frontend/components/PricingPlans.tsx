@@ -10,7 +10,7 @@ function money(cents: number) {
 }
 
 function usageText(used: number | undefined, limit: number | null | undefined, unit: string) {
-  if (limit == null) return `${used || 0} ${unit}`;
+  if (limit == null) return "Ilimitado";
   return `${used || 0} de ${limit} ${unit}`;
 }
 

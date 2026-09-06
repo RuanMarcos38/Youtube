@@ -3,6 +3,7 @@ import uuid
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import Job, SourceVideo, Tenant, TenantPlan, User
+from app.services.billing import can_use_tool, plan_payload_for_user
 from app.services import asaas as asaas_service
 from app.services.asaas import apply_asaas_webhook, external_reference
 from app.services.database_bootstrap import initialize_database
@@ -166,5 +167,47 @@ def test_quota_payload_counts_minutes_shorts_channels_and_users():
         assert usage["users_used"] == 1
         assert usage["processing_minutes_remaining"] == 119
         assert usage["shorts_remaining"] == 27
+    finally:
+        db.close()
+
+
+def test_superadmin_payload_repairs_and_reports_unlimited_plan():
+    initialize_database()
+    suffix = uuid.uuid4().hex[:12]
+    db = SessionLocal()
+    try:
+        tenant, owner = _tenant_with_owner(db, suffix)
+        owner.role = "superadmin"
+        plan = TenantPlan(
+            tenant_id=tenant.id,
+            plan_code="starter",
+            billing_status="pending",
+            billing_provider="legacy",
+            monthly_job_limit=1,
+            unlimited=False,
+        )
+        db.add(plan)
+        db.commit()
+
+        allowed, reason = can_use_tool(db, owner)
+        payload = plan_payload_for_user(db, owner)
+        db.refresh(plan)
+        db.refresh(tenant)
+
+        assert allowed is True
+        assert reason == ""
+        assert plan.plan_code == "admin"
+        assert plan.billing_status == "active"
+        assert plan.unlimited is True
+        assert plan.monthly_job_limit >= 999999
+        assert tenant.billing_status == "active"
+        assert payload["plan_code"] == "admin"
+        assert payload["plan_name"] == "Administrador ilimitado"
+        assert payload["unlimited"] is True
+        assert payload["jobs_remaining"] is None
+        assert payload["processing_minutes_limit"] is None
+        assert payload["shorts_limit"] is None
+        assert payload["channel_limit"] is None
+        assert payload["user_limit"] is None
     finally:
         db.close()

@@ -16,7 +16,7 @@ from ..services.asaas import (
     register_webhook,
     webhook_configured,
 )
-from ..services.billing import apply_kiwify_webhook, plan_payload
+from ..services.billing import apply_kiwify_webhook, plan_payload_for_user
 from ..services.plans import EXTRA_CHANNEL_PRICE_CENTS, public_plans
 from ..services.system_config import get_public_config_safe
 
@@ -67,7 +67,7 @@ def billing_plans():
 
 @router.get("/me")
 def my_billing(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    payload = plan_payload(db, user.tenant_id)
+    payload = plan_payload_for_user(db, user)
     public_config = get_public_config_safe(db)
     payload.update({
         "checkout_url": public_config["checkout_url"],

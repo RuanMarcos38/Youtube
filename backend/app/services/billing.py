@@ -8,11 +8,14 @@ from ..auth import hash_password, normalize_email
 from ..config import settings
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User
 from .email_service import send_access_credentials
-from .plans import quota_payload
+from .plans import channels_used, processing_minutes_used, quota_payload, shorts_used, users_used
 from .system_config import get_base_plan_job_limit
 
 
 ACTIVE_BILLING = {"active", "paid", "trial"}
+ADMIN_PLAN_CODE = "admin"
+ADMIN_PLAN_NAME = "Administrador ilimitado"
+ADMIN_JOB_LIMIT = 999999
 
 
 def ensure_plan(db: Session, tenant_id: int) -> TenantPlan:
@@ -31,6 +34,34 @@ def ensure_plan(db: Session, tenant_id: int) -> TenantPlan:
     db.add(plan)
     db.commit()
     db.refresh(plan)
+    return plan
+
+
+def ensure_superadmin_unlimited_plan(db: Session, user: User) -> TenantPlan:
+    plan = ensure_plan(db, user.tenant_id)
+    changed = False
+    if plan.plan_code != ADMIN_PLAN_CODE:
+        plan.plan_code = ADMIN_PLAN_CODE
+        changed = True
+    if plan.billing_status != "active":
+        plan.billing_status = "active"
+        changed = True
+    if not plan.unlimited:
+        plan.unlimited = True
+        changed = True
+    current_monthly_limit = int(plan.monthly_job_limit or 0)
+    if current_monthly_limit < ADMIN_JOB_LIMIT:
+        plan.monthly_job_limit = ADMIN_JOB_LIMIT
+        changed = True
+
+    tenant = db.get(Tenant, user.tenant_id)
+    if tenant and tenant.billing_status != "active":
+        tenant.billing_status = "active"
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(plan)
     return plan
 
 
@@ -66,8 +97,43 @@ def plan_payload(db: Session, tenant_id: int) -> dict:
     return payload
 
 
+def superadmin_plan_payload(db: Session, user: User) -> dict:
+    plan = ensure_superadmin_unlimited_plan(db, user)
+    return {
+        "plan_code": ADMIN_PLAN_CODE,
+        "plan_name": ADMIN_PLAN_NAME,
+        "billing_status": "active",
+        "billing_provider": getattr(plan, "billing_provider", "legacy") or "legacy",
+        "billing_cycle": getattr(plan, "billing_cycle", "monthly") or "monthly",
+        "monthly_job_limit": max(ADMIN_JOB_LIMIT, int(plan.monthly_job_limit or 0)),
+        "unlimited": True,
+        "jobs_used": jobs_used(db, user.tenant_id),
+        "jobs_remaining": None,
+        "subscription_value_cents": int(plan.subscription_value_cents or 0),
+        "processing_minutes_limit": None,
+        "processing_minutes_used": processing_minutes_used(db, user.tenant_id),
+        "processing_minutes_remaining": None,
+        "shorts_limit": None,
+        "shorts_used": shorts_used(db, user.tenant_id),
+        "shorts_remaining": None,
+        "channel_limit": None,
+        "channels_used": channels_used(db, user.tenant_id),
+        "channels_remaining": None,
+        "user_limit": None,
+        "users_used": users_used(db, user.tenant_id),
+        "users_remaining": None,
+    }
+
+
+def plan_payload_for_user(db: Session, user: User) -> dict:
+    if user.role == "superadmin":
+        return superadmin_plan_payload(db, user)
+    return plan_payload(db, user.tenant_id)
+
+
 def can_use_tool(db: Session, user: User) -> tuple[bool, str]:
     if user.role == "superadmin":
+        ensure_superadmin_unlimited_plan(db, user)
         return True, ""
     plan = ensure_plan(db, user.tenant_id)
     if settings.billing_require_active and plan.billing_status not in ACTIVE_BILLING:

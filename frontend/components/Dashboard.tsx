@@ -531,6 +531,13 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const activeJobs = useMemo(() => jobs.filter((job) => !["ready_for_review", "failed"].includes(job.status)).length, [jobs]);
   const readyClips = useMemo(() => clips.filter((clip) => ["ready", "approved", "uploaded"].includes(clip.status)).length, [clips]);
   const usagePercent = user.unlimited ? 100 : Math.min(100, Math.round((user.jobs_used / Math.max(1, user.monthly_job_limit)) * 100));
+  const adminUnlimited = user.role === "superadmin";
+  const planUsageValue = user.unlimited ? "Ilimitado" : fmtExact(user.jobs_used);
+  const planUsageDetail = adminUnlimited
+    ? `${fmtExact(user.jobs_used)} processamentos usados · administrador ilimitado`
+    : user.unlimited
+      ? `Processamentos usados · ilimitado · ${user.plan_code || "admin"}`
+      : `${fmtExact(user.jobs_remaining ?? 0)} restantes · limite ${fmtExact(user.monthly_job_limit)}`;
   const topVideo = liveMetrics?.top_video;
   const monetization = liveMetrics?.monetization;
 
@@ -767,7 +774,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <MetricCard label="Inscritos" value={liveMetrics?.hidden_subscriber_count ? "Oculto" : fmtNumber(liveMetrics?.subscriber_count || 0)} detail={liveMetrics?.channel_title || "Canal conectado"} />
                 <MetricCard label="Visualizações" value={fmtNumber(liveMetrics?.view_count || 0)} detail={liveMetrics?.views_last_28d != null ? `${fmtNumber(liveMetrics.views_last_28d)} em 28 dias` : "Total do canal"} />
                 <MetricCard label="Vídeos no canal" value={fmtExact(liveMetrics?.video_count || 0)} detail={`${activeJobs} processamentos ativos`} />
-                <MetricCard label="Uso do plano" value={fmtExact(user.jobs_used)} detail={user.unlimited ? `Processamentos usados · ilimitado · ${user.plan_code || "admin"}` : `${fmtExact(user.jobs_remaining ?? 0)} restantes · limite ${fmtExact(user.monthly_job_limit)}`} />
+                <MetricCard label="Uso do plano" value={planUsageValue} detail={planUsageDetail} />
               </div>
 
               <div className="sf-card overflow-hidden">
@@ -885,15 +892,15 @@ export default function Dashboard({ user }: { user: UserProfile }) {
 
               <div className="sf-card p-5">
                 <div className="text-[11px] font-semibold uppercase leading-4 text-[#ff0000]">Uso operacional</div>
-                <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">Processamentos do mês</h2>
+                <h2 className="mt-1 text-lg font-semibold leading-tight text-[#111]">{adminUnlimited ? "Administrador ilimitado" : "Processamentos do mês"}</h2>
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs"><span className="font-semibold text-[#222]">Uso mensal</span><span className="text-[#666]">{user.unlimited ? `${fmtExact(user.jobs_used)} processamentos` : `${fmtExact(user.jobs_used)} de ${fmtExact(user.monthly_job_limit)}`}</span></div>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#ececec]"><div className="h-full rounded-full bg-[#ff0000]" style={{ width: `${usagePercent}%` }} /></div>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-3">
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(jobs.length)}</div><div className="text-[#777]">processamentos</div></div>
                   <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{fmtExact(readyClips)}</div><div className="text-[#777]">cortes</div></div>
-                  <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{user.unlimited ? "∞" : fmtExact(user.jobs_remaining ?? 0)}</div><div className="text-[#777]">restantes</div></div>
+                  <div className="rounded-lg bg-[#f7f7f7] p-3"><div className="text-lg font-semibold text-[#111]">{user.unlimited ? "Ilimitado" : fmtExact(user.jobs_remaining ?? 0)}</div><div className="text-[#777]">{user.unlimited ? "limite" : "restantes"}</div></div>
                 </div>
                 <a href="/configuracoes" className="sf-button sf-button-outline mt-4 w-full justify-center">Gerenciar conta</a>
               </div>

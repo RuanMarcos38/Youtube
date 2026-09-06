@@ -14,7 +14,7 @@ function fmtNumber(value: number | null | undefined) {
 }
 
 function usageText(used: number | undefined, limit: number | null | undefined, unit: string) {
-  if (limit == null) return `${fmtNumber(used)} ${unit}`;
+  if (limit == null) return "Ilimitado";
   return `${fmtNumber(used)} de ${fmtNumber(limit)} ${unit}`;
 }
 
@@ -106,7 +106,9 @@ export default function AccountSettings() {
   const canManageTeam = MANAGER_ROLES.has(user.role);
   const isSuperadmin = user.role === "superadmin";
   const billingActive = user.role === "superadmin" || ACTIVE_BILLING.has(user.billing_status);
-  const usageLabel = user.unlimited ? `${fmtNumber(user.jobs_used)} processamentos usados` : `${fmtNumber(user.jobs_used)} de ${fmtNumber(user.monthly_job_limit)} processamentos`;
+  const unlimitedAccess = user.unlimited || isSuperadmin;
+  const usageLabel = unlimitedAccess ? "Ilimitado" : `${fmtNumber(user.jobs_used)} de ${fmtNumber(user.monthly_job_limit)} processamentos`;
+  const usageDetail = unlimitedAccess ? `${fmtNumber(user.jobs_used)} processamentos usados no mês` : "Franquia mensal do plano";
 
   return (
     <main className="sf-page-main pb-24 xl:pb-10">
@@ -117,10 +119,10 @@ export default function AccountSettings() {
             <div className="hidden h-10 w-px bg-[#ececec] sm:block" />
             <div className="min-w-0">
               <div className="sf-kicker">Conta e cobrança</div>
-              <h1 className="mt-1 truncate text-[26px] font-semibold leading-tight text-[#111]">Assinaturas, planos e configurações</h1>
+              <h1 className="mt-1 text-xl font-semibold leading-tight text-[#111] sm:text-[26px]">Assinaturas, planos e configurações</h1>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto">
             <a href="/#automacao" className="sf-button sf-button-outline">Abrir dashboard</a>
             <a href="/planos" className="sf-button sf-button-primary">Ver planos</a>
             <button onClick={logout} className="sf-button sf-button-outline">Sair</button>
@@ -140,14 +142,15 @@ export default function AccountSettings() {
               <span className={`w-fit rounded-full px-3 py-1 text-[11px] font-black ${billingActive ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{statusText(user.billing_status)}</span>
             </div>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Uso mensal</div><div className="mt-1 text-sm font-black">{usageLabel}</div></div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Envios de vídeos</div><div className="mt-1 text-sm font-black">{usageLabel}</div><div className="mt-1 text-[11px] leading-4 text-[#777]">{usageDetail}</div></div>
               <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Processamento</div><div className="mt-1 text-sm font-black">{usageText(user.processing_minutes_used, user.processing_minutes_limit, "min")}</div></div>
               <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Shorts</div><div className="mt-1 text-sm font-black">{usageText(user.shorts_used, user.shorts_limit, "Shorts")}</div></div>
               <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Canais</div><div className="mt-1 text-sm font-black">{usageText(user.channels_used, user.channel_limit, "canais")}</div></div>
+              <div className="rounded-xl bg-[#f7f7f7] p-4"><div className="text-[10px] font-black uppercase text-[#777]">Usuários</div><div className="mt-1 text-sm font-black">{usageText(user.users_used, user.user_limit, "usuários")}</div></div>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-2">
+            <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap">
               <a href="/planos" className="sf-button sf-button-primary">Planos e checkout Asaas</a>
               <a href="/#cortes" className="sf-button sf-button-outline">Voltar para publicações</a>
             </div>
