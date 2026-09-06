@@ -115,3 +115,32 @@ def test_existing_legacy_block_is_shortened_to_last_upload_time():
         assert 18 * 3600 < value["seconds_remaining"] < 20 * 3600
     finally:
         db.close()
+
+
+def test_existing_legacy_block_is_cleared_when_last_upload_window_passed():
+    initialize_database()
+    db = SessionLocal()
+    try:
+        user, _, _ = _uploaded_clip_fixture(db, uploaded_hours_ago=25)
+        detected_at = datetime.now(timezone.utc) - timedelta(hours=6)
+        legacy_payload = {
+            "blocked_at": detected_at.isoformat(),
+            "blocked_until": (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat(),
+            "message": "O limite diário de uploads deste canal foi atingido.",
+        }
+        db.add(
+            SystemSetting(
+                key=f"youtube.upload_block.{user.id}",
+                value=json.dumps(legacy_payload),
+                secret=False,
+            )
+        )
+        db.commit()
+
+        value = upload_availability(db, user.id)
+
+        assert value["blocked"] is False
+        assert value["reference_upload_at"] is not None
+        assert value["seconds_remaining"] == 0
+    finally:
+        db.close()

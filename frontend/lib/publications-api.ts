@@ -5,6 +5,7 @@ export type YouTubeAvailability = {
   blocked: boolean;
   blocked_at?: string | null;
   blocked_until?: string | null;
+  reference_upload_at?: string | null;
   seconds_remaining: number;
   message: string;
 };

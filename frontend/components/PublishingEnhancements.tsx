@@ -410,6 +410,10 @@ export default function PublishingEnhancements() {
           <div className="font-black">Uploads do YouTube temporariamente bloqueados</div>
           <div className="mt-1 text-xs leading-5">{availability.message}</div>
           <div className="mt-2 text-lg font-black">Nova tentativa estimada em {fmtCountdown(remaining)}</div>
+          <div className="mt-1 text-[10px]">
+            Base do contador: {availability.reference_upload_at ? `último upload confirmado em ${fmtDateTime(availability.reference_upload_at)}` : `falha recebida em ${fmtDateTime(availability.blocked_at || "")}`}.
+            {availability.blocked_until ? ` Liberação estimada: ${fmtDateTime(availability.blocked_until)}.` : ""}
+          </div>
           <div className="mt-1 text-[10px]">O ShortsFlow não fará novas tentativas durante esta janela. O prazo é estimado; a liberação final depende do próprio YouTube.</div>
         </div>
       )}
