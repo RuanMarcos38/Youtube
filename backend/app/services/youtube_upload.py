@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from ..errors import raise_for_youtube_error
+from ..errors import YouTubeAuthError, google_error_reason, raise_for_youtube_error
 from .youtube_oauth import get_credentials
 
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
@@ -65,3 +65,32 @@ def upload_video(
     if not video_id:
         raise RuntimeError("YouTube upload completed without returning a video ID")
     return video_id
+
+
+def delete_video(video_id: str, user_id: int) -> dict:
+    """Delete a video owned by the connected YouTube channel.
+
+    The caller must pass the video id already stored on the user's own Clip.
+    A video that was already removed directly in YouTube is treated as deleted
+    so ShortsFlow can safely reconcile its local publication history.
+    """
+    normalized_id = str(video_id or "").strip()
+    if not normalized_id:
+        raise ValueError("Este Short não possui um vídeo do YouTube vinculado.")
+
+    youtube = build("youtube", "v3", credentials=get_credentials(user_id), cache_discovery=False)
+    try:
+        youtube.videos().delete(id=normalized_id).execute()
+        return {"deleted": True, "already_missing": False}
+    except HttpError as exc:
+        reason, message = google_error_reason(exc)
+        if exc.resp.status == 404 or reason == "videoNotFound":
+            return {"deleted": True, "already_missing": True}
+        normalized_message = message.lower()
+        if reason == "insufficientPermissions" or "insufficient authentication scopes" in normalized_message:
+            raise YouTubeAuthError(
+                "Para excluir vídeos do canal, reconecte o YouTube uma única vez e autorize a permissão de gerenciamento. "
+                "As credenciais do projeto não serão alteradas."
+            ) from exc
+        raise_for_youtube_error(exc)
+        raise
