@@ -46,11 +46,12 @@ jobs:
             const needles = [
               'traceback', 'error', 'exception', 'operationalerror', 'sqlite', 'database',
               'uvicorn', 'backend', 'supervisor', 'exited', 'fatal', 'no such column',
-              'locked', 'tiktok', 'creator-info', 'creator_info', 'oauth/authorize', '500'
+              'locked', 'tiktok', 'creator-info', 'creator_info', 'oauth/authorize', '500',
+              '502', 'asaas', 'checkout', 'billing', '/api/billing/asaas/checkout', 'httpx'
             ];
             const interesting = lines.filter(line => needles.some(word => line.toLowerCase().includes(word)));
             console.log('--- FILTERED SHORTSFLOW RUNTIME DIAGNOSTICS ---');
-            console.log((interesting.length ? interesting : lines.slice(-300)).slice(-400).join('\n'));
+            console.log((interesting.length ? interesting : lines.slice(-300)).slice(-500).join('\n'));
             process.exit(code);
           };
 
