@@ -120,7 +120,7 @@ export const adminUpdateDownloadAuth = (payload: {
 }) => api<DownloadAuthStatus>("/api/admin/download-auth", { method: "PUT", body: JSON.stringify(payload) });
 
 export async function getTrending(keyword: string, region = "BR", days = 14): Promise<TrendingVideo[]> {
-  const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "500" });
+  const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "1000" });
   return api(`/api/videos/trending?${params}`);
 }
 
