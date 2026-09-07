@@ -16,7 +16,7 @@ SEARCH_PAGE_SIZE = 50
 # disappear from later YouTube pages. Scan a much wider result window and only
 # apply the UI result limit after all scanned pages have been merged.
 MAX_SEARCH_PAGES = 20
-MAX_RETURNED_RESULTS = 500
+MAX_RETURNED_RESULTS = 1000
 SEARCH_CACHE_TTL_SECONDS = 15 * 60
 
 _SEARCH_CACHE: dict[tuple[str, str, int, int], tuple[float, list[dict]]] = {}
