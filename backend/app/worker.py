@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from .config import settings
 from .database import SessionLocal
 from .models import Clip, Job, TikTokPost
+from .services.automatic_mode import run_automatic_modes
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
@@ -30,6 +31,7 @@ TIKTOK_STATUS_BATCH_SIZE = 6
 # each user access token. Keep a small safety margin so a large batch such as
 # 40 videos remains queued instead of being rejected by rate limiting.
 TIKTOK_UPLOAD_MIN_INTERVAL_SECONDS = 11.0
+AUTO_MODE_INTERVAL_SECONDS = 60
 MAX_PIPELINE_CONCURRENCY = 5
 
 
@@ -164,9 +166,11 @@ def main() -> None:
     active_tiktok_upload: Future | None = None
     active_probe: Future | None = None
     active_editor: Future | None = None
+    active_automation: Future | None = None
     last_probe_started = 0.0
     last_tiktok_status_started = 0.0
     last_tiktok_upload_started = 0.0
+    last_automation_started = 0.0
 
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
@@ -174,6 +178,7 @@ def main() -> None:
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-tiktok") as tiktok_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-probe") as probe_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-editor-ai") as editor_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-auto-mode") as automation_pool,
     ):
         while True:
             _heartbeat()
@@ -207,12 +212,27 @@ def main() -> None:
                     pass
                 active_editor = None
 
+            if active_automation is not None and active_automation.done():
+                try:
+                    active_automation.result()
+                except Exception:
+                    # The automatic module is isolated: it can never stop the
+                    # existing manual worker, YouTube upload or TikTok upload.
+                    pass
+                active_automation = None
+
             now = time.monotonic()
             if active_probe is None and (
                 last_probe_started == 0.0 or now - last_probe_started >= DOWNLOAD_PROBE_INTERVAL_SECONDS
             ):
                 last_probe_started = now
                 active_probe = probe_pool.submit(run_and_store_download_probe)
+
+            if active_automation is None and (
+                last_automation_started == 0.0 or now - last_automation_started >= AUTO_MODE_INTERVAL_SECONDS
+            ):
+                last_automation_started = now
+                active_automation = automation_pool.submit(run_automatic_modes)
 
             while len(active_jobs) < concurrency:
                 job_id = _claim_next_job_id()
