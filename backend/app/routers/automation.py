@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
-from ..services.automatic_mode import automation_status, load_auto_config, run_user_automatic_mode, save_auto_config
+from ..services.automatic_mode_guard import automation_status, load_auto_config, run_user_automatic_mode, save_auto_config
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
