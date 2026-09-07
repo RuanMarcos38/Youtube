@@ -105,6 +105,10 @@ def _source_path_for_clip(clip: Clip) -> Path | None:
     return None
 
 
+def _caption_removal_requested(payload: ClipCaptionUpdateRequest) -> bool:
+    return payload.subtitle_srt is not None and not payload.subtitle_srt.strip()
+
+
 @router.patch("/{clip_id}/captions", response_model=ClipOut)
 def update_clip_captions(
     clip_id: int,
@@ -127,12 +131,25 @@ def update_clip_captions(
     if not output_path.parent.is_dir():
         raise HTTPException(status_code=409, detail="Pasta do corte não encontrada no servidor.")
 
-    subtitle_path = Path(clip.subtitle_path) if clip.subtitle_path else output_path.with_suffix(".srt")
-    subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+    current_subtitle_path = Path(clip.subtitle_path) if clip.subtitle_path else output_path.with_suffix(".srt")
+    removing_caption = _caption_removal_requested(payload)
+    staged_subtitle_path: Path | None = None
+    render_subtitle_path: Path | None = current_subtitle_path if current_subtitle_path.is_file() else None
+
+    # Stage subtitle edits and only replace the persisted SRT after FFmpeg has
+    # successfully generated the matching video. This keeps video + subtitle
+    # metadata consistent if a render is interrupted or fails.
     if payload.subtitle_srt is not None:
-        duration = max(0.1, clip.end_seconds - clip.start_seconds)
-        subtitle_path.write_text(_normalize_subtitle_text(payload.subtitle_srt, duration), encoding="utf-8")
-        clip.subtitle_path = str(subtitle_path.resolve())
+        if removing_caption:
+            render_subtitle_path = None
+        else:
+            duration = max(0.1, clip.end_seconds - clip.start_seconds)
+            staged_subtitle_path = output_path.with_name(f"{output_path.stem}.legenda-edit-tmp.srt")
+            staged_subtitle_path.write_text(
+                _normalize_subtitle_text(payload.subtitle_srt, duration),
+                encoding="utf-8",
+            )
+            render_subtitle_path = staged_subtitle_path
 
     temporary_output = output_path.with_name(f"{output_path.stem}.legenda-tmp{output_path.suffix}")
     try:
@@ -142,7 +159,7 @@ def update_clip_captions(
             temporary_output,
             clip.start_seconds,
             clip.end_seconds,
-            subtitle_path,
+            render_subtitle_path,
             caption_position=payload.caption_position,
             caption_margin_v=payload.caption_margin_v,
             caption_font_size=payload.caption_font_size,
@@ -150,14 +167,28 @@ def update_clip_captions(
         temporary_output.replace(output_path)
     except FFmpegError as exc:
         temporary_output.unlink(missing_ok=True)
+        staged_subtitle_path and staged_subtitle_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"Falha ao recriar a legenda: {exc}") from exc
     except OSError as exc:
         temporary_output.unlink(missing_ok=True)
+        staged_subtitle_path and staged_subtitle_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="Falha ao substituir o vídeo renderizado com a nova legenda.") from exc
+
+    if payload.subtitle_srt is not None:
+        if removing_caption:
+            current_subtitle_path.unlink(missing_ok=True)
+            clip.subtitle_path = ""
+        elif staged_subtitle_path is not None:
+            current_subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+            staged_subtitle_path.replace(current_subtitle_path)
+            clip.subtitle_path = str(current_subtitle_path.resolve())
 
     clip.caption_position = payload.caption_position
     clip.caption_margin_v = payload.caption_margin_v
     clip.caption_font_size = payload.caption_font_size
+    # Explicitly advance updated_at so API media URLs can cache-bust immediately
+    # after a render, even on database engines with different onupdate behavior.
+    clip.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(clip)
     return clip_to_dict(clip)

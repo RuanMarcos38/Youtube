@@ -46,6 +46,43 @@ def test_metadata_fallback_prevents_empty_publication_fields():
     assert "YouTube Shorts" in metadata.tags
 
 
+def test_repetitive_transcript_title_is_replaced_by_useful_source_title():
+    metadata = build_publish_metadata(
+        title="E aí E aí E aí E aí E aí E aí",
+        description="",
+        copy_text="Veja até o final e comente sua opinião.",
+        tags=["E aí E aí E aí"],
+        source_title="Como organizar as vendas e melhorar o atendimento",
+        hook="E aí E aí E aí E aí",
+    )
+
+    assert metadata.title.startswith("Como organizar as vendas")
+    assert "#Shorts" in metadata.description
+    assert len([token for token in metadata.description.split() if token.startswith("#")]) >= 2
+    assert all("E aí E aí E aí" not in tag for tag in metadata.tags)
+
+
+def test_publish_metadata_does_not_duplicate_generated_hashtag_block_on_retry():
+    first = build_publish_metadata(
+        title="Estratégia de vendas em vídeos curtos",
+        description="Veja como estruturar uma abordagem comercial simples.",
+        copy_text="Comente qual ponto mais chamou sua atenção.",
+        tags=["estratégia de vendas", "vendas online", "vídeos curtos"],
+        source_title="Estratégia comercial para vender melhor",
+        hook="O ponto que muda a abordagem comercial",
+    )
+    second = build_publish_metadata(
+        title=first.title,
+        description=first.description,
+        copy_text="Comente qual ponto mais chamou sua atenção.",
+        tags=first.tags,
+        source_title="Estratégia comercial para vender melhor",
+        hook="O ponto que muda a abordagem comercial",
+    )
+
+    assert second.description.count("#Shorts") == 1
+
+
 def test_tags_respect_total_character_budget():
     tags = normalize_tags([f"palavra-chave muito longa {index} " * 4 for index in range(30)])
     assert len(tags) <= YOUTUBE_TAG_COUNT_MAX

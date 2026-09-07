@@ -15,7 +15,14 @@ def clip_to_dict(clip: Clip) -> dict:
     user_root = settings.data_path / "users" / str(clip.user_id)
     try:
         relative = path.resolve().relative_to(user_root.resolve()).as_posix()
-        media_url = f"/api/media/{relative}"
+        # Clips are recreated in-place when captions are edited/removed. A
+        # version based on the actual media mtime prevents browsers from showing
+        # the old burned-in caption after a successful render.
+        try:
+            version = path.stat().st_mtime_ns
+        except OSError:
+            version = 0
+        media_url = f"/api/media/{relative}?v={version}" if version else f"/api/media/{relative}"
     except ValueError:
         media_url = ""
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 
@@ -11,7 +12,8 @@ YOUTUBE_TAG_TOTAL_MAX = 450
 
 _STOPWORDS = {
     "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "para", "por", "com", "um", "uma",
-    "que", "como", "mais", "se", "no", "na", "nos", "nas", "the", "and", "for", "with", "from", "this", "that",
+    "que", "como", "mais", "se", "no", "na", "nos", "nas", "eu", "ele", "ela", "eles", "elas", "isso", "isto",
+    "aí", "ai", "é", "eh", "foi", "ser", "ter", "tem", "pra", "pro", "the", "and", "for", "with", "from", "this", "that",
 }
 
 
@@ -31,21 +33,58 @@ def _clean_tag(value: str | None) -> str:
     return tag[:60]
 
 
+def _words(value: str) -> list[str]:
+    return [
+        word.strip(".,!?;:()[]{}\"'").lower()
+        for word in re.findall(r"[\wÀ-ÿ-]+", _compact(value), flags=re.UNICODE)
+        if word.strip(".,!?;:()[]{}\"'")
+    ]
+
+
+def _meaningful_words(value: str) -> list[str]:
+    return [word for word in _words(value) if len(word) >= 3 and word not in _STOPWORDS]
+
+
+def _looks_repetitive(value: str) -> bool:
+    words = _words(value)
+    if len(words) < 4:
+        return False
+    counts = Counter(words)
+    unique_ratio = len(counts) / len(words)
+    dominant_ratio = max(counts.values()) / len(words)
+    return unique_ratio < 0.45 or dominant_ratio >= 0.5
+
+
+def _choose_title(title: str, source_title: str, hook: str) -> str:
+    candidates = [_compact(title), _compact(hook), _compact(source_title)]
+    for candidate in candidates:
+        if candidate and not _looks_repetitive(candidate):
+            return candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!")
+    for candidate in candidates:
+        if candidate:
+            return candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!")
+    return "Short em destaque"
+
+
 def _keyword_fallbacks(source_title: str, hook: str) -> list[str]:
     source = _compact(source_title)
     hook_text = _compact(hook)
-    words = [
-        word.strip(".,!?;:()[]{}\"'").lower()
-        for word in re.findall(r"[\wÀ-ÿ-]+", source, flags=re.UNICODE)
-    ]
-    words = [word for word in words if len(word) >= 4 and word not in _STOPWORDS]
+    source_words = _meaningful_words(source)
+    hook_words = _meaningful_words(hook_text)
+    keyword_words = list(dict.fromkeys([*hook_words, *source_words]))
 
     result: list[str] = []
-    if source:
+    if source and not _looks_repetitive(source):
         result.append(source[:60])
-    if hook_text and hook_text.lower() != source.lower():
+    if hook_text and hook_text.casefold() != source.casefold() and not _looks_repetitive(hook_text):
         result.append(hook_text[:60])
-    result.extend(words[:5])
+
+    result.extend(keyword_words[:6])
+    for index in range(min(4, max(0, len(keyword_words) - 1))):
+        phrase = f"{keyword_words[index]} {keyword_words[index + 1]}"
+        if len(phrase) <= 60:
+            result.append(phrase)
+
     result.extend(["YouTube Shorts", "Shorts", "vídeo curto"])
     return result
 
@@ -58,7 +97,7 @@ def normalize_tags(tags: list[str] | None, *, source_title: str = "", hook: str 
 
     for raw in candidates:
         tag = _clean_tag(raw)
-        if not tag:
+        if not tag or _looks_repetitive(tag):
             continue
         key = tag.casefold()
         if key in seen:
@@ -76,16 +115,27 @@ def normalize_tags(tags: list[str] | None, *, source_title: str = "", hook: str 
 
 def _hashtags(tags: list[str]) -> list[str]:
     result = ["#Shorts"]
+    seen = {"#shorts"}
     for tag in tags:
         slug = re.sub(r"[^\wÀ-ÿ]", "", tag, flags=re.UNICODE)
-        if not slug or slug.casefold() == "shorts":
+        if not slug:
             continue
         hashtag = f"#{slug[:35]}"
-        if hashtag.casefold() not in {item.casefold() for item in result}:
-            result.append(hashtag)
-        if len(result) >= 3:
+        key = hashtag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(hashtag)
+        if len(result) >= 4:
             break
     return result
+
+
+def _description_subject(clean_hook: str, clean_source: str, clean_title: str) -> str:
+    for candidate in (clean_hook, clean_source, clean_title):
+        if candidate and not _looks_repetitive(candidate):
+            return candidate
+    return clean_title or "este conteúdo"
 
 
 def normalize_clip_metadata(
@@ -99,14 +149,13 @@ def normalize_clip_metadata(
 ) -> tuple[str, str, str, list[str]]:
     clean_hook = _compact(hook)
     clean_source = _compact(source_title)
-    clean_title = _compact(title) or clean_hook or clean_source or "Short em destaque"
-    clean_title = clean_title[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!")
+    clean_title = _choose_title(_compact(title), clean_source, clean_hook)
 
     normalized_tags = normalize_tags(tags, source_title=clean_source, hook=clean_hook)
 
     clean_description = str(description or "").strip()
-    if not clean_description:
-        subject = clean_hook or clean_source or "este conteúdo"
+    if not clean_description or _looks_repetitive(clean_description):
+        subject = _description_subject(clean_hook, clean_source, clean_title)
         clean_description = f"Confira este trecho sobre {subject}."
     clean_description = clean_description[:4200].rstrip()
 
@@ -135,7 +184,12 @@ def build_publish_metadata(
     parts = [clean_description]
     if clean_copy and clean_copy.casefold() not in clean_description.casefold():
         parts.append(clean_copy)
-    parts.append(" ".join(_hashtags(normalized_tags)))
+
+    hashtag_line = " ".join(_hashtags(normalized_tags))
+    existing_text = "\n".join(parts).casefold()
+    if hashtag_line and hashtag_line.casefold() not in existing_text:
+        parts.append(hashtag_line)
+
     full_description = "\n\n".join(part for part in parts if part).strip()
     full_description = full_description[:YOUTUBE_DESCRIPTION_MAX].rstrip()
 

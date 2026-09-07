@@ -67,7 +67,11 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
             hook=clip.hook,
         )
 
+        # Persist the exact SEO package that will be sent to YouTube. This keeps
+        # Publications/history aligned with the real title, organized description
+        # + hashtags and qualified tags used in the upload request.
         clip.title = metadata.title
+        clip.description = metadata.description
         clip.tags_json = json.dumps(metadata.tags, ensure_ascii=False)
         db.commit()
 
