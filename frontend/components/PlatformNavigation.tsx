@@ -16,6 +16,10 @@ function ShortsIcon({ className = "h-5 w-5" }: IconProps) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3" stroke="currentColor" strokeWidth="1.7"/><path d="m10 8.5 5.5 3.5-5.5 3.5v-7Z" fill="currentColor"/></svg>;
 }
 
+function AutoIcon({ className = "h-5 w-5" }: IconProps) {
+  return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M7.2 7.2A6.8 6.8 0 0 1 18.9 10M16.8 16.8A6.8 6.8 0 0 1 5.1 14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M18.9 5.8V10h-4.2M5.1 18.2V14h4.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/><path d="m10.2 8.8 4.5 3.2-4.5 3.2V8.8Z" fill="currentColor"/></svg>;
+}
+
 function EditIcon({ className = "h-5 w-5" }: IconProps) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M4.5 16.8V20h3.2L18.6 9.1l-3.2-3.2L4.5 16.8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><path d="m13.8 7.5 3.2 3.2M5 5h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>;
 }
@@ -62,6 +66,7 @@ type NavItem = {
 const workspaceItems: NavItem[] = [
   { href: "/#automacao", label: "Painel ao vivo", mobileLabel: "Painel", icon: HomeIcon },
   { href: "/#configurar", label: "Criar Shorts", mobileLabel: "Criar", icon: ShortsIcon },
+  { href: "/modo-automatico", label: "Modo Automático", mobileLabel: "Auto", icon: AutoIcon },
   { href: "/editor-ia", label: "Editor de vídeo", mobileLabel: "Editor", icon: EditIcon },
   { href: "/projetos", label: "Projetos", icon: ProjectsIcon },
   { href: "/#processamento", label: "Processamentos", mobileLabel: "Processar", icon: ProcessIcon },
@@ -104,6 +109,7 @@ export default function PlatformNavigation() {
   }, [pathname]);
 
   const activeHref = useMemo(() => {
+    if (pathname === "/modo-automatico") return "/modo-automatico";
     if (pathname === "/editor-ia") return "/editor-ia";
     if (pathname === "/projetos") return "/projetos";
     if (pathname === "/metricas-tiktok") return "/metricas-tiktok";
@@ -147,7 +153,7 @@ export default function PlatformNavigation() {
           </a>
         </div>
 
-        <nav className="flex-1 px-3 py-5">
+        <nav className="flex-1 overflow-y-auto px-3 py-5">
           <div className="mb-3 px-3 text-[10px] font-semibold uppercase leading-4 text-[#8a8a8a]">Área de trabalho</div>
           <div className="space-y-1">
             {workspaceItems.map(renderDesktopLink)}
