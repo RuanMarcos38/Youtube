@@ -34,16 +34,43 @@ class AutomaticModeUpdate(BaseModel):
     allow_duet: bool | None = None
     allow_stitch: bool | None = None
     max_active_jobs: int | None = Field(default=None, ge=1, le=2)
+    # Regra protegida do Modo Automático. O cliente pode enviar `true` para
+    # refletir a UI, mas nunca pode desativar a limpeza obrigatória.
+    remove_generated_captions: bool | None = None
 
 
 def _payload_dict(payload: AutomaticModeUpdate) -> dict[str, Any]:
-    return payload.model_dump(exclude_none=True)
+    data = payload.model_dump(exclude_none=True)
+    caption_rule = data.pop("remove_generated_captions", None)
+    if caption_rule is False:
+        raise ValueError(
+            "A remoção da legenda gerada pelo ShortsFlow é obrigatória no Modo Automático e não pode ser desativada."
+        )
+    return data
+
+
+def _protected_config(config: dict) -> dict:
+    # A regra é exposta explicitamente para a interface/API, mas não depende de
+    # configuração persistida. Assim ela permanece sempre ativa, inclusive para
+    # usuários/configurações criados antes desta proteção.
+    protected = dict(config)
+    protected["remove_generated_captions"] = True
+    return protected
+
+
+def _protected_status(status: dict) -> dict:
+    protected = dict(status)
+    protected["caption_removal_required"] = True
+    return protected
 
 
 @router.get("")
 def get_automatic_mode(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     config = load_auto_config(db, user.id)
-    return {"config": config, "status": automation_status(db, user.id, config)}
+    return {
+        "config": _protected_config(config),
+        "status": _protected_status(automation_status(db, user.id, config)),
+    }
 
 
 @router.put("")
@@ -56,7 +83,10 @@ def update_automatic_mode(
         config = save_auto_config(db, user.id, _payload_dict(payload))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"config": config, "status": automation_status(db, user.id, config)}
+    return {
+        "config": _protected_config(config),
+        "status": _protected_status(automation_status(db, user.id, config)),
+    }
 
 
 @router.post("/run-now")
