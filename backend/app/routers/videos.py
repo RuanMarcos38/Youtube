@@ -13,7 +13,7 @@ router = APIRouter(prefix="/videos", tags=["videos"])
 def trending_videos(
     keyword: str = Query(default="", max_length=120),
     region: str = Query(default="BR", min_length=2, max_length=2),
-    max_results: int = Query(default=100, ge=1, le=500),
+    max_results: int = Query(default=100, ge=1, le=1000),
     days: int = Query(default=14, ge=1, le=90),
     _user: User = Depends(get_current_user),
 ):
