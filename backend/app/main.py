@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from .config import settings
-from .routers import admin, admin_insights, auth, billing, clips, diagnostics, editor_ai, jobs, media, publications, system, tiktok_auth, videos, youtube_auth
+from .routers import admin, admin_insights, auth, automation, billing, clips, diagnostics, editor_ai, jobs, media, publications, system, tiktok_auth, videos, youtube_auth
 from .services.bootstrap import ensure_superadmin
 from .services.caption_removal_runtime import install_editor_api_caption_queue
 from .services.daily_admin_audit import daily_admin_audit_loop
@@ -33,7 +33,7 @@ async def lifespan(_: FastAPI):
             await audit_task
 
 
-app = FastAPI(title=settings.app_name, version="2.6.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.7.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -64,6 +64,7 @@ app.include_router(videos.router, prefix=settings.api_prefix)
 app.include_router(jobs.router, prefix=settings.api_prefix)
 app.include_router(clips.router, prefix=settings.api_prefix)
 app.include_router(publications.router, prefix=settings.api_prefix)
+app.include_router(automation.router, prefix=settings.api_prefix)
 app.include_router(editor_ai.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
 app.include_router(youtube_auth.router, prefix=settings.api_prefix)
@@ -72,4 +73,4 @@ app.include_router(tiktok_auth.router, prefix=settings.api_prefix)
 
 @app.get("/")
 def root():
-    return {"message": settings.app_name, "version": "2.6.1", "docs": "/docs"}
+    return {"message": settings.app_name, "version": "2.7.0", "docs": "/docs"}
