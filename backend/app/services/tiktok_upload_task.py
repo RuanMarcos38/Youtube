@@ -1,5 +1,7 @@
+import subprocess
 from pathlib import Path
 
+from ..config import settings
 from ..database import SessionLocal
 from ..models import Clip, TikTokPost
 from .tiktok_oauth import get_creator_info
@@ -28,6 +30,95 @@ FAIL_REASON_MESSAGES = {
     "reached_active_user_cap": "O aplicativo TikTok atingiu o limite atual de usuários/publicações permitido.",
     "internal": "O TikTok informou uma falha interna durante a publicação. Tente novamente mais tarde.",
 }
+
+
+_SOURCE_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
+
+
+def _source_path_for_clip(clip: Clip) -> Path | None:
+    """Locate the downloaded source without changing the stored clip or project."""
+    rendered = Path(clip.file_path)
+    root = rendered.parent
+    for extension in (".mp4", ".mkv", ".webm", ".mov"):
+        candidate = root / f"source{extension}"
+        if candidate.is_file():
+            return candidate
+    for candidate in sorted(root.glob("source.*")):
+        if candidate.is_file() and candidate.suffix.lower() in _SOURCE_VIDEO_EXTENSIONS:
+            return candidate
+    return None
+
+
+def _prepare_tiktok_original_audio_file(clip: Clip) -> Path:
+    """Create a temporary TikTok file with the rendered video and source audio only.
+
+    The visual track stays exactly as ShortsFlow rendered it. The audio track is
+    replaced from the original downloaded source for the clip time range, so any
+    soundtrack/music bed added during editing is never sent to TikTok. The
+    persistent Clip file is not overwritten and credentials/settings are not
+    touched.
+    """
+    rendered = Path(clip.file_path)
+    if not rendered.is_file():
+        raise RuntimeError("Arquivo do corte não encontrado para preparar a publicação no TikTok.")
+
+    source = _source_path_for_clip(clip)
+    if source is None:
+        raise RuntimeError(
+            "Arquivo-fonte original não encontrado. A publicação no TikTok foi interrompida para não enviar música adicionada."
+        )
+
+    start = max(0.0, float(clip.start_seconds or 0.0))
+    end = max(start, float(clip.end_seconds or start))
+    duration = end - start
+    if duration <= 0.05:
+        raise RuntimeError("O corte não possui duração válida para restaurar o áudio original antes do TikTok.")
+
+    output = rendered.with_name(f"{rendered.stem}.tiktok-original-audio-{clip.id}.mp4")
+    output.unlink(missing_ok=True)
+    command = [
+        settings.ffmpeg_binary,
+        "-y",
+        "-i",
+        str(rendered),
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(source),
+        "-t",
+        f"{duration:.3f}",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
+        "-map_metadata",
+        "-1",
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        output.unlink(missing_ok=True)
+        raise RuntimeError(f"Executável não encontrado: {settings.ffmpeg_binary}") from exc
+    except subprocess.CalledProcessError as exc:
+        output.unlink(missing_ok=True)
+        detail = (exc.stderr or exc.stdout or "Falha ao restaurar o áudio original")[-5000:]
+        raise RuntimeError(f"Não foi possível preparar o áudio original para o TikTok: {detail}") from exc
+
+    if not output.is_file() or output.stat().st_size <= 0:
+        output.unlink(missing_ok=True)
+        raise RuntimeError("O arquivo temporário com áudio original não foi gerado para o TikTok.")
+    return output
 
 
 def _pause_user_queue(db, user_id: int, message: str, current_post_id: int) -> None:
@@ -106,11 +197,17 @@ def run_tiktok_upload(post_id: int) -> None:
             )
             return
 
+        upload_file: Path | None = None
         try:
+            # TikTok receives a temporary derivative whose visual track is the
+            # existing rendered Short and whose audio comes only from source.*.
+            # This removes any automatically mixed music without touching the
+            # original Short used by YouTube, the database row, or credentials.
+            upload_file = _prepare_tiktok_original_audio_file(clip)
             publish_id = direct_post_video(
                 db,
                 user_id=post.user_id,
-                file_path=Path(clip.file_path),
+                file_path=upload_file,
                 title=post.title,
                 privacy_level=post.privacy_level,
                 disable_comment=post.disable_comment,
@@ -127,6 +224,9 @@ def run_tiktok_upload(post_id: int) -> None:
             mark_unaudited_public_block(db, user_id=post.user_id)
             release_unaudited_public_queue(db, user_id=post.user_id, current_post_id=post.id)
             return
+        finally:
+            if upload_file is not None:
+                upload_file.unlink(missing_ok=True)
 
         _finish_submission(db, post, publish_id)
     except TikTokPostLimitError as exc:
