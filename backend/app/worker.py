@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from .config import settings
 from .database import SessionLocal
 from .models import Clip, Job, TikTokPost
-from .services.automatic_mode import run_automatic_modes
+from .services.automatic_mode_guard import auto_clip_publish_verified, auto_tiktok_post_publish_verified, run_automatic_modes
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
@@ -87,15 +87,20 @@ def _claim_next_job_id() -> int | None:
 def _claim_next_upload() -> tuple[int, str] | None:
     db = SessionLocal()
     try:
-        clip = db.query(Clip).filter(Clip.status == "upload_queued").order_by(Clip.id.asc()).first()
-        if not clip:
-            return None
-        privacy = "public"
-        clip.upload_privacy = privacy
-        clip.status = "uploading"
-        clip.upload_error = None
-        db.commit()
-        return clip.id, privacy
+        clips = db.query(Clip).filter(Clip.status == "upload_queued").order_by(Clip.id.asc()).limit(100).all()
+        for clip in clips:
+            # Manual publications keep their existing behavior. Automatic clips
+            # are hard-blocked until the clean re-render marker proves that the
+            # ShortsFlow caption layer was removed from the actual video file.
+            if not auto_clip_publish_verified(db, clip):
+                continue
+            privacy = "public"
+            clip.upload_privacy = privacy
+            clip.status = "uploading"
+            clip.upload_error = None
+            db.commit()
+            return clip.id, privacy
+        return None
     finally:
         db.close()
 
@@ -103,13 +108,17 @@ def _claim_next_upload() -> tuple[int, str] | None:
 def _claim_next_tiktok_post() -> int | None:
     db = SessionLocal()
     try:
-        post = db.query(TikTokPost).filter(TikTokPost.status == "queued").order_by(TikTokPost.id.asc()).first()
-        if not post:
-            return None
-        post.status = "uploading"
-        post.error = None
-        db.commit()
-        return post.id
+        posts = db.query(TikTokPost).filter(TikTokPost.status == "queued").order_by(TikTokPost.id.asc()).limit(100).all()
+        for post in posts:
+            # The same mandatory clean-video guard applies to automatic TikTok
+            # posts. A captioned/unverified automatic clip cannot be claimed.
+            if not auto_tiktok_post_publish_verified(db, post):
+                continue
+            post.status = "uploading"
+            post.error = None
+            db.commit()
+            return post.id
+        return None
     finally:
         db.close()
 
