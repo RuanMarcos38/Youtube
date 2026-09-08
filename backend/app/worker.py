@@ -6,11 +6,11 @@ from .config import settings
 from .database import SessionLocal
 from .models import Clip, Job, TikTokPost
 from .services.automatic_mode_guard import auto_clip_publish_verified, auto_tiktok_post_publish_verified, run_automatic_modes
-from .services.caption_removal_runtime import run_caption_aware_editor_task
 from .services.clip_caption_queue import caption_removal_pending, claim_next_caption_removal, run_caption_removal
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
+from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
 from .services.tiktok_policy import recover_retryable_draft_uploads
 from .services.tiktok_upload_task import refresh_tiktok_post, run_tiktok_upload
@@ -296,7 +296,7 @@ def main() -> None:
                 editor_task = claim_next_editor_task()
                 if editor_task is not None:
                     active_editor = editor_pool.submit(
-                        run_caption_aware_editor_task,
+                        run_claimed_editor_task,
                         editor_task[0],
                         editor_task[1],
                         editor_task[2],
