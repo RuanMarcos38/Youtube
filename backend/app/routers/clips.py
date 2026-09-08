@@ -8,6 +8,7 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..models import Clip, SystemSetting, User
 from ..schemas import BatchUploadRequest, BatchUploadResponse, ClipCaptionUpdateRequest, ClipOut, UploadRequest
+from ..services.clip_caption_queue import enqueue_caption_removal
 from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
 from ..services.ffmpeg_service import FFmpegError, ensure_ffmpeg, render_vertical_clip
 from ..services.serializers import clip_to_dict
@@ -131,8 +132,18 @@ def update_clip_captions(
     if not output_path.parent.is_dir():
         raise HTTPException(status_code=409, detail="Pasta do corte não encontrada no servidor.")
 
-    current_subtitle_path = Path(clip.subtitle_path) if clip.subtitle_path else output_path.with_suffix(".srt")
     removing_caption = _caption_removal_requested(payload)
+    if removing_caption:
+        # A clean 30–60 second 1080x1920 re-render can exceed the HTTP/proxy
+        # request window on a busy VPS. Queue only this destructive media step
+        # in the existing worker instead of keeping the browser request open.
+        # The worker recreates the real MP4 from source without subtitles and
+        # blocks YouTube/TikTok until that clean file is confirmed.
+        enqueue_caption_removal(db, clip, user.id)
+        db.refresh(clip)
+        return clip_to_dict(clip)
+
+    current_subtitle_path = Path(clip.subtitle_path) if clip.subtitle_path else output_path.with_suffix(".srt")
     staged_subtitle_path: Path | None = None
     render_subtitle_path: Path | None = current_subtitle_path if current_subtitle_path.is_file() else None
 
@@ -140,16 +151,13 @@ def update_clip_captions(
     # successfully generated the matching video. This keeps video + subtitle
     # metadata consistent if a render is interrupted or fails.
     if payload.subtitle_srt is not None:
-        if removing_caption:
-            render_subtitle_path = None
-        else:
-            duration = max(0.1, clip.end_seconds - clip.start_seconds)
-            staged_subtitle_path = output_path.with_name(f"{output_path.stem}.legenda-edit-tmp.srt")
-            staged_subtitle_path.write_text(
-                _normalize_subtitle_text(payload.subtitle_srt, duration),
-                encoding="utf-8",
-            )
-            render_subtitle_path = staged_subtitle_path
+        duration = max(0.1, clip.end_seconds - clip.start_seconds)
+        staged_subtitle_path = output_path.with_name(f"{output_path.stem}.legenda-edit-tmp.srt")
+        staged_subtitle_path.write_text(
+            _normalize_subtitle_text(payload.subtitle_srt, duration),
+            encoding="utf-8",
+        )
+        render_subtitle_path = staged_subtitle_path
 
     temporary_output = output_path.with_name(f"{output_path.stem}.legenda-tmp{output_path.suffix}")
     try:
@@ -174,14 +182,10 @@ def update_clip_captions(
         staged_subtitle_path and staged_subtitle_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="Falha ao substituir o vídeo renderizado com a nova legenda.") from exc
 
-    if payload.subtitle_srt is not None:
-        if removing_caption:
-            current_subtitle_path.unlink(missing_ok=True)
-            clip.subtitle_path = ""
-        elif staged_subtitle_path is not None:
-            current_subtitle_path.parent.mkdir(parents=True, exist_ok=True)
-            staged_subtitle_path.replace(current_subtitle_path)
-            clip.subtitle_path = str(current_subtitle_path.resolve())
+    if payload.subtitle_srt is not None and staged_subtitle_path is not None:
+        current_subtitle_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_subtitle_path.replace(current_subtitle_path)
+        clip.subtitle_path = str(current_subtitle_path.resolve())
 
     clip.caption_position = payload.caption_position
     clip.caption_margin_v = payload.caption_margin_v
