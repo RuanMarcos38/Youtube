@@ -6,10 +6,11 @@ from .config import settings
 from .database import SessionLocal
 from .models import Clip, Job, TikTokPost
 from .services.automatic_mode_guard import auto_clip_publish_verified, auto_tiktok_post_publish_verified, run_automatic_modes
+from .services.caption_removal_runtime import run_caption_aware_editor_task
+from .services.clip_caption_queue import caption_removal_pending, claim_next_caption_removal, run_caption_removal
 from .services.database_bootstrap import initialize_database
 from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
-from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
 from .services.tiktok_policy import recover_retryable_draft_uploads
 from .services.tiktok_upload_task import refresh_tiktok_post, run_tiktok_upload
@@ -89,6 +90,10 @@ def _claim_next_upload() -> tuple[int, str] | None:
     try:
         clips = db.query(Clip).filter(Clip.status == "upload_queued").order_by(Clip.id.asc()).limit(100).all()
         for clip in clips:
+            # A manual or automatic caption-removal request must finish before
+            # the same media can be claimed for YouTube.
+            if caption_removal_pending(db, clip.id, clip.user_id):
+                continue
             # Manual publications keep their existing behavior. Automatic clips
             # are hard-blocked until the clean re-render marker proves that the
             # ShortsFlow caption layer was removed from the actual video file.
@@ -110,6 +115,9 @@ def _claim_next_tiktok_post() -> int | None:
     try:
         posts = db.query(TikTokPost).filter(TikTokPost.status == "queued").order_by(TikTokPost.id.asc()).limit(100).all()
         for post in posts:
+            clip = db.query(Clip).filter(Clip.id == post.clip_id, Clip.user_id == post.user_id).first()
+            if clip is None or caption_removal_pending(db, clip.id, clip.user_id):
+                continue
             # The same mandatory clean-video guard applies to automatic TikTok
             # posts. A captioned/unverified automatic clip cannot be claimed.
             if not auto_tiktok_post_publish_verified(db, post):
@@ -176,6 +184,7 @@ def main() -> None:
     active_probe: Future | None = None
     active_editor: Future | None = None
     active_automation: Future | None = None
+    active_caption_removal: Future | None = None
     last_probe_started = 0.0
     last_tiktok_status_started = 0.0
     last_tiktok_upload_started = 0.0
@@ -188,6 +197,7 @@ def main() -> None:
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-probe") as probe_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-editor-ai") as editor_pool,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-auto-mode") as automation_pool,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="shortsflow-caption-remove") as caption_pool,
     ):
         while True:
             _heartbeat()
@@ -230,6 +240,15 @@ def main() -> None:
                     pass
                 active_automation = None
 
+            if active_caption_removal is not None and active_caption_removal.done():
+                try:
+                    active_caption_removal.result()
+                except Exception:
+                    # Queue state keeps the media blocked and retryable. A
+                    # caption failure must never interrupt the main worker.
+                    pass
+                active_caption_removal = None
+
             now = time.monotonic()
             if active_probe is None and (
                 last_probe_started == 0.0 or now - last_probe_started >= DOWNLOAD_PROBE_INTERVAL_SECONDS
@@ -248,6 +267,13 @@ def main() -> None:
                 if job_id is None:
                     break
                 active_jobs[job_pool.submit(run_pipeline, job_id)] = job_id
+
+            # Caption cleanup has priority over publication. This removes the
+            # long FFmpeg work from the HTTP request that produced /captions 500.
+            if active_caption_removal is None:
+                clip_id = claim_next_caption_removal()
+                if clip_id is not None:
+                    active_caption_removal = caption_pool.submit(run_caption_removal, clip_id)
 
             if active_upload is None:
                 upload = _claim_next_upload()
@@ -270,7 +296,7 @@ def main() -> None:
                 editor_task = claim_next_editor_task()
                 if editor_task is not None:
                     active_editor = editor_pool.submit(
-                        run_claimed_editor_task,
+                        run_caption_aware_editor_task,
                         editor_task[0],
                         editor_task[1],
                         editor_task[2],
