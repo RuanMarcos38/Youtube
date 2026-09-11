@@ -18,8 +18,8 @@ _STOPWORDS = {
     "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "para", "por", "com", "um", "uma",
     "que", "como", "mais", "se", "no", "na", "nos", "nas", "eu", "ele", "ela", "eles", "elas", "isso", "isto",
     "é", "foi", "ser", "ter", "tem", "pra", "pro", "sua", "seu", "suas", "seus", "essa", "esse", "essas", "esses",
-    "muito", "muita", "muitos", "muitas", "também", "então", "porque", "quando", "the", "and", "for", "with", "from",
-    "this", "that", "you", "your", "are", "was", "were", "have", "has", "had",
+    "muito", "muita", "muitos", "muitas", "também", "então", "porque", "quando", "sem", "antes", "the", "and", "for",
+    "with", "from", "this", "that", "you", "your", "are", "was", "were", "have", "has", "had",
 }
 
 _GENERIC_MARKERS = (
@@ -128,7 +128,8 @@ def _specific_tag_candidates(content_text: str, hook: str, source_title: str) ->
     meaningful = _meaningful(content_text)
     counts = Counter(meaningful)
 
-    # Primeiro entram os conceitos mais recorrentes do próprio corte.
+    # Primeiro entram os conceitos mais recorrentes do próprio corte. Termos
+    # funcionais são descartados para abrir espaço às entidades/assuntos reais.
     candidates.extend(word for word, _count in counts.most_common(7))
 
     raw_words = _words(content_text)[:42]
