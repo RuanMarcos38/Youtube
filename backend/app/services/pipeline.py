@@ -6,6 +6,7 @@ from ..config import settings
 from .ai_service import select_clips
 from .downloader import download_video
 from .ffmpeg_service import ensure_ffmpeg, extract_audio_chunks, get_duration, render_vertical_clip, write_clip_srt
+from .seo_quality import build_qualified_local_seo, clip_transcript_text
 from .transcription import transcribe_chunks
 
 
@@ -118,6 +119,21 @@ def run_pipeline(job_id: int) -> None:
             output_path = work_dir / f"clip_{index:02d}.mp4"
             write_clip_srt(segments, candidate.start, candidate.end, srt_path)
             render_vertical_clip(video_path, output_path, candidate.start, candidate.end, srt_path)
+
+            # SEO é calculado individualmente a partir das palavras realmente
+            # presentes neste corte. O serviço preserva metadata boa do planner
+            # OpenAI e melhora automaticamente o fallback local, sem nova API
+            # paga e sem alterar render, autenticação, upload ou regras do SaaS.
+            content_text = clip_transcript_text(segments, candidate.start, candidate.end)
+            seo = build_qualified_local_seo(
+                source_title=source.title,
+                hook=candidate.hook,
+                content_text=content_text,
+                current_title=candidate.title,
+                current_description=candidate.description,
+                current_tags=candidate.tags,
+            )
+
             clip = Clip(
                 tenant_id=job.tenant_id,
                 user_id=job.user_id,
@@ -126,10 +142,10 @@ def run_pipeline(job_id: int) -> None:
                 end_seconds=candidate.end,
                 hook=candidate.hook,
                 reason=candidate.reason,
-                title=candidate.title,
-                description=candidate.description,
+                title=seo.title,
+                description=seo.description,
                 copy_text=candidate.copy,
-                tags_json=json.dumps(candidate.tags, ensure_ascii=False),
+                tags_json=json.dumps(seo.tags, ensure_ascii=False),
                 file_path=str(output_path.resolve()),
                 subtitle_path=str(srt_path.resolve()),
                 status="ready",
