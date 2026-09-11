@@ -8,12 +8,19 @@ import type { Clip } from "@/lib/types";
 
 const BLOCKED = new Set(["upload_queued", "uploading", "uploaded"]);
 
+type BulkProgress = {
+  done: number;
+  total: number;
+};
+
 export default function ShortsSeoPanel() {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [open, setOpen] = useState(false);
   const [clips, setClips] = useState<Clip[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress>({ done: 0, total: 0 });
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -56,7 +63,7 @@ export default function ShortsSeoPanel() {
   }, [visible]);
 
   async function generate(clip: Clip) {
-    if (BLOCKED.has(clip.status)) return;
+    if (BLOCKED.has(clip.status) || bulkBusy) return;
     setBusyId(clip.id);
     setNotice("");
     setError("");
@@ -71,7 +78,60 @@ export default function ShortsSeoPanel() {
     }
   }
 
+  async function generateAll() {
+    if (bulkBusy || busyId !== null) return;
+
+    const targets = clips.filter((clip) => !BLOCKED.has(clip.status));
+    if (!targets.length) {
+      setNotice("");
+      setError("Não há Shorts disponíveis para gerar SEO em massa antes da publicação.");
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkProgress({ done: 0, total: targets.length });
+    setNotice("");
+    setError("");
+
+    let success = 0;
+    let failed = 0;
+
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const clip = targets[index];
+        setBusyId(clip.id);
+        setBulkProgress({ done: index, total: targets.length });
+
+        try {
+          const updated = await generateClipSeo(clip.id);
+          setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
+          success += 1;
+        } catch {
+          failed += 1;
+        }
+
+        setBulkProgress({ done: index + 1, total: targets.length });
+      }
+
+      if (success > 0) {
+        setNotice(`${success} Short${success === 1 ? "" : "s"} atualizado${success === 1 ? "" : "s"} em massa com Título + Descrição + Tags.`);
+      }
+      if (failed > 0) {
+        setError(`${failed} Short${failed === 1 ? "" : "s"} não pôde${failed === 1 ? "" : "ram"} gerar SEO. Os demais foram processados normalmente.`);
+      }
+    } finally {
+      setBusyId(null);
+      setBulkBusy(false);
+      void refresh();
+    }
+  }
+
   if (!mounted || !visible) return null;
+
+  const eligibleCount = clips.filter((clip) => !BLOCKED.has(clip.status)).length;
+  const bulkPercent = bulkProgress.total > 0
+    ? Math.round((bulkProgress.done / bulkProgress.total) * 100)
+    : 0;
 
   return createPortal(
     <>
@@ -99,7 +159,7 @@ export default function ShortsSeoPanel() {
               <div className="text-[11px] font-bold uppercase tracking-[.08em] text-[#ff0000]">SEO por Short</div>
               <h3 className="mt-1 text-base font-bold text-[#111]">Título, descrição e tags</h3>
               <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Novos Shorts recebem SEO automaticamente. Use “Gerar SEO” somente quando quiser refazer antes de publicar.
+                Gere individualmente ou processe todos os Shorts disponíveis de uma só vez antes da publicação.
               </p>
             </div>
             <button
@@ -110,6 +170,39 @@ export default function ShortsSeoPanel() {
             >
               Fechar
             </button>
+          </div>
+
+          <div className="border-b border-[#ededed] p-4">
+            <button
+              type="button"
+              data-generate-seo-bulk="true"
+              onClick={() => void generateAll()}
+              disabled={bulkBusy || busyId !== null || eligibleCount === 0}
+              className="w-full rounded-xl bg-[#ff0000] px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#e60000] disabled:cursor-not-allowed disabled:opacity-40"
+              title="Gerar Título + Descrição + Tags para todos os Shorts ainda não enviados"
+            >
+              {bulkBusy
+                ? `Gerando SEO em massa ${bulkProgress.done}/${bulkProgress.total}`
+                : `Gerar SEO em massa (${eligibleCount})`}
+            </button>
+            <div className="mt-2 text-center text-[10px] leading-4 text-[#777]">
+              Processa Título + Descrição + Tags de todos os Shorts disponíveis, mantendo o botão individual “Gerar SEO”.
+            </div>
+
+            {bulkBusy && (
+              <div className="mt-3" aria-live="polite">
+                <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-[#555]">
+                  <span>Processando Short {Math.min(bulkProgress.done + 1, bulkProgress.total)} de {bulkProgress.total}</span>
+                  <span>{bulkPercent}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-[#ededed]">
+                  <div
+                    className="h-full rounded-full bg-[#ff0000] transition-all duration-300"
+                    style={{ width: `${bulkPercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {notice && <div className="mx-4 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">{notice}</div>}
@@ -138,7 +231,7 @@ export default function ShortsSeoPanel() {
                   <button
                     type="button"
                     onClick={() => void generate(clip)}
-                    disabled={blocked || busyId !== null}
+                    disabled={blocked || busyId !== null || bulkBusy}
                     className="mt-3 w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-xs font-bold text-[#222] transition hover:border-[#ff0000] hover:text-[#d90000] disabled:cursor-not-allowed disabled:opacity-40"
                     title={blocked ? "SEO fica bloqueado depois que o Short entra na fila/publicação." : "Regenerar SEO usando o conteúdo real deste Short"}
                   >
