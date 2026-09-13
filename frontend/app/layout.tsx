@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import ClipDeleteManager from "@/components/ClipDeleteManager";
 import DiagnosticsAssistant from "@/components/DiagnosticsAssistant";
 import { LanguageRuntime } from "@/components/LanguageSelector";
 import LiveAudienceCard from "@/components/LiveAudienceCard";
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <PresenceHeartbeat />
         {children}
         <PublishingEnhancements />
+        <ClipDeleteManager />
         <ShortsSeoPanel />
         <YouTubePublishedManager />
         <PublishingUiOrganizer />
