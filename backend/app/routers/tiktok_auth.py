@@ -26,7 +26,6 @@ from ..services.tiktok_oauth import (
     get_creator_info,
 )
 from ..services.tiktok_policy import (
-    apply_unaudited_public_block,
     clear_legacy_unaudited_state,
     clear_unaudited_public_block,
     recover_retryable_draft_uploads,
@@ -121,10 +120,17 @@ def oauth_disconnect(user: User = Depends(get_current_user), db: Session = Depen
 
 @router.post("/creator-info", response_model=TikTokCreatorInfoResponse)
 def creator_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return TikTok's latest creator options without a stale local audit gate.
+
+    A previous unaudited failure is kept only as diagnostic history. The current
+    Creator Info response and the Direct Post endpoint remain authoritative, so
+    an app that has just been approved can publish publicly immediately without
+    waiting for the old local six-hour marker to expire.
+    """
     try:
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
-        return apply_unaudited_public_block(db, user_id=user.id, creator=creator)
+        return creator
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -169,21 +175,17 @@ def upload_batch(
         raise HTTPException(status_code=409, detail="Conecte o TikTok deste perfil antes de publicar.")
 
     try:
+        # Always validate against the newest creator options returned by TikTok.
+        # Do not let a historical unaudited marker block a client that may have
+        # been approved since the previous attempt.
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
         recover_retryable_draft_uploads(db, user_id=user.id)
-        creator = apply_unaudited_public_block(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     options = creator.get("privacy_level_options") or []
     if payload.privacy_level not in options:
-        if creator.get("public_posting_blocked"):
-            raise HTTPException(
-                status_code=409,
-                detail=creator.get("public_posting_block_reason")
-                or "O TikTok ainda não liberou Direct Post real para esta conta/app.",
-            )
         raise HTTPException(
             status_code=400,
             detail="Selecione uma opção de privacidade permitida pelo TikTok para esta conta.",
