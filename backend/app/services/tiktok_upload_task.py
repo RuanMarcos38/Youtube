@@ -7,10 +7,8 @@ from ..models import Clip, TikTokPost
 from .tiktok_oauth import get_creator_info
 from .tiktok_policy import (
     DRAFT_RETRY_MESSAGE,
-    DIRECT_POST_UNAVAILABLE_MESSAGE,
     mark_unaudited_public_block,
     release_unaudited_public_queue,
-    unaudited_public_block_active,
 )
 from .tiktok_upload import (
     TikTokPostLimitError,
@@ -147,20 +145,18 @@ def _finish_submission(db, post: TikTokPost, publish_id: str) -> None:
 
 
 def _unaudited_account_blocks_direct_post(db, post: TikTokPost) -> bool:
-    """Return True when TikTok's unaudited rules do not allow Direct Post.
+    """Describe the unaudited-account restriction for diagnostics/tests.
 
-    TikTok currently permits unaudited Direct Post only when the creator account
-    itself is private and the selected viewership is SELF_ONLY. Creator Info is
-    cached by the OAuth service, so this normally does not add an extra network
-    request immediately after queue creation.
+    The worker no longer uses a cached local marker to preempt a new Direct Post
+    attempt. TikTok's live Direct Post endpoint is authoritative, which lets a
+    newly approved app start publishing publicly immediately without waiting for
+    an old local audit marker to expire.
     """
     if post.privacy_level != "SELF_ONLY":
         return True
     try:
         creator = get_creator_info(db, post.user_id)
     except Exception:
-        # When the account state cannot be confirmed, do not send to drafts as a
-        # hidden fallback. Keep the clip visible so the user can retry later.
         return True
     options = {str(value).strip() for value in (creator.get("privacy_level_options") or []) if str(value).strip()}
     account_is_private = "FOLLOWER_OF_CREATOR" in options and "PUBLIC_TO_EVERYONE" not in options
@@ -184,25 +180,14 @@ def run_tiktok_upload(post_id: int) -> None:
         post.error = None
         db.commit()
 
-        # A previous public-account failure proves that this client is still
-        # unaudited. Only real Direct Post is allowed here; the Upload/inbox
-        # endpoint is not used as a fallback because the user requested posts,
-        # not drafts.
-        if unaudited_public_block_active(db, user_id=post.user_id) and _unaudited_account_blocks_direct_post(db, post):
-            release_unaudited_public_queue(
-                db,
-                user_id=post.user_id,
-                current_post_id=post.id,
-                current_error=DIRECT_POST_UNAVAILABLE_MESSAGE,
-            )
-            return
-
         upload_file: Path | None = None
         try:
-            # TikTok receives a temporary derivative whose visual track is the
-            # existing rendered Short and whose audio comes only from source.*.
-            # This removes any automatically mixed music without touching the
-            # original Short used by YouTube, the database row, or credentials.
+            # Always let TikTok's current Direct Post endpoint decide whether
+            # public posting is now available. This is important after app audit:
+            # a historical unaudited marker must never keep the account blocked.
+            # The temporary derivative preserves the rendered visual track and
+            # restores only the original source audio, without touching the
+            # persistent Short, database row, environment or OAuth credentials.
             upload_file = _prepare_tiktok_original_audio_file(clip)
             publish_id = direct_post_video(
                 db,
@@ -215,8 +200,9 @@ def run_tiktok_upload(post_id: int) -> None:
                 disable_stitch=post.disable_stitch,
             )
         except TikTokUnauditedClientError:
-            # TikTok remains authoritative. Remember the restriction and keep
-            # the item visible instead of silently converting it to a draft.
+            # The live TikTok API is authoritative. Remember the response only
+            # for diagnostics and release the current queue for a later retry.
+            # No credentials or other project configuration are changed.
             db.rollback()
             post = db.get(TikTokPost, post_id)
             if not post:
