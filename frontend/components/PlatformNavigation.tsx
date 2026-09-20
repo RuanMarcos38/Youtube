@@ -71,7 +71,8 @@ const workspaceItems: NavItem[] = [
   { href: "/projetos", label: "Projetos", icon: ProjectsIcon },
   { href: "/#processamento", label: "Processamentos", mobileLabel: "Processar", icon: ProcessIcon },
   { href: "/#cortes", label: "Publicações", mobileLabel: "Publicar", icon: PublishIcon },
-  { href: "/metricas-tiktok", label: "Métricas TikTok", mobileLabel: "Métricas", icon: MetricsIcon },
+  { href: "/metricas-youtube", label: "Métricas YouTube", mobileLabel: "YouTube", icon: MetricsIcon },
+  { href: "/metricas-tiktok", label: "Métricas TikTok", mobileLabel: "TikTok", icon: MetricsIcon },
 ];
 
 const accountItems: NavItem[] = [
@@ -112,6 +113,7 @@ export default function PlatformNavigation() {
     if (pathname === "/modo-automatico") return "/modo-automatico";
     if (pathname === "/editor-ia") return "/editor-ia";
     if (pathname === "/projetos") return "/projetos";
+    if (pathname === "/metricas-youtube") return "/metricas-youtube";
     if (pathname === "/metricas-tiktok") return "/metricas-tiktok";
     if (pathname === "/planos") return "/planos";
     if (pathname === "/configuracoes") return "/configuracoes";
