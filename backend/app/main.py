@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from .config import settings
-from .routers import admin, admin_insights, auth, automation, billing, clip_deletions, clips, diagnostics, editor_ai, jobs, media, publications, seo, system, tiktok_auth, videos, youtube_auth
+from .routers import admin, admin_insights, auth, automation, billing, clip_deletions, clips, diagnostics, editor_ai, jobs, media, publications, seo, system, tiktok_auth, videos, vidiq, youtube_auth
 from .services.bootstrap import ensure_superadmin
 from .services.caption_removal_runtime import install_editor_api_caption_queue
 from .services.daily_admin_audit import daily_admin_audit_loop
@@ -71,6 +71,7 @@ app.include_router(editor_ai.router, prefix=settings.api_prefix)
 app.include_router(media.router, prefix=settings.api_prefix)
 app.include_router(youtube_auth.router, prefix=settings.api_prefix)
 app.include_router(tiktok_auth.router, prefix=settings.api_prefix)
+app.include_router(vidiq.router, prefix=settings.api_prefix)
 
 
 @app.get("/")
