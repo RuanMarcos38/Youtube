@@ -109,6 +109,12 @@ class Settings(BaseSettings):
     youtube_default_region: str = "BR"
     youtube_default_privacy: str = "public"
 
+    # vidIQ MCP is optional and read-only. The key must live only in runtime
+    # secrets (EasyPanel/environment) and is never exposed to the frontend.
+    vidiq_mcp_url: str = "https://mcp.vidiq.com/mcp"
+    vidiq_mcp_api_key: str = ""
+    vidiq_mcp_timeout_seconds: float = 45.0
+
     # TikTok is isolated from all existing Google/YouTube credentials. These
     # values remain empty until an approved TikTok Developer app is connected.
     tiktok_client_key: str = ""

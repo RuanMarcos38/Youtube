@@ -197,3 +197,26 @@ export const tiktokUploadBatch = (
   method: "POST",
   body: JSON.stringify({ clip_ids: clipIds, ...payload }),
 });
+
+
+export type VidiqStatus = {
+  configured: boolean;
+  connected: boolean;
+  credits?: Record<string, unknown> | null;
+  channels: Array<{ channelId?: string }>;
+  authenticated_as?: string | null;
+  message: string;
+};
+
+export type VidiqChatResult = {
+  answer: string;
+  tool: string;
+  data: Record<string, unknown>;
+};
+
+export const vidiqStatus = () => api<VidiqStatus>("/api/vidiq/status");
+export const vidiqChat = (payload: { message: string; channel_id?: string; video_id?: string }) =>
+  api<VidiqChatResult>("/api/vidiq/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
