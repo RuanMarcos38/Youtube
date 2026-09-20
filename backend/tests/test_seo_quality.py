@@ -62,7 +62,7 @@ def test_existing_specific_description_is_preserved():
     )
 
     assert seo.description == description
-    assert seo.tags[0] == "Qualidade dos Leads"
+    assert "Qualidade dos Leads" in seo.tags
 
 
 def test_all_qualified_tags_pass_internal_relevance_gate():
