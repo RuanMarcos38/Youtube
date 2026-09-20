@@ -11,7 +11,7 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..models import Clip, Job, User
 from ..schemas import ClipOut
-from ..services.seo_quality import build_qualified_local_seo
+from ..services.seo_ai import build_ai_qualified_seo
 from ..services.serializers import clip_to_dict
 
 
@@ -66,16 +66,13 @@ def regenerate_clip_seo(
     if not content_text:
         content_text = " ".join(part for part in (clip.hook, clip.title, source_title) if part)
 
-    # Regeneração manual parte novamente do conteúdo real do Short, em vez de
-    # reutilizar a descrição/tags anteriores. A copy de engajamento permanece
-    # intocada porque esta ação é exclusivamente de SEO de publicação.
-    seo = build_qualified_local_seo(
+    # Usa a IA já configurada no projeto quando a chave OpenAI está disponível.
+    # Em qualquer falha de IA, o serviço cai automaticamente para o gerador local
+    # qualificado, evitando quebrar o fluxo de publicação.
+    seo = build_ai_qualified_seo(
         source_title=source_title,
         hook=clip.hook,
         content_text=content_text,
-        current_title=clip.hook or clip.title,
-        current_description="",
-        current_tags=[],
     )
 
     clip.title = seo.title

@@ -7,9 +7,31 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from ..errors import YouTubeAuthError, google_error_reason, raise_for_youtube_error
+from .seo_service import YOUTUBE_TAG_COUNT_MAX, YOUTUBE_TAG_TOTAL_MAX, youtube_tag_budget
 from .youtube_oauth import get_credentials
 
 RETRIABLE_STATUS_CODES = {500, 502, 503, 504}
+
+
+def _safe_upload_tags(tags: list[str]) -> list[str]:
+    safe: list[str] = []
+    seen: set[str] = set()
+    for raw in tags or []:
+        tag = " ".join(str(raw or "").lstrip("#").split()).strip(" ,.;:|/")
+        if not tag:
+            continue
+        tag = tag[:70].rstrip()
+        key = tag.casefold()
+        if key in seen:
+            continue
+        proposed = [*safe, tag]
+        if youtube_tag_budget(proposed) > YOUTUBE_TAG_TOTAL_MAX:
+            continue
+        seen.add(key)
+        safe.append(tag)
+        if len(safe) >= YOUTUBE_TAG_COUNT_MAX:
+            break
+    return safe
 
 
 def upload_video(
@@ -32,7 +54,7 @@ def upload_video(
         "snippet": {
             "title": title[:100],
             "description": description,
-            "tags": tags[:15],
+            "tags": _safe_upload_tags(tags),
             "categoryId": "22",
         },
         "status": {

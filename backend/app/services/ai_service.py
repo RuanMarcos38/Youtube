@@ -15,7 +15,7 @@ class ClipCandidate(BaseModel):
     title: str = Field(max_length=100)
     description: str
     copy: str = Field(max_length=500)
-    tags: list[str] = Field(default_factory=list, max_length=15)
+    tags: list[str] = Field(default_factory=list, max_length=40)
 
 
 class ClipPlan(BaseModel):

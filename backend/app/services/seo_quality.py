@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from .seo_service import normalize_tags
+from .seo_service import normalize_tags, smart_title_case
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,7 @@ class QualifiedSeo:
     title: str
     description: str
     tags: list[str]
+    tag_scores: dict[str, int]
 
 
 _STOPWORDS = {
@@ -27,6 +28,13 @@ _GENERIC_MARKERS = (
     "confira este trecho sobre",
     "short em destaque",
 )
+
+_PLATFORM_KEYWORDS = {
+    "youtube shorts",
+    "shorts",
+    "vídeo curto",
+    "video curto",
+}
 
 
 def _compact(value: str | None) -> str:
@@ -99,9 +107,9 @@ def _title_from_content(current_title: str, hook: str, content_text: str, source
         lowered = candidate.casefold()
         if any(marker in lowered for marker in _GENERIC_MARKERS):
             continue
-        return _trim(candidate, 88)
+        return smart_title_case(_trim(candidate, 88), keep_connectors_lower=True)
 
-    return _trim(source or hook_text or "Short em destaque", 88)
+    return smart_title_case(_trim(source or hook_text or "Short em destaque", 88), keep_connectors_lower=True)
 
 
 def _description_from_content(title: str, content_text: str, hook: str) -> str:
@@ -112,7 +120,7 @@ def _description_from_content(title: str, content_text: str, hook: str) -> str:
         if sentence.casefold() == title.casefold():
             continue
         selected.append(sentence)
-        if len(selected) == 2:
+        if len(selected) == 3:
             break
 
     if not selected:
@@ -120,7 +128,27 @@ def _description_from_content(title: str, content_text: str, hook: str) -> str:
         selected = [f"Neste Short, você confere {subject}."]
 
     body = "\n\n".join(selected)
-    return f"{body}\n\nAssista ao Short e compartilhe sua opinião nos comentários."[:1200]
+    return f"{body}\n\nAssista ao Short e compartilhe sua opinião nos comentários."[:1800]
+
+
+def keyword_relevance_score(keyword: str, *, content_text: str, hook: str, source_title: str) -> int:
+    normalized = _compact(keyword).casefold().lstrip("#")
+    if not normalized:
+        return 0
+    if normalized in _PLATFORM_KEYWORDS:
+        return 62
+
+    tag_tokens = _meaningful(normalized)
+    if not tag_tokens:
+        return 0
+
+    context = _compact(f"{content_text} {hook} {source_title}").casefold()
+    context_tokens = set(_meaningful(context))
+    overlap = sum(1 for token in tag_tokens if token in context_tokens) / max(1, len(tag_tokens))
+    exact_bonus = 10 if normalized in context else 0
+    specificity_bonus = min(10, int(len(tag_tokens) * 2.5))
+    score = round(45 + (35 * overlap) + exact_bonus + specificity_bonus)
+    return max(0, min(100, score))
 
 
 def _specific_tag_candidates(content_text: str, hook: str, source_title: str) -> list[str]:
@@ -128,24 +156,65 @@ def _specific_tag_candidates(content_text: str, hook: str, source_title: str) ->
     meaningful = _meaningful(content_text)
     counts = Counter(meaningful)
 
-    # Primeiro entram os conceitos mais recorrentes do próprio corte. Termos
-    # funcionais são descartados para abrir espaço às entidades/assuntos reais.
-    candidates.extend(word for word, _count in counts.most_common(7))
+    candidates.extend(word for word, _count in counts.most_common(12))
 
-    raw_words = _words(content_text)[:42]
-    # Frases de 2-3 termos capturam melhor intenção de busca e contexto.
-    for size in (3, 2):
+    raw_words = _words(content_text)[:80]
+    for size in (4, 3, 2):
         for index in range(max(0, len(raw_words) - size + 1)):
             phrase_words = raw_words[index : index + size]
             useful = [word for word in phrase_words if word not in _STOPWORDS and len(word) >= 3]
             if len(useful) < max(1, size - 1):
                 continue
             phrase = " ".join(phrase_words)
-            if 6 <= len(phrase) <= 60:
+            if 6 <= len(phrase) <= 70:
                 candidates.append(phrase)
 
-    candidates.extend([_trim(hook, 60), _trim(source_title, 60)])
+    candidates.extend([_trim(hook, 70), _trim(source_title, 70), "YouTube Shorts", "Shorts"])
     return [candidate for candidate in candidates if candidate]
+
+
+def _qualified_tags(
+    candidates: list[str],
+    *,
+    content_text: str,
+    hook: str,
+    source_title: str,
+) -> tuple[list[str], dict[str, int]]:
+    scored: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        compact = _compact(candidate)
+        key = compact.casefold().lstrip("#")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        score = keyword_relevance_score(
+            compact,
+            content_text=content_text,
+            hook=hook,
+            source_title=source_title,
+        )
+        if score < 60:
+            continue
+        scored.append((score, index, compact))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    ordered = [item[2] for item in scored]
+    normalized = normalize_tags(ordered, source_title=source_title, hook=hook)
+
+    final_scores: dict[str, int] = {}
+    final_tags: list[str] = []
+    for tag in normalized:
+        score = keyword_relevance_score(
+            tag,
+            content_text=content_text,
+            hook=hook,
+            source_title=source_title,
+        )
+        if score >= 60:
+            final_tags.append(tag)
+            final_scores[tag] = score
+    return final_tags, final_scores
 
 
 def build_qualified_local_seo(
@@ -157,11 +226,11 @@ def build_qualified_local_seo(
     current_description: str = "",
     current_tags: list[str] | None = None,
 ) -> QualifiedSeo:
-    """Build unique metadata from the words actually present in one Short.
+    """Build publication metadata from the real words used in one Short.
 
-    This path is deterministic and has no paid API dependency. Existing metadata
-    produced by the OpenAI planner is kept when it is already specific; generic
-    local-planner text is replaced with clip-specific metadata.
+    The score is an internal relevance gate (60-100), not an official vidIQ
+    metric. It prevents unrelated/high-volume keywords from being inserted when
+    an external keyword data provider is not available at runtime.
     """
 
     title = _title_from_content(current_title, hook, content_text, source_title)
@@ -179,11 +248,12 @@ def build_qualified_local_seo(
     )
 
     supplied_tags = [str(tag) for tag in (current_tags or []) if str(tag).strip()]
-    specific_candidates = _specific_tag_candidates(content_text, hook, source_title)
-    tags = normalize_tags(
-        [*supplied_tags, *specific_candidates],
-        source_title=source_title,
+    candidates = [*supplied_tags, *_specific_tag_candidates(content_text, hook, source_title)]
+    tags, tag_scores = _qualified_tags(
+        candidates,
+        content_text=content_text,
         hook=hook,
+        source_title=source_title,
     )
 
-    return QualifiedSeo(title=title, description=description, tags=tags)
+    return QualifiedSeo(title=title, description=description, tags=tags, tag_scores=tag_scores)

@@ -41,7 +41,7 @@ def test_generic_local_metadata_becomes_unique_and_content_specific():
     assert "Trecho selecionado automaticamente" not in seo.description
     assert "oferta clara" in seo.description
     assert len(seo.tags) >= 8
-    assert len(seo.tags) <= 15
+    assert len(seo.tags) <= 40
     assert any("marketing" in tag.lower() for tag in seo.tags)
     assert any("cliente" in tag.lower() or "oferta" in tag.lower() for tag in seo.tags)
 
@@ -62,4 +62,21 @@ def test_existing_specific_description_is_preserved():
     )
 
     assert seo.description == description
-    assert seo.tags[0] == "qualidade dos leads"
+    assert "Qualidade dos Leads" in seo.tags
+
+
+def test_all_qualified_tags_pass_internal_relevance_gate():
+    content = (
+        "Marketing digital exige uma oferta clara, geração de leads qualificados, "
+        "funil de vendas e estratégia comercial para converter clientes."
+    )
+    seo = build_qualified_local_seo(
+        source_title="Marketing digital e vendas",
+        hook="Como gerar leads qualificados",
+        content_text=content,
+        current_tags=["celebridade aleatória", "marketing digital", "funil de vendas"],
+    )
+
+    assert seo.tags
+    assert all(seo.tag_scores[tag] >= 60 for tag in seo.tags)
+    assert not any("celebridade" in tag.casefold() for tag in seo.tags)

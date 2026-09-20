@@ -22,15 +22,21 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _latest_successful_upload_at(db: Session, user_id: int, *, before: datetime | None = None) -> datetime | None:
-    """Return the latest YouTube upload completed by ShortsFlow for this user.
+def _first_releasable_upload_at(
+    db: Session,
+    user_id: int,
+    *,
+    before: datetime | None = None,
+    hours: int = DEFAULT_BLOCK_HOURS,
+) -> datetime | None:
+    """Find the oldest successful upload still inside the rolling window.
 
-    The daily-limit countdown must be anchored to the last successful upload,
-    not to the later instant when YouTube happens to return the limit error.
-    We inspect a few recent uploaded clips in Python so timezone differences in
-    SQLite/Postgres do not make the query brittle.
+    When YouTube reports uploadLimitExceeded, the first possible slot can reopen
+    when the oldest upload in the active window completes 24h. Using the latest
+    upload here would keep ShortsFlow blocked longer than necessary.
     """
     before_utc = _utc(before) if before else datetime.now(timezone.utc)
+    lower_bound = before_utc - timedelta(hours=max(1, int(hours)))
     candidates = (
         db.query(Clip)
         .filter(
@@ -39,16 +45,17 @@ def _latest_successful_upload_at(db: Session, user_id: int, *, before: datetime 
             Clip.status == "uploaded",
         )
         .order_by(Clip.updated_at.desc(), Clip.id.desc())
-        .limit(25)
+        .limit(250)
         .all()
     )
+    window: list[datetime] = []
     for clip in candidates:
         if not clip.updated_at:
             continue
         uploaded_at = _utc(clip.updated_at)
-        if uploaded_at <= before_utc:
-            return uploaded_at
-    return None
+        if lower_bound <= uploaded_at <= before_utc:
+            window.append(uploaded_at)
+    return min(window) if window else None
 
 
 def _reference_upload_at(
@@ -58,13 +65,12 @@ def _reference_upload_at(
     detected_at: datetime,
     hours: int,
 ) -> datetime | None:
-    latest = _latest_successful_upload_at(db, user_id, before=detected_at)
-    if not latest:
-        return None
-    age = detected_at - latest
-    if age < timedelta(0) or age > timedelta(hours=hours):
-        return None
-    return latest
+    return _first_releasable_upload_at(
+        db,
+        user_id,
+        before=detected_at,
+        hours=hours,
+    )
 
 
 def mark_upload_blocked(db: Session, user_id: int, message: str, *, hours: int = DEFAULT_BLOCK_HOURS) -> dict:
@@ -120,15 +126,7 @@ def _parse(row: SystemSetting | None) -> dict | None:
 
 
 def _reconcile_existing_block(db: Session, user_id: int, row: SystemSetting, parsed: dict) -> dict:
-    """Repair blocks created by older versions that started the 24h clock too late.
-
-    Existing production rows used `error_detected_at + 24h`. When there is a
-    successful ShortsFlow upload shortly before that error, shorten the window
-    to `last_successful_upload + 24h`. Never extend a stored block here.
-    """
-    if parsed.get("reference_upload_at_dt"):
-        return parsed
-
+    """Shorten conservative legacy blocks to the first rolling-window release."""
     detected_at = parsed.get("blocked_at_dt") or datetime.now(timezone.utc)
     block_hours = int(parsed.get("block_hours") or DEFAULT_BLOCK_HOURS)
     reference_upload = _reference_upload_at(
@@ -141,7 +139,12 @@ def _reconcile_existing_block(db: Session, user_id: int, row: SystemSetting, par
         return parsed
 
     corrected_until = reference_upload + timedelta(hours=block_hours)
-    if corrected_until >= parsed["blocked_until_dt"]:
+    if (
+        parsed.get("reference_upload_at_dt") == reference_upload
+        and corrected_until == parsed["blocked_until_dt"]
+    ):
+        return parsed
+    if corrected_until > parsed["blocked_until_dt"]:
         return parsed
 
     payload = {
@@ -200,7 +203,7 @@ def upload_availability(db: Session, user_id: int) -> dict:
             "reference_upload_at": parsed.get("reference_upload_at"),
             "blocked_until": until.isoformat(),
             "seconds_remaining": 0,
-            "message": "A janela estimada de 24 horas terminou. O envio pode ser testado novamente.",
+            "message": "A primeira janela estimada foi liberada. O envio pode ser testado novamente.",
         }
 
     return {

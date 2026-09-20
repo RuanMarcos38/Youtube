@@ -8,6 +8,14 @@ import type { Clip } from "@/lib/types";
 
 const BLOCKED = new Set(["upload_queued", "uploading", "uploaded"]);
 
+function youtubeTagBudget(tags: string[]): number {
+  return tags.reduce((total, tag, index) => {
+    const separator = index > 0 ? 1 : 0;
+    const quoteCost = tag.includes(" ") ? 2 : 0;
+    return total + separator + tag.length + quoteCost;
+  }, 0);
+}
+
 type BulkProgress = {
   done: number;
   total: number;
@@ -70,7 +78,7 @@ export default function ShortsSeoPanel() {
     try {
       const updated = await generateClipSeo(clip.id);
       setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
-      setNotice(`SEO do Short #${clip.id} regenerado com título, descrição e tags específicos do corte.`);
+      setNotice(`SEO IA do Short #${clip.id} gerado com Título + Descrição + Tags qualificadas (filtro 60+).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível gerar o SEO deste Short.");
     } finally {
@@ -144,7 +152,7 @@ export default function ShortsSeoPanel() {
         aria-controls="shorts-seo-panel"
       >
         <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#ff0000]" />
-        SEO Shorts
+        SEO IA Shorts
         {!!clips.length && <span className="rounded-full bg-[#ff0000] px-2 py-0.5 text-[10px] text-white">{clips.length}</span>}
       </button>
 
@@ -157,9 +165,9 @@ export default function ShortsSeoPanel() {
           <div className="flex items-start justify-between gap-4 border-b border-[#ededed] p-4">
             <div>
               <div className="text-[11px] font-bold uppercase tracking-[.08em] text-[#ff0000]">SEO por Short</div>
-              <h3 className="mt-1 text-base font-bold text-[#111]">Título, descrição e tags</h3>
+              <h3 className="mt-1 text-base font-bold text-[#111]">Título + Descrição + Tags com IA</h3>
               <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Gere individualmente ou processe todos os Shorts disponíveis de uma só vez antes da publicação.
+                Gere por IA, com capitalização otimizada, filtro interno de relevância 60+ e tags dentro do limite oficial de 500 caracteres do YouTube.
               </p>
             </div>
             <button
@@ -183,10 +191,10 @@ export default function ShortsSeoPanel() {
             >
               {bulkBusy
                 ? `Gerando SEO em massa ${bulkProgress.done}/${bulkProgress.total}`
-                : `Gerar SEO em massa (${eligibleCount})`}
+                : `Gerar Título + Descrição + Tags com IA (${eligibleCount})`}
             </button>
             <div className="mt-2 text-center text-[10px] leading-4 text-[#777]">
-              Processa Título + Descrição + Tags de todos os Shorts disponíveis, mantendo o botão individual “Gerar SEO”.
+              Processa todos os Shorts disponíveis com IA. Tags irrelevantes são descartadas pelo filtro 60+ e o pacote respeita até 500 caracteres.
             </div>
 
             {bulkBusy && (
@@ -216,7 +224,7 @@ export default function ShortsSeoPanel() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] font-bold uppercase tracking-[.06em] text-[#777]">
-                        Short #{clip.id} · {clip.tags.length} tags
+                        Short #{clip.id} · {clip.tags.length} tags · {youtubeTagBudget(clip.tags)}/500 caracteres
                       </div>
                       <div className="mt-1 text-sm font-bold leading-5 text-[#111]">{clip.title || "Título ainda não gerado"}</div>
                       <div className="mt-2 text-[11px] leading-5 text-[#667085]">{clip.description || "Descrição ainda não gerada."}</div>
@@ -233,9 +241,9 @@ export default function ShortsSeoPanel() {
                     onClick={() => void generate(clip)}
                     disabled={blocked || busyId !== null || bulkBusy}
                     className="mt-3 w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-xs font-bold text-[#222] transition hover:border-[#ff0000] hover:text-[#d90000] disabled:cursor-not-allowed disabled:opacity-40"
-                    title={blocked ? "SEO fica bloqueado depois que o Short entra na fila/publicação." : "Regenerar SEO usando o conteúdo real deste Short"}
+                    title={blocked ? "SEO fica bloqueado depois que o Short entra na fila/publicação." : "Gerar por IA usando o conteúdo real deste Short, com filtro SEO 60+ e até 500 caracteres de tags"}
                   >
-                    {busyId === clip.id ? "Gerando SEO..." : blocked ? "SEO bloqueado após envio" : "Gerar SEO"}
+                    {busyId === clip.id ? "Gerando com IA..." : blocked ? "SEO bloqueado após envio" : "Gerar Título + Descrição + Tags com IA"}
                   </button>
                 </article>
               );
