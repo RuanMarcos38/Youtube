@@ -57,7 +57,7 @@ def test_repetitive_transcript_title_is_replaced_by_useful_source_title():
         hook="E aí E aí E aí E aí",
     )
 
-    assert metadata.title.startswith("Como organizar as vendas")
+    assert metadata.title.startswith("Como Organizar as Vendas")
     assert "#Shorts" in metadata.description
     assert len([token for token in metadata.description.split() if token.startswith("#")]) >= 2
     assert all("E aí E aí E aí" not in tag for tag in metadata.tags)
