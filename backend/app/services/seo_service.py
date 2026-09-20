@@ -7,13 +7,28 @@ from dataclasses import dataclass
 
 YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 5000
-YOUTUBE_TAG_COUNT_MAX = 15
-YOUTUBE_TAG_TOTAL_MAX = 450
+YOUTUBE_TAG_COUNT_MAX = 40
+YOUTUBE_TAG_TOTAL_MAX = 500
 
 _STOPWORDS = {
     "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "para", "por", "com", "um", "uma",
     "que", "como", "mais", "se", "no", "na", "nos", "nas", "eu", "ele", "ela", "eles", "elas", "isso", "isto",
     "aí", "ai", "é", "eh", "foi", "ser", "ter", "tem", "pra", "pro", "the", "and", "for", "with", "from", "this", "that",
+}
+_LOWERCASE_CONNECTORS = {
+    "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "para", "por", "com", "um", "uma", "no", "na", "nos", "nas",
+}
+_PRESERVE_CASE = {
+    "seo": "SEO",
+    "youtube": "YouTube",
+    "shorts": "Shorts",
+    "ia": "IA",
+    "b2b": "B2B",
+    "b2c": "B2C",
+    "crm": "CRM",
+    "roi": "ROI",
+    "google": "Google",
+    "tiktok": "TikTok",
 }
 
 
@@ -28,9 +43,41 @@ def _compact(value: str | None) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def smart_title_case(value: str | None, *, keep_connectors_lower: bool = True) -> str:
+    compact = _compact(value)
+    if not compact:
+        return ""
+    words = compact.split(" ")
+    result: list[str] = []
+    for index, word in enumerate(words):
+        prefix = ""
+        suffix = ""
+        core = word
+        while core and core[0] in "([{\"'":
+            prefix += core[0]
+            core = core[1:]
+        while core and core[-1] in ".,!?;:)]}\"'":
+            suffix = core[-1] + suffix
+            core = core[:-1]
+        if not core:
+            result.append(word)
+            continue
+        key = core.casefold()
+        if key in _PRESERVE_CASE:
+            transformed = _PRESERVE_CASE[key]
+        elif keep_connectors_lower and index > 0 and key in _LOWERCASE_CONNECTORS:
+            transformed = key
+        else:
+            transformed = core[:1].upper() + core[1:].lower()
+        result.append(f"{prefix}{transformed}{suffix}")
+    return " ".join(result)
+
+
 def _clean_tag(value: str | None) -> str:
     tag = _compact(value).lstrip("#").strip(" ,.;:|/")
-    return tag[:60]
+    if not tag:
+        return ""
+    return smart_title_case(tag, keep_connectors_lower=True)[:70].rstrip()
 
 
 def _words(value: str) -> list[str]:
@@ -59,11 +106,11 @@ def _choose_title(title: str, source_title: str, hook: str) -> str:
     candidates = [_compact(title), _compact(hook), _compact(source_title)]
     for candidate in candidates:
         if candidate and not _looks_repetitive(candidate):
-            return candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!")
+            return smart_title_case(candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!"), keep_connectors_lower=True)
     for candidate in candidates:
         if candidate:
-            return candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!")
-    return "Short em destaque"
+            return smart_title_case(candidate[:YOUTUBE_TITLE_MAX].rstrip(" -|:,.!"), keep_connectors_lower=True)
+    return "Short em Destaque"
 
 
 def _keyword_fallbacks(source_title: str, hook: str) -> list[str]:
@@ -75,25 +122,36 @@ def _keyword_fallbacks(source_title: str, hook: str) -> list[str]:
 
     result: list[str] = []
     if source and not _looks_repetitive(source):
-        result.append(source[:60])
+        result.append(source[:70])
     if hook_text and hook_text.casefold() != source.casefold() and not _looks_repetitive(hook_text):
-        result.append(hook_text[:60])
+        result.append(hook_text[:70])
 
-    result.extend(keyword_words[:6])
-    for index in range(min(4, max(0, len(keyword_words) - 1))):
-        phrase = f"{keyword_words[index]} {keyword_words[index + 1]}"
-        if len(phrase) <= 60:
-            result.append(phrase)
+    result.extend(keyword_words[:10])
+    for size in (4, 3, 2):
+        for index in range(max(0, len(keyword_words) - size + 1)):
+            phrase = " ".join(keyword_words[index : index + size])
+            if 6 <= len(phrase) <= 70:
+                result.append(phrase)
 
-    result.extend(["YouTube Shorts", "Shorts", "vídeo curto"])
+    result.extend(["YouTube Shorts", "Shorts", "Vídeo Curto"])
     return result
+
+
+def youtube_tag_budget(tags: list[str]) -> int:
+    total = 0
+    for index, tag in enumerate(tags):
+        if index:
+            total += 1
+        total += len(tag)
+        if " " in tag:
+            total += 2
+    return total
 
 
 def normalize_tags(tags: list[str] | None, *, source_title: str = "", hook: str = "") -> list[str]:
     candidates = [*(tags or []), *_keyword_fallbacks(source_title, hook)]
     result: list[str] = []
     seen: set[str] = set()
-    total = 0
 
     for raw in candidates:
         tag = _clean_tag(raw)
@@ -102,12 +160,11 @@ def normalize_tags(tags: list[str] | None, *, source_title: str = "", hook: str 
         key = tag.casefold()
         if key in seen:
             continue
-        projected = total + len(tag) + (1 if result else 0)
-        if projected > YOUTUBE_TAG_TOTAL_MAX:
+        proposed = [*result, tag]
+        if youtube_tag_budget(proposed) > YOUTUBE_TAG_TOTAL_MAX:
             continue
         seen.add(key)
         result.append(tag)
-        total = projected
         if len(result) >= YOUTUBE_TAG_COUNT_MAX:
             break
     return result
