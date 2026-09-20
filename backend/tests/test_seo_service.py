@@ -5,6 +5,7 @@ from app.services.seo_service import (
     YOUTUBE_TITLE_MAX,
     build_publish_metadata,
     normalize_tags,
+    youtube_tag_budget,
 )
 
 
@@ -24,7 +25,7 @@ def test_publish_metadata_is_complete_and_within_youtube_limits():
     assert len(metadata.description) <= YOUTUBE_DESCRIPTION_MAX
     assert "#Shorts" in metadata.description
     assert 3 <= len(metadata.tags) <= YOUTUBE_TAG_COUNT_MAX
-    assert len(",".join(metadata.tags)) <= YOUTUBE_TAG_TOTAL_MAX + YOUTUBE_TAG_COUNT_MAX
+    assert youtube_tag_budget(metadata.tags) <= YOUTUBE_TAG_TOTAL_MAX
     assert all(not tag.startswith("#") for tag in metadata.tags)
     assert len({tag.casefold() for tag in metadata.tags}) == len(metadata.tags)
 
@@ -39,7 +40,7 @@ def test_metadata_fallback_prevents_empty_publication_fields():
         hook="Entenda como funciona o financiamento",
     )
 
-    assert metadata.title.startswith("Entenda como funciona")
+    assert metadata.title.startswith("Entenda Como Funciona")
     assert "Confira este trecho" in metadata.description
     assert "#Shorts" in metadata.description
     assert metadata.tags
@@ -86,4 +87,16 @@ def test_publish_metadata_does_not_duplicate_generated_hashtag_block_on_retry():
 def test_tags_respect_total_character_budget():
     tags = normalize_tags([f"palavra-chave muito longa {index} " * 4 for index in range(30)])
     assert len(tags) <= YOUTUBE_TAG_COUNT_MAX
-    assert sum(len(tag) + (1 if index else 0) for index, tag in enumerate(tags)) <= YOUTUBE_TAG_TOTAL_MAX
+    assert youtube_tag_budget(tags) <= YOUTUBE_TAG_TOTAL_MAX
+
+
+def test_tags_use_optimized_capitalization_without_breaking_acronyms():
+    tags = normalize_tags(
+        ["seo para youtube", "ia para shorts", "marketing digital", "vendas b2b"],
+        source_title="SEO para YouTube com IA",
+        hook="Como melhorar vendas B2B",
+    )
+    assert "SEO para YouTube" in tags
+    assert "IA para Shorts" in tags
+    assert "Vendas B2B" in tags
+    assert youtube_tag_budget(tags) <= 500
