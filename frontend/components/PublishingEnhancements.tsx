@@ -82,6 +82,40 @@ function tiktokStatusLabel(status?: string) {
 
 const YOUTUBE_BUSY_STATUSES = new Set(["upload_queued", "uploading", "uploaded"]);
 const TIKTOK_BUSY_STATUSES = new Set(["queued", "uploading", "processing", "submitted"]);
+const PUBLICATION_BATCH_LIMIT = 100;
+
+type BatchUploadResult = { queued: number; skipped: number; clip_ids: number[] };
+
+function chunkIds(ids: number[], size = PUBLICATION_BATCH_LIMIT) {
+  const chunks: number[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function mergeBatchResults(results: BatchUploadResult[]): BatchUploadResult {
+  return results.reduce<BatchUploadResult>(
+    (acc, result) => ({
+      queued: acc.queued + result.queued,
+      skipped: acc.skipped + result.skipped,
+      clip_ids: [...acc.clip_ids, ...result.clip_ids],
+    }),
+    { queued: 0, skipped: 0, clip_ids: [] },
+  );
+}
+
+async function uploadIdsInBatches(
+  ids: number[],
+  upload: (chunk: number[]) => Promise<BatchUploadResult>,
+) {
+  const batches = chunkIds(ids);
+  const results: BatchUploadResult[] = [];
+  for (const chunk of batches) {
+    results.push(await upload(chunk));
+  }
+  return { batches, result: mergeBatchResults(results) };
+}
 
 function isYouTubeSelectable(clip: Clip) {
   return !YOUTUBE_BUSY_STATUSES.has(clip.status || "");
@@ -336,8 +370,10 @@ export default function PublishingEnhancements() {
     if (availability.blocked && remaining > 0) return setError(`YouTube bloqueado temporariamente. Nova tentativa estimada em ${fmtCountdown(remaining)}.`);
     setBusy("youtube"); setError(""); setNotice("");
     try {
-      const result = await uploadClipsBatch(selectedIds);
-      setNotice(`${result.queued} corte(s) colocado(s) na fila do YouTube. Eles somem desta aba somente após a publicação ser confirmada.`);
+      const { batches, result } = await uploadIdsInBatches(selectedIds, uploadClipsBatch);
+      const batchNote = batches.length > 1 ? ` em ${batches.length} lotes seguros` : "";
+      const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
+      setNotice(`${result.queued} corte(s) colocado(s) na fila do YouTube${batchNote}. Eles somem desta aba somente após a publicação ser confirmada.${skipped}`);
       await refreshQueues({ silent: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao criar a fila do YouTube.");
@@ -359,13 +395,14 @@ export default function PublishingEnhancements() {
     try {
       // The backend validates Creator Info immediately before queueing. Do not
       // make a duplicate TikTok Creator Info request from the browser.
-      const result = await tiktokUploadBatch(selectedIds, {
+      const payload = {
         privacy_level: privacy,
         allow_comment: allowComment,
         allow_duet: allowDuet,
         allow_stitch: allowStitch,
         music_usage_confirmed: musicConfirmed,
-      });
+      };
+      const { batches, result } = await uploadIdsInBatches(selectedIds, (ids) => tiktokUploadBatch(ids, payload));
       const queuedIds = new Set(result.clip_ids);
       if (queuedIds.size) {
         setTiktokClips((current) => current.map((clip) => (
@@ -376,8 +413,9 @@ export default function PublishingEnhancements() {
         setTiktokSelected((current) => new Set([...current].filter((id) => !queuedIds.has(id))));
       }
       if (result.queued) {
+        const batchNote = batches.length > 1 ? ` em ${batches.length} lotes seguros` : "";
         const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
-        setNotice(`${result.queued} corte(s) enviados para a fila de Direct Post. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok bloquear a publicação direta, o corte volta liberado para nova tentativa.${skipped}`);
+        setNotice(`${result.queued} corte(s) enviados para a fila de Direct Post${batchNote}. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok bloquear a publicação direta, o corte volta liberado para nova tentativa.${skipped}`);
       } else {
         setError("Nenhum corte novo foi enviado ao TikTok. Os selecionados já estavam em fila/processamento, publicados ou sem arquivo válido.");
       }
