@@ -11,6 +11,7 @@ import type {
   PublicConfig,
   TeamUser,
   TrendingVideo,
+  TrendingVideoPage,
   UserProfile,
   YouTubeLiveMetrics,
 } from "./types";
@@ -122,6 +123,17 @@ export const adminUpdateDownloadAuth = (payload: {
 export async function getTrending(keyword: string, region = "BR", days = 14): Promise<TrendingVideo[]> {
   const params = new URLSearchParams({ keyword, region, days: String(days), max_results: "1000" });
   return api(`/api/videos/trending?${params}`);
+}
+
+export async function searchYoutubeVideos(
+  keyword: string,
+  region = "BR",
+  days = 14,
+  pageToken?: string | null,
+): Promise<TrendingVideoPage> {
+  const params = new URLSearchParams({ keyword, region, days: String(days) });
+  if (pageToken) params.set("page_token", pageToken);
+  return api(`/api/videos/search?${params}`);
 }
 
 export async function createJob(video: TrendingVideo, requestedClips: number): Promise<Job> {
