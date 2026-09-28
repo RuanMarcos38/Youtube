@@ -3,7 +3,7 @@ from pathlib import Path
 from app.services import ffmpeg_service
 
 
-def test_vertical_render_keeps_complete_frame_and_quality_floor(monkeypatch, tmp_path):
+def test_vertical_render_fills_short_canvas_without_stretching(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
     monkeypatch.setattr(ffmpeg_service, "_run", lambda command: commands.append(command) or "")
@@ -22,12 +22,12 @@ def test_vertical_render_keeps_complete_frame_and_quality_floor(monkeypatch, tmp
     command = commands[0]
     vf = command[command.index("-vf") + 1]
 
-    assert "force_original_aspect_ratio=decrease" in vf
+    assert "force_original_aspect_ratio=increase" in vf
     assert "flags=lanczos" in vf
-    assert "pad=1080:1920" in vf
+    assert "crop=1080:1920" in vf
     assert "setsar=1" in vf
-    assert "force_original_aspect_ratio=increase" not in vf
-    assert "crop=1080:1920" not in vf
+    assert "force_original_aspect_ratio=decrease" not in vf
+    assert "pad=1080:1920" not in vf
 
     assert command[command.index("-crf") + 1] == "18"
     assert command[command.index("-b:a") + 1] == "192k"
