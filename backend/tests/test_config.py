@@ -41,6 +41,6 @@ def test_processing_speed_defaults(monkeypatch):
     assert settings.local_whisper_parallelism == 2
     assert settings.local_whisper_cpu_threads == 0
     assert settings.audio_chunk_seconds == 1200
-    assert settings.ffmpeg_preset == "veryfast"
-    assert settings.ffmpeg_crf == 21
+    assert settings.ffmpeg_preset == "fast"
+    assert settings.ffmpeg_crf == 18
     assert settings.ffmpeg_threads_per_job == 2
