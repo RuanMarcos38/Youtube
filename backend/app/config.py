@@ -128,10 +128,10 @@ class Settings(BaseSettings):
     ytdlp_node_path: str = "/usr/local/bin/node"
     ffmpeg_binary: str = "ffmpeg"
     ffprobe_binary: str = "ffprobe"
-    # Veryfast is substantially quicker than medium for 9:16 Shorts while CRF
-    # 21 preserves clean text/faces for social publishing.
-    ffmpeg_preset: str = "veryfast"
-    ffmpeg_crf: int = 21
+    # Prioritize source fidelity for Shorts: CRF 18 is visually transparent for
+    # typical YouTube material while the fast preset keeps processing practical.
+    ffmpeg_preset: str = "fast"
+    ffmpeg_crf: int = 18
     ffmpeg_threads_per_job: int = 2
     worker_poll_seconds: float = 1.0
     # Five pipeline workers means videos 1-5 can be active together and video 6
