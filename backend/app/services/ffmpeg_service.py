@@ -143,19 +143,26 @@ def render_vertical_clip(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(0.1, end_seconds - start_seconds)
 
+    # Preserve the complete YouTube frame. The old center-crop removed the left
+    # and right sides of landscape videos, which could cut text, slides and
+    # people out of the Short. Lanczos scaling + padding keeps the original
+    # geometry intact and prevents stretched or illegible output.
     filters = [
-        "scale=1080:1920:force_original_aspect_ratio=increase",
-        "crop=1080:1920:(in_w-1080)/2:(in_h-1920)/2",
+        "scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
+        "setsar=1",
     ]
     if subtitle_path and subtitle_path.exists() and subtitle_path.stat().st_size > 0:
         escaped = _escape_filter_path(subtitle_path)
         style = _subtitle_force_style(caption_position, caption_margin_v, caption_font_size)
         filters.append(f"subtitles='{escaped}':force_style='{style}'")
 
-    preset = (settings.ffmpeg_preset or "veryfast").strip()
+    preset = (settings.ffmpeg_preset or "fast").strip()
     if preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
-        preset = "veryfast"
-    crf = max(16, min(30, int(settings.ffmpeg_crf or 21)))
+        preset = "fast"
+    # Never allow the automatic cutter to silently render below the required
+    # quality floor. Lower CRF values remain allowed for even higher quality.
+    crf = max(16, min(18, int(settings.ffmpeg_crf or 18)))
     threads = max(1, min(8, int(settings.ffmpeg_threads_per_job or 2)))
 
     _run([
@@ -166,8 +173,9 @@ def render_vertical_clip(
         "-vf", ",".join(filters),
         "-map", "0:v:0", "-map", "0:a?",
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+        "-profile:v", "high", "-level", "4.2",
         "-threads", str(threads),
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         str(output_path),
     ])
