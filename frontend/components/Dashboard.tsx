@@ -6,7 +6,7 @@ import {
   approveClip,
   createEditorProjectFromClip,
   createJob,
-  getTrending,
+  searchYoutubeVideos,
   listClips,
   listJobs,
   retryJob,
@@ -513,6 +513,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const [requestedClips, setRequestedClips] = useState(3);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [videos, setVideos] = useState<TrendingVideo[]>([]);
+  const [nextVideoPageToken, setNextVideoPageToken] = useState<string | null>(null);
   const [selected, setSelected] = useState<TrendingVideo | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -522,6 +523,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const [captionDrafts, setCaptionDrafts] = useState<Record<number, CaptionDraft>>({});
   const [privacy, setPrivacy] = useState("private");
   const [loading, setLoading] = useState(false);
+  const [loadingMoreVideos, setLoadingMoreVideos] = useState(false);
   const [liveLoading, setLiveLoading] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -614,11 +616,32 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   async function search() {
     setLoading(true); setError(""); setMessage("");
     try {
-      const result = await getTrending(keyword, region, days);
-      setVideos(result); setSelected(null);
+      const result = await searchYoutubeVideos(keyword, region, days);
+      setVideos(result.items);
+      setNextVideoPageToken(result.next_page_token ?? null);
+      setSelected(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao buscar vídeos");
     } finally { setLoading(false); }
+  }
+
+  async function loadMoreVideos() {
+    if (!nextVideoPageToken || loading || loadingMoreVideos) return;
+    setLoadingMoreVideos(true);
+    setError("");
+    try {
+      const result = await searchYoutubeVideos(keyword, region, days, nextVideoPageToken);
+      setVideos((current) => {
+        const seen = new Set(current.map((video) => video.video_id));
+        const fresh = result.items.filter((video) => !seen.has(video.video_id));
+        return [...current, ...fresh];
+      });
+      setNextVideoPageToken(result.next_page_token ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao carregar mais vídeos");
+    } finally {
+      setLoadingMoreVideos(false);
+    }
   }
 
   async function processSelected() {
@@ -924,14 +947,21 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteúdo</h3><p className="mt-1 text-xs text-[#666]">Encontre vídeos com potencial para cortes.</p></div>
               <div className="p-5">
                 <div className="grid gap-3 md:grid-cols-[1fr_80px_110px_auto]">
-                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} className="sf-input min-w-0 px-3 py-2.5" placeholder="Ex.: marketing digital, imóveis, vendas" />
-                  <input value={region} onChange={(e) => setRegion(e.target.value.toUpperCase().slice(0, 2))} className="sf-input px-3 py-2.5 text-center font-medium" />
-                  <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="sf-input px-3 py-2.5"><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
+                  <input value={keyword} onChange={(e) => { setKeyword(e.target.value); setNextVideoPageToken(null); }} onKeyDown={(e) => e.key === "Enter" && search()} className="sf-input min-w-0 px-3 py-2.5" placeholder="Ex.: marketing digital, imóveis, vendas" />
+                  <input value={region} onChange={(e) => { setRegion(e.target.value.toUpperCase().slice(0, 2)); setNextVideoPageToken(null); }} className="sf-input px-3 py-2.5 text-center font-medium" />
+                  <select value={days} onChange={(e) => { setDays(Number(e.target.value)); setNextVideoPageToken(null); }} className="sf-input px-3 py-2.5"><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
                   <button onClick={search} disabled={loading} className="sf-button sf-button-primary disabled:opacity-50"><SearchIcon className="h-4 w-4" />{loading ? "Buscando..." : "Buscar"}</button>
                 </div>
 
-                <div className="mt-5 max-h-[520px] divide-y divide-[#ededed] overflow-y-auto rounded-lg border border-[#e8e8e8]">
-                  {videos.length === 0 && <div className="p-10 text-center text-sm text-[#777]">Faça uma busca para encontrar vídeos.</div>}
+                <div
+                  onScroll={(event) => {
+                    const element = event.currentTarget;
+                    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 120;
+                    if (nearBottom && nextVideoPageToken && !loadingMoreVideos) void loadMoreVideos();
+                  }}
+                  className="mt-5 max-h-[520px] divide-y divide-[#ededed] overflow-y-auto rounded-lg border border-[#e8e8e8]"
+                >
+                  {videos.length === 0 && !loading && <div className="p-10 text-center text-sm text-[#777]">{nextVideoPageToken ? "Continue carregando para encontrar vídeos dentro dos filtros atuais." : "Faça uma busca para encontrar vídeos."}</div>}
                   {videos.map((video) => (
                     <button key={video.video_id} onClick={() => setSelected(video)} className={`flex w-full items-center gap-4 p-3 text-left transition ${selected?.video_id === video.video_id ? "bg-red-50" : "bg-white hover:bg-[#f7f7f7]"}`}>
                       <div className="relative h-16 w-28 flex-none overflow-hidden rounded-md bg-[#111]"><img src={video.thumbnail_url} alt="" className="h-full w-full object-cover" /><span className="absolute inset-0 grid place-items-center bg-black/15"><span className="grid h-8 w-8 place-items-center rounded-full bg-white/95"><PlayIcon className="ml-0.5 h-3.5 w-3.5 text-[#111]" /></span></span></div>
@@ -939,6 +969,23 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                       {selected?.video_id === video.video_id && <span className="grid h-6 w-6 flex-none place-items-center rounded-full bg-[#ff0000] text-white"><CheckIcon className="h-3.5 w-3.5" /></span>}
                     </button>
                   ))}
+                  {videos.length > 0 && (
+                    <div className="flex items-center justify-between gap-3 bg-[#fafafa] px-3 py-2.5 text-[11px] text-[#666]">
+                      <span>{videos.length} resultado(s) carregado(s)</span>
+                      {nextVideoPageToken ? (
+                        <button
+                          type="button"
+                          onClick={() => void loadMoreVideos()}
+                          disabled={loadingMoreVideos}
+                          className="rounded-md border border-[#dedede] bg-white px-3 py-1.5 font-semibold text-[#222] disabled:opacity-50"
+                        >
+                          {loadingMoreVideos ? "Carregando..." : "Carregar mais"}
+                        </button>
+                      ) : (
+                        <span className="font-medium text-[#555]">Todos os resultados disponíveis foram carregados.</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
