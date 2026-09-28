@@ -17,6 +17,12 @@ class TrendingVideo(BaseModel):
     duration_seconds: int = 0
 
 
+class TrendingVideoPage(BaseModel):
+    items: list[TrendingVideo]
+    next_page_token: str | None = None
+    has_more: bool = False
+
+
 class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     email: EmailStr

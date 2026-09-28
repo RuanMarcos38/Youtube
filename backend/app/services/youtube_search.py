@@ -131,6 +131,87 @@ def _cache_put(key: tuple[str, str, int, int], videos: list[dict]) -> None:
     _SEARCH_CACHE[key] = (time.monotonic(), [dict(video) for video in videos])
 
 
+def discover_videos_page(
+    keyword: str = "",
+    region: str = "BR",
+    days: int = 14,
+    page_token: str | None = None,
+) -> dict:
+    """Return one YouTube search page with no ShortsFlow total-result cap.
+
+    YouTube allows at most 50 search items per request. The caller can keep
+    following next_page_token until YouTube stops returning one. This keeps
+    the search responsive while allowing the UI to progressively expose every
+    API-visible result that matches the existing filters.
+    """
+    youtube = _youtube_public_client()
+    region = (region or settings.youtube_default_region).upper()
+    normalized_days = max(1, min(int(days), 90))
+    query = (keyword or "").strip()
+
+    published_after = (
+        datetime.now(timezone.utc) - timedelta(days=normalized_days)
+    ).isoformat().replace("+00:00", "Z")
+
+    try:
+        direct_video_id = _extract_direct_video_id(query)
+        if direct_video_id:
+            items = []
+            for item in _fetch_video_details(youtube, [direct_video_id]):
+                video = _normalize_video(item)
+                if video["duration_seconds"] >= MIN_SOURCE_DURATION_SECONDS:
+                    items.append(video)
+            return {
+                "items": items,
+                "next_page_token": None,
+                "has_more": False,
+            }
+
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "order": "relevance",
+            "regionCode": region,
+            "publishedAfter": published_after,
+            "videoDuration": "long",
+            "maxResults": SEARCH_PAGE_SIZE,
+            "safeSearch": "none",
+        }
+        if query:
+            params["q"] = query
+        if page_token:
+            params["pageToken"] = page_token
+
+        search_response = youtube.search().list(**params).execute()
+        ids = list(
+            dict.fromkeys(
+                item.get("id", {}).get("videoId")
+                for item in search_response.get("items", [])
+                if item.get("id", {}).get("videoId")
+            )
+        )
+
+        details_by_id: dict[str, dict] = {}
+        for item in _fetch_video_details(youtube, ids):
+            video = _normalize_video(item)
+            if video["duration_seconds"] < MIN_SOURCE_DURATION_SECONDS:
+                continue
+            if video["video_id"]:
+                details_by_id[video["video_id"]] = video
+
+        # Preserve YouTube's relevance order instead of re-sorting locally.
+        items = [details_by_id[video_id] for video_id in ids if video_id in details_by_id]
+        next_token = search_response.get("nextPageToken")
+        return {
+            "items": items,
+            "next_page_token": next_token,
+            "has_more": bool(next_token),
+        }
+    except HttpError as exc:
+        raise_for_youtube_error(exc)
+        raise
+
+
 def discover_videos(keyword: str = "", region: str = "BR", max_results: int = 100, days: int = 14) -> list[dict]:
     """Return the broadest API-visible set of eligible long-form videos.
 

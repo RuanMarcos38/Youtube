@@ -209,6 +209,12 @@ export type TrendingVideo = {
   duration_seconds: number;
 };
 
+export type TrendingVideoPage = {
+  items: TrendingVideo[];
+  next_page_token?: string | null;
+  has_more: boolean;
+};
+
 export type SourceVideo = {
   id: number;
   youtube_id: string;

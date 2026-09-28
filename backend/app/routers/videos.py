@@ -3,10 +3,33 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..auth import get_current_user
 from ..errors import YouTubeAuthError, YouTubeQuotaError
 from ..models import User
-from ..schemas import TrendingVideo
-from ..services.youtube_search import discover_videos
+from ..schemas import TrendingVideo, TrendingVideoPage
+from ..services.youtube_search import discover_videos, discover_videos_page
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+@router.get("/search", response_model=TrendingVideoPage)
+def search_videos(
+    keyword: str = Query(default="", max_length=120),
+    region: str = Query(default="BR", min_length=2, max_length=2),
+    days: int = Query(default=14, ge=1, le=90),
+    page_token: str | None = Query(default=None, max_length=512),
+    _user: User = Depends(get_current_user),
+):
+    try:
+        return discover_videos_page(
+            keyword=keyword,
+            region=region,
+            days=days,
+            page_token=page_token,
+        )
+    except YouTubeQuotaError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except YouTubeAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/trending", response_model=list[TrendingVideo])
