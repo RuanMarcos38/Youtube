@@ -26,6 +26,7 @@ from ..services.tiktok_oauth import (
     get_creator_info,
 )
 from ..services.tiktok_policy import (
+    apply_unaudited_public_block,
     clear_legacy_unaudited_state,
     clear_unaudited_public_block,
     recover_retryable_draft_uploads,
@@ -130,6 +131,10 @@ def creator_info(user: User = Depends(get_current_user), db: Session = Depends(g
     try:
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
+        # If the last real Direct Post attempt was rejected because the TikTok
+        # client is unaudited, surface that authoritative state instead of
+        # continuing to show "Pronto para TikTok" with no explanation.
+        creator = apply_unaudited_public_block(db, user_id=user.id, creator=creator)
         return creator
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -181,8 +186,15 @@ def upload_batch(
         creator = get_creator_info(db, user.id, force=True)
         clear_legacy_unaudited_state(db, user_id=user.id)
         recover_retryable_draft_uploads(db, user_id=user.id)
+        creator = apply_unaudited_public_block(db, user_id=user.id, creator=creator)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if creator.get("public_posting_blocked") and payload.privacy_level == "PUBLIC_TO_EVERYONE":
+        raise HTTPException(
+            status_code=409,
+            detail=creator.get("public_posting_block_reason") or "O TikTok bloqueou a publicação pública por Direct Post para esta conta/app.",
+        )
 
     options = creator.get("privacy_level_options") or []
     if payload.privacy_level not in options:
