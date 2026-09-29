@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
@@ -19,6 +19,8 @@ AUTO_CLEAN_PREFIX = "auto_clean:"
 MAX_FORCE_CLEAN_PER_TICK = 15
 CLEANABLE_STATUSES = ["ready", "approved", "upload_failed", "upload_queued", "uploaded"]
 READY_STATUSES = ["ready", "approved", "upload_failed"]
+TIKTOK_COUNTED_STATUSES = ["queued", "uploading", "processing", "submitted", "published", "paused_limit"]
+TIKTOK_RETRY_COOLDOWN_MINUTES = 30
 
 
 def load_auto_config(db: Session, user_id: int) -> dict:
@@ -202,6 +204,51 @@ def _tiktok_post_title(clip: Clip) -> str:
     return f"{base}\n\n{hashtags}".strip()[:2200]
 
 
+def _tiktok_started_today_for_user(db: Session, user_id: int, config: dict) -> int:
+    """Count real TikTok queue/publication attempts for this user today.
+
+    This intentionally does not depend on the clip having been created by the
+    automatic discovery job. A Short that is visible as "Pronto para TikTok"
+    and is automatically queued must consume the same daily target.
+    """
+    start, end = auto._local_day_utc_bounds(config)
+    return (
+        db.query(TikTokPost)
+        .filter(
+            TikTokPost.user_id == user_id,
+            TikTokPost.created_at >= start,
+            TikTokPost.created_at < end,
+            TikTokPost.status.in_(TIKTOK_COUNTED_STATUSES),
+        )
+        .count()
+    )
+
+
+def _latest_tiktok_posts(db: Session, user_id: int) -> dict[int, TikTokPost]:
+    rows = (
+        db.query(TikTokPost)
+        .filter(TikTokPost.user_id == user_id)
+        .order_by(TikTokPost.id.asc())
+        .all()
+    )
+    return {row.clip_id: row for row in rows}
+
+
+def _tiktok_post_retryable(post: TikTokPost | None) -> bool:
+    if post is None or post.status == "ready":
+        return True
+    if post.status != "failed":
+        return False
+    updated = post.updated_at
+    if updated is None:
+        return True
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    else:
+        updated = updated.astimezone(timezone.utc)
+    return updated <= datetime.now(timezone.utc) - timedelta(minutes=TIKTOK_RETRY_COOLDOWN_MINUTES)
+
+
 def _queue_tiktok_due_verified(db: Session, user: User, config: dict) -> tuple[int, str | None]:
     if not config["publish_tiktok"]:
         return 0, None
@@ -222,56 +269,60 @@ def _queue_tiktok_due_verified(db: Session, user: User, config: dict) -> tuple[i
     if privacy not in options:
         return 0, creator.get("public_posting_block_reason") or "O TikTok não liberou a privacidade configurada para Direct Post nesta conta."
 
-    auto_ids = auto._auto_job_ids(db, user.id)
     expected = auto.expected_publications_now(config)
-    already = auto._tiktok_started_today(db, user.id, auto_ids, config)
+    already = _tiktok_started_today_for_user(db, user.id, config)
     due = max(0, expected - already)
-    if due <= 0 or not auto_ids:
+    if due <= 0:
         return 0, None
 
-    verified = _verified_clip_ids(db, user.id)
-    if not verified:
-        return 0, None
-    existing_clip_ids = {
-        row.clip_id
-        for row in db.query(TikTokPost).filter(TikTokPost.user_id == user.id).all()
-    }
-    max_duration = int(creator.get("max_video_post_duration_sec") or 60)
+    # Use the same current Short pool shown by /publications/tiktok: the newest
+    # 200 non-archived clips. Automatic clips still need the mandatory clean
+    # marker; manually-created ready clips are allowed by auto_clip_publish_verified.
     candidate_rows = (
         db.query(Clip)
         .filter(
             Clip.user_id == user.id,
-            Clip.job_id.in_(auto_ids),
-            Clip.id.in_(verified),
             Clip.status != "archived",
             Clip.subtitle_path == "",
         )
-        .order_by(Clip.id.asc())
+        .order_by(Clip.id.desc())
+        .limit(200)
         .all()
     )
+    latest_posts = _latest_tiktok_posts(db, user.id)
+    max_duration = int(creator.get("max_video_post_duration_sec") or 60)
     queued = 0
+
     for clip in candidate_rows:
         if queued >= due:
             break
-        if clip.id in existing_clip_ids or not Path(clip.file_path).is_file():
+        if not Path(clip.file_path).is_file():
+            continue
+        if not auto_clip_publish_verified(db, clip):
             continue
         if max(0.0, clip.end_seconds - clip.start_seconds) > max_duration:
             continue
-        post = TikTokPost(
-            user_id=user.id,
-            clip_id=clip.id,
-            status="queued",
-            privacy_level=privacy,
-            title=_tiktok_post_title(clip),
-            disable_comment=not bool(config["allow_comment"]) or bool(creator.get("comment_disabled")),
-            disable_duet=not bool(config["allow_duet"]) or bool(creator.get("duet_disabled")),
-            disable_stitch=not bool(config["allow_stitch"]) or bool(creator.get("stitch_disabled")),
-            publish_id=None,
-            error=None,
-        )
-        db.add(post)
-        existing_clip_ids.add(clip.id)
+
+        post = latest_posts.get(clip.id)
+        if not _tiktok_post_retryable(post):
+            continue
+
+        if post is None:
+            post = TikTokPost(user_id=user.id, clip_id=clip.id)
+            db.add(post)
+            latest_posts[clip.id] = post
+
+        # Reuse a retryable row instead of creating duplicate TikTokPost rows.
+        post.status = "queued"
+        post.privacy_level = privacy
+        post.title = _tiktok_post_title(clip)
+        post.disable_comment = not bool(config["allow_comment"]) or bool(creator.get("comment_disabled"))
+        post.disable_duet = not bool(config["allow_duet"]) or bool(creator.get("duet_disabled"))
+        post.disable_stitch = not bool(config["allow_stitch"]) or bool(creator.get("stitch_disabled"))
+        post.publish_id = None
+        post.error = None
         queued += 1
+
     db.commit()
     return queued, None
 
@@ -279,6 +330,9 @@ def _queue_tiktok_due_verified(db: Session, user: User, config: dict) -> tuple[i
 def automation_status(db: Session, user_id: int, config: dict | None = None) -> dict:
     config = config or load_auto_config(db, user_id)
     status = auto.automation_status(db, user_id, config)
+    # Keep the dashboard aligned with the real TikTok queue, including Shorts
+    # that were created manually but are being distributed automatically.
+    status["tiktok_today"] = _tiktok_started_today_for_user(db, user_id, config)
     auto_ids = auto._auto_job_ids(db, user_id)
     if not auto_ids:
         status["clean_ready"] = 0
