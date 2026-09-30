@@ -153,11 +153,11 @@ def apply_unaudited_public_block(db: Session, *, user_id: int, creator: dict) ->
 
     TikTok requires unaudited Direct Post clients to use a private creator
     account and SELF_ONLY viewership. A public account cannot use Direct Post
-    until the app is audited or the creator makes the account private.
+    until the app is audited or the creator makes the account private. Only the
+    current audit marker blocks the UI; historical failed posts remain
+    diagnostic and must not re-block after the user reconnects TikTok.
     """
     active = unaudited_public_block_active(db, user_id=user_id)
-    if not active:
-        active = sync_unaudited_public_block_from_recent_failure(db, user_id=user_id)
     if not active:
         return creator
     options = [str(value) for value in (creator.get("privacy_level_options") or []) if str(value).strip()]

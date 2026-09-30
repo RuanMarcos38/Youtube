@@ -176,6 +176,82 @@ def test_sync_unaudited_public_block_from_recent_failure():
         db.close()
 
 
+def test_recent_unaudited_failure_does_not_block_after_reconnect_clear():
+    initialize_database()
+    suffix = uuid.uuid4().hex[:12]
+    db = SessionLocal()
+    try:
+        tenant = Tenant(name=f"TikTok reconnect clear {suffix}", billing_status="active")
+        db.add(tenant)
+        db.flush()
+        user = User(
+            tenant_id=tenant.id,
+            email=f"tiktok-reconnect-clear-{suffix}@example.com",
+            password_hash="test-only",
+            display_name="TikTok Reconnect Clear",
+            role="member",
+            active=True,
+        )
+        db.add(user)
+        db.flush()
+        source = SourceVideo(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            youtube_id=f"reconnect-source-{suffix}",
+            title="Source",
+            channel_title="Channel",
+            original_url="https://www.youtube.com/watch?v=test",
+            thumbnail_url="",
+            duration_seconds=60,
+            rights_confirmed=True,
+        )
+        db.add(source)
+        db.flush()
+        job = Job(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            source_video_id=source.id,
+            requested_clips=1,
+            status="ready_for_review",
+            progress=100,
+        )
+        db.add(job)
+        db.flush()
+        clip = Clip(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            job_id=job.id,
+            start_seconds=0,
+            end_seconds=30,
+            title="Reconnect failure",
+            file_path=f"/tmp/{suffix}.mp4",
+            status="ready",
+        )
+        db.add(clip)
+        db.flush()
+        db.add(
+            TikTokPost(
+                user_id=user.id,
+                clip_id=clip.id,
+                privacy_level="PUBLIC_TO_EVERYONE",
+                status="failed",
+                error="O TikTok identificou este cliente da Content Posting API como não auditado.",
+            )
+        )
+        db.commit()
+
+        creator = {
+            "privacy_level_options": ["PUBLIC_TO_EVERYONE", "SELF_ONLY"],
+            "public_posting_blocked": False,
+            "public_posting_block_reason": "",
+        }
+
+        assert apply_unaudited_public_block(db, user_id=user.id, creator=creator) == creator
+        assert unaudited_public_block_active(db, user_id=user.id) is False
+    finally:
+        db.close()
+
+
 def test_release_unaudited_public_queue_keeps_current_error_visible():
     initialize_database()
     suffix = uuid.uuid4().hex[:12]
