@@ -5,6 +5,7 @@ from app.database import SessionLocal
 from app.models import Clip, Job, SourceVideo, Tenant, TikTokPost, User
 from app.routers.publications import tiktok_publications, youtube_publications
 from app.services.database_bootstrap import initialize_database
+from app.services.tiktok_upload import _public_post_ids
 from app.services.tiktok_upload_task import refresh_tiktok_post
 from app.services.youtube_upload_availability import mark_upload_blocked, upload_availability
 
@@ -238,7 +239,17 @@ def test_tiktok_post_only_disappears_after_publish_complete(monkeypatch):
         db.close()
 
 
-def test_tiktok_public_post_disappears_after_publish_complete_without_public_id(monkeypatch):
+def test_tiktok_status_accepts_corrected_public_post_id_field():
+    assert _public_post_ids({"publicly_available_post_id": ["abc", "", None]}) == ["abc"]
+    assert _public_post_ids(
+        {
+            "publicaly_available_post_id": ["legacy", "same"],
+            "publicly_available_post_id": ["same", "current"],
+        }
+    ) == ["legacy", "same", "current"]
+
+
+def test_tiktok_public_post_stays_visible_after_publish_complete_without_public_id(monkeypatch):
     initialize_database()
     db = SessionLocal()
     try:
@@ -272,10 +283,14 @@ def test_tiktok_public_post_disappears_after_publish_complete_without_public_id(
     try:
         refreshed = db.get(TikTokPost, post_id)
         user = refreshed and refreshed.user_id
-        assert refreshed.status == "published"
-        assert refreshed.error is None
+        assert refreshed.status == "processing"
+        assert "PUBLISH_COMPLETE" in (refreshed.error or "")
+        assert "ID público" in (refreshed.error or "")
         owner = db.get(User, user)
         assert owner is not None
-        assert clip.id not in {item["id"] for item in tiktok_publications(user=owner, db=db)["clips"]}
+        publications = tiktok_publications(user=owner, db=db)["clips"]
+        assert clip.id in {item["id"] for item in publications}
+        item = next(item for item in publications if item["id"] == clip.id)
+        assert item["tiktok_status"] == "processing"
     finally:
         db.close()

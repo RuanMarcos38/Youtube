@@ -62,6 +62,28 @@ def _raise_tiktok_error(response: httpx.Response, payload: dict) -> None:
     raise TikTokUploadError(f"TikTok ({code}): {message}")
 
 
+def _public_post_ids(data: dict) -> list[str]:
+    """Return TikTok's public post ids, accepting both documented field names."""
+    raw_values = []
+    for field in ("publicaly_available_post_id", "publicly_available_post_id"):
+        value = data.get(field)
+        if not value:
+            continue
+        if isinstance(value, list):
+            raw_values.extend(value)
+        else:
+            raw_values.append(value)
+
+    post_ids: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        post_id = str(value or "").strip()
+        if post_id and post_id not in seen:
+            post_ids.append(post_id)
+            seen.add(post_id)
+    return post_ids
+
+
 def _upload_file(
     client: httpx.Client,
     *,
@@ -210,6 +232,6 @@ def fetch_post_status(db: Session, *, user_id: int, publish_id: str) -> dict:
     return {
         "status": str(data.get("status") or "").strip().upper(),
         "fail_reason": str(data.get("fail_reason") or "").strip(),
-        "post_ids": [str(value) for value in (data.get("publicaly_available_post_id") or [])],
+        "post_ids": _public_post_ids(data),
         "uploaded_bytes": int(data.get("uploaded_bytes") or 0),
     }

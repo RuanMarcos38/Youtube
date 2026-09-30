@@ -415,7 +415,7 @@ export default function PublishingEnhancements() {
       if (result.queued) {
         const batchNote = batches.length > 1 ? ` em ${batches.length} lotes seguros` : "";
         const skipped = result.skipped ? ` ${result.skipped} corte(s) já estavam em fila/processamento, publicados ou sem arquivo válido.` : "";
-        setNotice(`${result.queued} corte(s) enviados para a fila de Direct Post${batchNote}. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE; se o TikTok bloquear a publicação direta, o corte volta liberado para nova tentativa.${skipped}`);
+        setNotice(`${result.queued} corte(s) enviados para a fila de Direct Post${batchNote}. O ShortsFlow só remove da aba quando o TikTok retorna PUBLISH_COMPLETE com ID público do post; se o TikTok bloquear a publicação direta, o corte volta liberado para nova tentativa.${skipped}`);
       } else {
         setError("Nenhum corte novo foi enviado ao TikTok. Os selecionados já estavam em fila/processamento, publicados ou sem arquivo válido.");
       }

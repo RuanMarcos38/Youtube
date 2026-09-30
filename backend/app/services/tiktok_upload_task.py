@@ -119,6 +119,12 @@ def _prepare_tiktok_original_audio_file(clip: Clip) -> Path:
     return output
 
 
+PUBLIC_POST_PENDING_MESSAGE = (
+    "O TikTok retornou PUBLISH_COMPLETE, mas ainda não devolveu o ID público do post. "
+    "O ShortsFlow vai continuar conferindo e só removerá este corte quando houver prova de publicação pública."
+)
+
+
 def _pause_user_queue(db, user_id: int, message: str, current_post_id: int) -> None:
     current = db.get(TikTokPost, current_post_id)
     if current:
@@ -241,8 +247,12 @@ def refresh_tiktok_post(post_id: int) -> None:
         result = fetch_post_status(db, user_id=post.user_id, publish_id=post.publish_id)
         remote = result["status"]
         if remote == "PUBLISH_COMPLETE":
-            post.status = "published"
-            post.error = None
+            if result.get("post_ids"):
+                post.status = "published"
+                post.error = None
+            else:
+                post.status = "processing"
+                post.error = PUBLIC_POST_PENDING_MESSAGE
         elif remote == "SEND_TO_USER_INBOX":
             # This is what TikTok's API reports for the Upload flow. It means
             # TikTok says it sent an inbox notification; it does not let the

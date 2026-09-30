@@ -123,8 +123,8 @@ def tiktok_publications(user: User = Depends(get_current_user), db: Session = De
 
     No video file is duplicated on disk: both platform tabs reference the same
     rendered Short while keeping publication state independent. A TikTok item
-    is removed only after TikTok confirms PUBLISH_COMPLETE. Inbox/draft delivery
-    is not treated as a completed publication.
+    is removed only after TikTok confirms PUBLISH_COMPLETE with a public post
+    id. Inbox/draft delivery is not treated as a completed publication.
     """
     recover_retryable_draft_uploads(db, user_id=user.id)
     clips = [clip for clip in _base_clips(user, db) if clip.status != "archived"]
