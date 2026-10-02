@@ -24,14 +24,16 @@ class DownloadError(RuntimeError):
     pass
 
 
-def download_auth_configured() -> bool:
-    """Return True only when a usable cookie source is actually configured."""
-    if cookie_override_file() is not None:
-        return True
+def _environment_auth_configured() -> bool:
     if settings.ytdlp_cookies_b64.strip():
         return True
     configured_file = settings.ytdlp_cookie_file.strip()
     return bool(configured_file and Path(configured_file).is_file())
+
+
+def download_auth_configured() -> bool:
+    """Return True only when at least one usable cookie source is configured."""
+    return bool(cookie_override_file() is not None or _environment_auth_configured())
 
 
 def download_proxy_configured() -> bool:
@@ -68,24 +70,32 @@ def _copy_cookie_text(text: str, target: Path) -> str:
     return str(target)
 
 
-def _resolve_cookie_file(runtime_file: Path | None = None) -> str | None:
+def _resolve_cookie_file(runtime_file: Path | None = None, *, source: str = "auto") -> str | None:
     target = runtime_file or COOKIE_RUNTIME_FILE
+    if source not in {"auto", "override", "environment"}:
+        raise DownloadError("Fonte de autenticação de download inválida.")
+
     override = cookie_override_file()
-    if override is not None:
+    if source != "environment" and override is not None:
         try:
             return _copy_cookie_text(override.read_text(encoding="utf-8"), target)
         except Exception as exc:
             raise DownloadError("O cookie renovado pelo administrador não pôde ser lido.") from exc
+    if source == "override":
+        return None
+
+    encoded = "".join(settings.ytdlp_cookies_b64.split())
     configured_file = settings.ytdlp_cookie_file.strip()
     if configured_file:
         path = Path(configured_file)
-        if not path.is_file():
+        if path.is_file():
+            try:
+                return _copy_cookie_text(path.read_text(encoding="utf-8"), target)
+            except Exception as exc:
+                raise DownloadError("YTDLP_COOKIE_FILE existe, mas não pôde ser lido.") from exc
+        if not encoded:
             raise DownloadError("YTDLP_COOKIE_FILE está configurado, mas o arquivo não existe no container.")
-        try:
-            return _copy_cookie_text(path.read_text(encoding="utf-8"), target)
-        except Exception as exc:
-            raise DownloadError("YTDLP_COOKIE_FILE existe, mas não pôde ser lido.") from exc
-    encoded = "".join(settings.ytdlp_cookies_b64.split())
+
     if not encoded:
         return None
     try:
@@ -130,7 +140,13 @@ def _js_runtimes() -> dict:
     return runtimes
 
 
-def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None, *, include_cookies: bool = True) -> dict:
+def _base_options(
+    output_dir: Path,
+    progress_hook: ProgressHook | None = None,
+    *,
+    include_cookies: bool = True,
+    cookie_source: str = "auto",
+) -> dict:
     YTDLP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     options: dict = {
         "outtmpl": str(output_dir / "source.%(ext)s"),
@@ -164,7 +180,7 @@ def _base_options(output_dir: Path, progress_hook: ProgressHook | None = None, *
                 pass
         options["progress_hooks"] = [safe_progress_hook]
     if include_cookies:
-        cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir))
+        cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir), source=cookie_source)
         if cookie_file:
             options["cookiefile"] = cookie_file
     proxy_url = effective_proxy_url()
@@ -211,20 +227,29 @@ def _impersonated_client_args(player_client: str, *, skip_webpage: bool = False)
     return variant
 
 
-def _strategy_variants() -> list[tuple[str, dict, bool]]:
-    strategies: list[tuple[str, dict, bool]] = []
-    if download_auth_configured():
-        authenticated = [
-            ("auth:mweb+pot:skip-webpage", _pot_provider_args("mweb", skip_webpage=True)),
-            ("auth:mweb+pot", _pot_provider_args("mweb")),
-            ("auth:web_safari+pot", _pot_provider_args("web_safari")),
-            ("auth:web_safari:hls", _hls_client_args("web_safari", skip_webpage=True)),
-            ("auth:tv_embedded", _client_args("tv_embedded", skip_webpage=True)),
-            ("auth:web_embedded", _client_args("web_embedded", skip_webpage=True)),
-            ("auth:default", {}),
-        ]
+def _strategy_variants() -> list[tuple[str, dict, bool, str]]:
+    strategies: list[tuple[str, dict, bool, str]] = []
+    authenticated = [
+        ("mweb+pot:skip-webpage", _pot_provider_args("mweb", skip_webpage=True)),
+        ("mweb+pot", _pot_provider_args("mweb")),
+        ("web_safari+pot", _pot_provider_args("web_safari")),
+        ("web_safari:hls", _hls_client_args("web_safari", skip_webpage=True)),
+        ("tv_embedded", _client_args("tv_embedded", skip_webpage=True)),
+        ("web_embedded", _client_args("web_embedded", skip_webpage=True)),
+        ("default", {}),
+    ]
+
+    # A credencial renovada no painel fica no volume persistente e normalmente
+    # deve ser tentada primeiro. Se também existir uma credencial no ambiente do
+    # EasyPanel, ela é testada como fonte independente em seguida. Isso evita que
+    # um override antigo impeça o uso de uma sessão mais nova já configurada no
+    # servidor, sem apagar ou alterar nenhuma das credenciais existentes.
+    if cookie_override_file() is not None:
         for name, variant in authenticated:
-            strategies.append((name, variant, True))
+            strategies.append((f"auth:override:{name}", variant, True, "override"))
+    if _environment_auth_configured():
+        for name, variant in authenticated:
+            strategies.append((f"auth:environment:{name}", variant, True, "environment"))
 
     # Keep all public fallbacks on IPv4. A working IPv6 route is not required
     # for this deployment and trying an unavailable family only adds noise and
@@ -245,7 +270,7 @@ def _strategy_variants() -> list[tuple[str, dict, bool]]:
         ("guest:default", {}),
     ]
     for name, variant in guest:
-        strategies.append((name, variant, False))
+        strategies.append((name, variant, False, "none"))
     return strategies
 
 
@@ -320,9 +345,9 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
     attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
         output_dir = Path(tmp)
-        for strategy, variant, include_cookies in _strategy_variants():
+        for strategy, variant, include_cookies, cookie_source in _strategy_variants():
             attempted.append(strategy)
-            options = _base_options(output_dir, include_cookies=include_cookies)
+            options = _base_options(output_dir, include_cookies=include_cookies, cookie_source=cookie_source)
             options.update({"skip_download": True, "simulate": True, "quiet": True, "no_warnings": True, "extract_flat": False})
             options.update(variant)
             try:
@@ -361,9 +386,14 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     attempts = 0
-    for strategy, variant, include_cookies in _strategy_variants():
+    for strategy, variant, include_cookies, cookie_source in _strategy_variants():
         attempts += 1
-        options = _base_options(output_dir, progress_hook=progress_hook, include_cookies=include_cookies)
+        options = _base_options(
+            output_dir,
+            progress_hook=progress_hook,
+            include_cookies=include_cookies,
+            cookie_source=cookie_source,
+        )
         options.update(variant)
         try:
             video_path = _download_with_options(url, output_dir, options)
