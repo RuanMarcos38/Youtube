@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { deleteJob, listJobs } from "@/lib/api";
 import type { Job } from "@/lib/types";
@@ -10,19 +10,49 @@ function isProcessingSection() {
   return window.location.hash.replace("#", "") === "processamento";
 }
 
+function supersededFailedJobs(jobs: Job[]) {
+  const newestBySource = new Map<number, number>();
+  for (const job of jobs) {
+    const sourceId = job.source_video?.id;
+    if (!sourceId) continue;
+    newestBySource.set(sourceId, Math.max(newestBySource.get(sourceId) || 0, job.id));
+  }
+
+  return jobs.filter((job) => {
+    const sourceId = job.source_video?.id;
+    if (job.status !== "failed" || !sourceId) return false;
+    return job.id < (newestBySource.get(sourceId) || job.id);
+  });
+}
+
 export default function FailedProcessingActions() {
   const [visible, setVisible] = useState(false);
   const [open, setOpen] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const cleanupInFlight = useRef(new Set<number>());
 
   const failedJobs = useMemo(() => jobs.filter((job) => job.status === "failed"), [jobs]);
 
   const refresh = useCallback(async () => {
     try {
       const data = await listJobs();
-      setJobs(data);
+      const staleFailures = supersededFailedJobs(data);
+      const removed = new Set<number>();
+
+      for (const job of staleFailures) {
+        if (cleanupInFlight.current.has(job.id)) continue;
+        cleanupInFlight.current.add(job.id);
+        try {
+          await deleteJob(job.id);
+          removed.add(job.id);
+        } catch {
+          cleanupInFlight.current.delete(job.id);
+        }
+      }
+
+      setJobs(data.filter((job) => !removed.has(job.id)));
     } catch {
       setJobs([]);
     }
@@ -56,7 +86,7 @@ export default function FailedProcessingActions() {
     setError("");
     try {
       await deleteJob(job.id);
-      setJobs((current) => current.filter((item) => item.id !== job.id));
+      setJobs((currentJobs) => currentJobs.filter((item) => item.id !== job.id));
       window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível excluir este processamento.");
@@ -75,7 +105,7 @@ export default function FailedProcessingActions() {
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#ff0000]">Limpeza da fila</div>
               <h3 className="mt-1 text-sm font-semibold text-[#111]">Processamentos não concluídos</h3>
-              <p className="mt-1 text-[11px] leading-4 text-[#777]">Exclua somente as tentativas que terminaram com falha.</p>
+              <p className="mt-1 text-[11px] leading-4 text-[#777]">Tentativas antigas já substituídas são limpas automaticamente. Exclua manualmente apenas a falha mais recente se não quiser reenviar.</p>
             </div>
             <button
               type="button"
