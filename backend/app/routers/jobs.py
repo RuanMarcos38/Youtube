@@ -60,6 +60,13 @@ def _create_queued_job(db: Session, user: User, source: SourceVideo, requested_c
     return job_to_dict(job)
 
 
+def _remove_failed_job(db: Session, user_id: int, job: Job) -> None:
+    work_dir = settings.data_path / "users" / str(user_id) / "jobs" / str(job.id)
+    db.delete(job)
+    db.commit()
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+
 def _validated_duration(payload: JobCreate, source: SourceVideo | None) -> int:
     if payload.duration_seconds > 0:
         return payload.duration_seconds
@@ -134,7 +141,7 @@ def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_
 def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     original = (
         db.query(Job)
-        .options(joinedload(Job.source_video))
+        .options(joinedload(Job.source_video), joinedload(Job.clips))
         .filter(Job.id == job_id, Job.user_id == user.id)
         .first()
     )
@@ -151,7 +158,13 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
     # não são cobrados retroativamente em minutos.
     duration_seconds = max(0, int(original.source_video.duration_seconds or 0))
     _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips)
-    return _create_queued_job(db, user, original.source_video, original.requested_clips)
+
+    # Cria primeiro a nova tentativa, preservando o vídeo de origem e todas as
+    # credenciais/configurações. Depois remove somente a tentativa antiga que já
+    # terminou em falha, evitando cartões duplicados na tela de processamentos.
+    result = _create_queued_job(db, user, original.source_video, original.requested_clips)
+    _remove_failed_job(db, user.id, original)
+    return result
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -167,10 +180,7 @@ def delete_failed_job(job_id: int, user: User = Depends(get_current_user), db: S
     if job.status != "failed":
         raise HTTPException(status_code=409, detail="Apenas processamentos que falharam podem ser excluídos.")
 
-    work_dir = settings.data_path / "users" / str(user.id) / "jobs" / str(job.id)
-    db.delete(job)
-    db.commit()
-    shutil.rmtree(work_dir, ignore_errors=True)
+    _remove_failed_job(db, user.id, job)
     return None
 
 
