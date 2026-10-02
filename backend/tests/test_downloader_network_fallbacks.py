@@ -35,7 +35,7 @@ def test_guest_strategies_include_hls_but_never_ipv6(monkeypatch):
     monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://127.0.0.1:4416")
 
     strategies = downloader._strategy_variants()
-    by_name = {name: variant for name, variant, _ in strategies}
+    by_name = {name: variant for name, variant, _, _ in strategies}
 
     assert "guest:web_safari:hls:skip-webpage" in by_name
     assert "m3u8" in by_name["guest:web_safari:hls:skip-webpage"]["format"]
