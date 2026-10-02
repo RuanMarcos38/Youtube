@@ -131,7 +131,7 @@ function jobErrorMessage(error: string) {
     return "Este processamento foi criado antes da correção para vídeos longos e excedeu o limite da OpenAI. Clique em Tentar novamente para recriar o processamento usando a transcrição otimizada.";
   }
   if (normalized.includes("sign in to confirm") || normalized.includes("cookies") || normalized.includes("not a bot")) {
-    return "O YouTube recusou a sessão de download usada neste processamento antigo. A autenticação atual já foi renovada; tente novamente para baixar com a configuração corrigida.";
+    return error;
   }
   return error;
 }

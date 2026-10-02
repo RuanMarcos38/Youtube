@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Lock
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -11,7 +13,7 @@ from ..database import get_db
 from ..models import Job, PaymentEvent, ProvisionedCredential, SystemSetting, Tenant, TenantPlan, User, YouTubeConnection
 from ..services.asaas import asaas_configured
 from ..services.billing import ensure_plan, jobs_used
-from ..services.download_probe import store_download_probe_result
+from ..services.download_probe import run_and_store_download_probe, store_download_probe_result
 from ..services.downloader import validate_download_session
 from ..services.kiwify_api import KiwifyApiError, register_webhook
 from ..services.runtime_download_auth import (
@@ -30,6 +32,11 @@ from ..services.system_config import get_public_config, update_public_config
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+# Only one admin download probe may run at a time in this API process.
+_download_probe_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="download-probe")
+_download_probe_lock = Lock()
+_download_probe_future = None
 
 
 class PlanUpdate(BaseModel):
@@ -290,7 +297,14 @@ def update_download_auth(payload: DownloadAuthUpdate, _: User = Depends(require_
 
 
 @router.post("/download-auth/test")
-def test_download_auth(_: User = Depends(require_superadmin)):
+def test_download_auth(background: bool = False, _: User = Depends(require_superadmin)):
+    if background:
+        global _download_probe_future
+        with _download_probe_lock:
+            if _download_probe_future is None or _download_probe_future.done():
+                _download_probe_future = _download_probe_executor.submit(run_and_store_download_probe)
+        return {"pending": True}
+
     result = validate_download_session()
     try:
         store_download_probe_result(result)
@@ -304,6 +318,33 @@ def test_download_auth(_: User = Depends(require_superadmin)):
                 "O teste já tentou cookies e fallbacks públicos sem cookies. "
                 "Renove a sessão e, se persistir, configure um proxy residencial/estático. "
                 f"Detalhe: {message}"
+            )
+        raise HTTPException(status_code=503, detail=message)
+    return result
+
+
+@router.get("/download-auth/test-status")
+def download_test_status(_: User = Depends(require_superadmin)):
+    with _download_probe_lock:
+        future = _download_probe_future
+    if future is None:
+        raise HTTPException(status_code=409, detail="Inicie um novo teste de download.")
+    if not future.done():
+        return {"pending": True}
+    try:
+        result = future.result()
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível concluir o diagnóstico. Inicie um novo teste.",
+        )
+    if not result.get("ok"):
+        message = str(result.get("error") or "A sessão de download foi recusada.")
+        if result.get("bot_blocked"):
+            message = (
+                "O YouTube recusou o IP/sessão de saída do servidor. "
+                "Renove a sessão e, se persistir, configure um proxy residencial/estático "
+                "e gere os cookies usando a mesma saída. Detalhe: " + message
             )
         raise HTTPException(status_code=503, detail=message)
     return result

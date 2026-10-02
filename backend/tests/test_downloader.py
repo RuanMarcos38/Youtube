@@ -70,6 +70,7 @@ def test_base_options_enable_available_js_runtime_and_proxy(tmp_path, monkeypatc
     assert options["js_runtimes"]["deno"] == {"path": "/opt/venv/bin/deno"}
     assert options["proxy"] == "http://proxy.internal:8080"
     assert options["source_address"] == "0.0.0.0"
+    assert options["cachedir"] is False
     assert options["concurrent_fragment_downloads"] >= 1
 
 
