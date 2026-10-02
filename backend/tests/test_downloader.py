@@ -117,6 +117,43 @@ def test_runtime_cookie_file_is_unique_per_job(tmp_path, monkeypatch):
     assert second.parent == runtime_cookie.parent
 
 
+def test_environment_cookie_can_be_used_when_runtime_override_also_exists(tmp_path, monkeypatch):
+    override_file = tmp_path / "override.txt"
+    override_file.write_text(
+        "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tPREF\toverride\n",
+        encoding="utf-8",
+    )
+    environment_cookie = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tPREF\tenvironment\n"
+    monkeypatch.setattr(downloader, "cookie_override_file", lambda: override_file)
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(
+        downloader.settings,
+        "ytdlp_cookies_b64",
+        base64.b64encode(environment_cookie.encode("utf-8")).decode("ascii"),
+    )
+
+    resolved = downloader._resolve_cookie_file(tmp_path / "runtime.txt", source="environment")
+
+    assert resolved is not None
+    assert "environment" in (tmp_path / "runtime.txt").read_text(encoding="utf-8")
+    assert "override" not in (tmp_path / "runtime.txt").read_text(encoding="utf-8")
+
+
+def test_strategy_variants_keep_override_and_environment_as_independent_sources(tmp_path, monkeypatch):
+    override_file = tmp_path / "override.txt"
+    override_file.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tPREF\toverride\n", encoding="utf-8")
+    monkeypatch.setattr(downloader, "cookie_override_file", lambda: override_file)
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "configured")
+    monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "")
+
+    strategies = downloader._strategy_variants()
+    names = [name for name, _, _, _ in strategies]
+
+    assert any(name.startswith("auth:override:") for name in names)
+    assert any(name.startswith("auth:environment:") for name in names)
+
+
 def test_invalid_base64_cookie_is_rejected(monkeypatch):
     monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "not-valid-base64$$$")
@@ -130,7 +167,7 @@ def test_guest_strategies_include_pot_hls_and_impersonation(monkeypatch):
     monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
     monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://127.0.0.1:4416")
 
-    names = [name for name, _, _ in downloader._strategy_variants()]
+    names = [name for name, _, _, _ in downloader._strategy_variants()]
 
     assert "guest:mweb+pot" in names
     assert "guest:web_safari" in names
