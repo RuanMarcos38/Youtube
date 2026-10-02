@@ -93,7 +93,17 @@ export const adminMetrics = () => api<AdminMetrics>("/api/admin/dashboard");
 export const adminUsers = () => api<AdminUser[]>("/api/admin/users");
 export const adminCredentials = () => api<ProvisionedCredential[]>("/api/admin/provisioned-credentials");
 export const adminDownloadAuth = () => api<DownloadAuthStatus>("/api/admin/download-auth");
-export const adminTestDownloadAuth = () => api<{ ok: boolean; video_id?: string; title?: string; mode: string; strategy?: string }>("/api/admin/download-auth/test", { method: "POST" });
+export async function adminTestDownloadAuth() {
+  type Result = { pending?: boolean; ok: boolean; mode: string; strategy?: string };
+  await api<{ pending: boolean }>("/api/admin/download-auth/test?background=true", { method: "POST" });
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const result = await api<Result>("/api/admin/download-auth/test-status");
+    if (!result.pending) return result;
+  }
+  throw new Error("O diagnóstico ainda não terminou. Aguarde antes de iniciar outro teste.");
+}
 export const adminRunDiagnostics = (autoFix = true) => api<DiagnosticResult>(`/api/admin/diagnostics/run?auto_fix=${autoFix ? "true" : "false"}`, { method: "POST" });
 export const adminKiwifySettings = () => api<KiwifyAdminSettings>("/api/admin/kiwify");
 export const adminSystemConfig = () => api<PublicConfig>("/api/admin/system-config");

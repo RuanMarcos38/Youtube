@@ -164,7 +164,9 @@ def _base_options(
         "file_access_retries": 2,
         "concurrent_fragment_downloads": 2,
         "sleep_interval_requests": 1,
-        # Never reuse YouTube player/session cache between jobs. Authentication can\n        # be renewed from the admin panel while older jobs still exist; a stale\n        # yt-dlp cache can otherwise keep the previous rejected session alive.\n        "cachedir": False,
+        # Authentication can be renewed while older jobs still exist.
+        # Do not reuse a rejected player/session cache across jobs.
+        "cachedir": False,
         "js_runtimes": _js_runtimes(),
         # EasyPanel/VPS environments frequently expose an IPv6-capable Python
         # runtime without a usable IPv6 default route. Binding to IPv4 prevents
