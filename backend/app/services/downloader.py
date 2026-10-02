@@ -347,10 +347,10 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
         output_dir = Path(tmp)
         for strategy, variant, include_cookies, cookie_source in _strategy_variants():
             attempted.append(strategy)
-            options = _base_options(output_dir, include_cookies=include_cookies, cookie_source=cookie_source)
-            options.update({"skip_download": True, "simulate": True, "quiet": True, "no_warnings": True, "extract_flat": False})
-            options.update(variant)
             try:
+                options = _base_options(output_dir, include_cookies=include_cookies, cookie_source=cookie_source)
+                options.update({"skip_download": True, "simulate": True, "quiet": True, "no_warnings": True, "extract_flat": False})
+                options.update(variant)
                 with YoutubeDL(options) as ydl:
                     info = ydl.extract_info(url, download=False)
                 return {
@@ -388,14 +388,14 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
     attempts = 0
     for strategy, variant, include_cookies, cookie_source in _strategy_variants():
         attempts += 1
-        options = _base_options(
-            output_dir,
-            progress_hook=progress_hook,
-            include_cookies=include_cookies,
-            cookie_source=cookie_source,
-        )
-        options.update(variant)
         try:
+            options = _base_options(
+                output_dir,
+                progress_hook=progress_hook,
+                include_cookies=include_cookies,
+                cookie_source=cookie_source,
+            )
+            options.update(variant)
             video_path = _download_with_options(url, output_dir, options)
             if video_path:
                 return video_path
