@@ -81,7 +81,8 @@ def test_retry_failed_job_creates_new_queued_job(monkeypatch):
         assert result["error"] is None
         assert result["requested_clips"] == 10
         jobs = db.query(Job).order_by(Job.id.asc()).all()
-        assert [job.status for job in jobs] == ["failed", "queued"]
+        assert [job.status for job in jobs] == ["queued"]
+        assert db.get(Job, failed.id) is None
     finally:
         db.close()
 
