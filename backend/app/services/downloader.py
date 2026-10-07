@@ -146,6 +146,7 @@ def _base_options(
     *,
     include_cookies: bool = True,
     cookie_source: str = "auto",
+    use_proxy: bool = True,
 ) -> dict:
     YTDLP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     options: dict = {
@@ -185,7 +186,7 @@ def _base_options(
         cookie_file = _resolve_cookie_file(_runtime_cookie_file(output_dir), source=cookie_source)
         if cookie_file:
             options["cookiefile"] = cookie_file
-    proxy_url = effective_proxy_url()
+    proxy_url = effective_proxy_url() if use_proxy else ""
     if proxy_url:
         options["proxy"] = proxy_url
     return options
@@ -330,6 +331,20 @@ def _is_network_unreachable(message: str) -> bool:
     )
 
 
+def _is_proxy_failure(message: str) -> bool:
+    lowered = str(message or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "unable to connect to proxy",
+            "proxyerror",
+            "tunnel connection failed",
+            "proxy authentication required",
+            "proxy connection",
+        )
+    ) or ("proxy" in lowered and "402 payment required" in lowered)
+
+
 def _primary_failure(errors: list[str]) -> str:
     if not errors:
         return "Sessão de download indisponível."
@@ -345,12 +360,20 @@ def _primary_failure(errors: list[str]) -> str:
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
     errors: list[str] = []
     attempted: list[str] = []
+    proxy_configured = download_proxy_configured()
+    proxy_failed = False
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
         output_dir = Path(tmp)
         for strategy, variant, include_cookies, cookie_source in _strategy_variants():
             attempted.append(strategy)
+            use_proxy = proxy_configured and not proxy_failed
             try:
-                options = _base_options(output_dir, include_cookies=include_cookies, cookie_source=cookie_source)
+                options = _base_options(
+                    output_dir,
+                    include_cookies=include_cookies,
+                    cookie_source=cookie_source,
+                    use_proxy=use_proxy,
+                )
                 options.update({"skip_download": True, "simulate": True, "quiet": True, "no_warnings": True, "extract_flat": False})
                 options.update(variant)
                 with YoutubeDL(options) as ydl:
@@ -359,7 +382,7 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                     "ok": True,
                     "video_id": (info or {}).get("id"),
                     "title": (info or {}).get("title"),
-                    "mode": "cookies+proxy" if include_cookies and download_proxy_configured() else "cookies" if include_cookies else "proxy" if download_proxy_configured() else "guest-fallback",
+                    "mode": "cookies+proxy" if include_cookies and use_proxy else "cookies" if include_cookies else "proxy" if use_proxy else "guest-fallback",
                     "strategy": strategy,
                     "attempts": len(attempted),
                     "ip_family": "ipv4",
@@ -368,6 +391,8 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                 }
             except Exception as exc:
                 message = _compact_error(str(exc))
+                if use_proxy and _is_proxy_failure(message):
+                    proxy_failed = True
                 if message and message not in errors:
                     errors.append(message)
     return {
@@ -375,7 +400,8 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
         "error": _primary_failure(errors),
         "bot_blocked": any(_is_bot_block(item) for item in errors),
         "network_unreachable": any(_is_network_unreachable(item) for item in errors),
-        "mode": "cookies+proxy" if download_auth_configured() and download_proxy_configured() else "cookies" if download_auth_configured() else "proxy" if download_proxy_configured() else "guest",
+        "mode": "cookies+proxy" if download_auth_configured() and proxy_configured and not proxy_failed else "cookies" if download_auth_configured() else "proxy" if proxy_configured and not proxy_failed else "guest",
+        "proxy_failed": proxy_failed,
         "attempts": len(attempted),
         "strategies": attempted,
         "ip_family": "ipv4",
@@ -388,14 +414,18 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     attempts = 0
+    proxy_configured = download_proxy_configured()
+    proxy_failed = False
     for strategy, variant, include_cookies, cookie_source in _strategy_variants():
         attempts += 1
+        use_proxy = proxy_configured and not proxy_failed
         try:
             options = _base_options(
                 output_dir,
                 progress_hook=progress_hook,
                 include_cookies=include_cookies,
                 cookie_source=cookie_source,
+                use_proxy=use_proxy,
             )
             options.update(variant)
             video_path = _download_with_options(url, output_dir, options)
@@ -403,6 +433,8 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
                 return video_path
         except Exception as exc:
             error = _compact_error(str(exc))
+            if use_proxy and _is_proxy_failure(error):
+                proxy_failed = True
             if error:
                 tagged = f"{strategy}: {error}"
                 if tagged not in errors:
