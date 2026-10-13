@@ -275,6 +275,10 @@ def _strategy_variants() -> list[tuple[str, dict, bool, str]]:
     ]
     for name, variant in guest:
         strategies.append((name, variant, False, "none"))
+    if residential_status(settings.data_path)["enabled"]:
+        # Public links should not wait for rejected, rotated account cookies.
+        # Keep account strategies available afterward for content requiring login.
+        strategies.sort(key=lambda strategy: strategy[2])
     return strategies
 
 

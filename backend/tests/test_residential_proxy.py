@@ -135,6 +135,29 @@ def test_downloader_never_falls_back_to_vps_when_residential_is_offline(tmp_path
     assert downloader.validate_download_session()["attempts"] == 0
 
 
+def test_residential_public_download_does_not_retry_stale_account_cookies(tmp_path, monkeypatch):
+    import base64
+    from app.services import downloader
+    cookies = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tPREF\tsynthetic\n"
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", base64.b64encode(cookies.encode()).decode())
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(downloader, "cookie_override_file", lambda: None)
+    monkeypatch.setattr(downloader, "residential_status", lambda _: {"enabled": True, "connected": True})
+    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+    calls = []
+    def download(_url, output, options):
+        calls.append(options)
+        if options.get("cookiefile"):
+            raise RuntimeError("The provided YouTube account cookies are no longer valid")
+        video = output / "source.mp4"
+        video.write_bytes(b"synthetic-video")
+        return video
+    monkeypatch.setattr(downloader, "_download_with_options", download)
+    assert downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path).is_file()
+    assert len(calls) == 1
+    assert "cookiefile" not in calls[0]
+
+
 def test_offline_relay_does_not_accept_connect(tmp_path):
     async def run():
         relay = ResidentialRelay(tmp_path, port=0)
