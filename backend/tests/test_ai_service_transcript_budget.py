@@ -79,6 +79,18 @@ def test_select_clips_retries_with_smaller_transcript_on_rate_limit(monkeypatch)
     assert fake_responses.call_lengths[1] < fake_responses.call_lengths[0]
 
 
+def test_local_candidates_accept_valid_short_speech_isolated_by_silence():
+    segments = [
+        {"start": 10.0, "end": 12.0, "text": "Uma frase curta."},
+        {"start": 120.0, "end": 137.56, "text": "Um trecho completo entre pausas longas."},
+        {"start": 200.0, "end": 215.0, "text": "Outro trecho no limite mínimo."},
+    ]
+    candidates = ai_service._build_local_candidates(segments, 300.0)
+    assert {(start, end) for _, start, end, _ in candidates} == {
+        (120.0, 137.56), (200.0, 215.0)
+    }
+
+
 def test_select_clips_local_requires_no_openai_key(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "clip_planning_provider", "local")
     monkeypatch.setattr(ai_service.settings, "openai_api_key", "")

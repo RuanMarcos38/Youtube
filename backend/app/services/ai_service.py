@@ -234,7 +234,7 @@ def _build_local_candidates(
                 break
             parts.append(item["text"])
 
-            if clip_duration >= 20.0:
+            if clip_duration >= 15.0:
                 text = " ".join(parts)
                 duration_bonus = max(0.0, 3.0 - abs(38.0 - clip_duration) / 10.0)
                 score = _local_score(text, clip_duration) + duration_bonus
