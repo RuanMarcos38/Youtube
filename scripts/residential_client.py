@@ -7,8 +7,14 @@ import json
 import re
 import socket
 import struct
+import sys
 from contextlib import suppress
+from pathlib import Path
 from urllib.parse import urlsplit
+
+_bundled_dependencies = Path(__file__).resolve().parent / "_deps"
+if _bundled_dependencies.is_dir():
+    sys.path.insert(0, str(_bundled_dependencies))
 
 MAX_CHUNK = 32768
 MAX_CHANNELS = 16
@@ -136,7 +142,7 @@ async def run_connection(url: str, code: str):
     endpoint = "wss://" + parsed.netloc + "/api/admin/residential-proxy/connect"
     # Authentication stays in a header, never in URLs, logs or files.
     async with connect(endpoint, additional_headers={"Authorization": "Bearer " + code},
-                       max_size=MAX_CHUNK + 4, open_timeout=20, close_timeout=5) as websocket:
+                       max_size=MAX_CHUNK + 4, open_timeout=20, close_timeout=5, compression=None) as websocket:
         print("Conexão residencial ativa. Mantenha esta janela aberta. Ctrl+C desconecta.", flush=True)
         await ClientRelay(websocket).run()
 
