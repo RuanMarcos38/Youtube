@@ -14,7 +14,11 @@ import {
   adminUpdatePlan,
   adminUpdateSystemConfig,
   adminUsers,
+  adminResidentialProxy,
+  adminPairResidentialProxy,
+  adminDisableResidentialProxy,
 } from "@/lib/api";
+import type { ResidentialProxyStatus } from "@/lib/api";
 import type { AdminMetrics, AdminUser, DownloadAuthStatus, KiwifyAdminSettings, ProvisionedCredential, PublicConfig } from "@/lib/types";
 
 function money(cents: number) {
@@ -31,6 +35,9 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [credentials, setCredentials] = useState<ProvisionedCredential[]>([]);
   const [downloadAuth, setDownloadAuth] = useState<DownloadAuthStatus | null>(null);
+  const [residential, setResidential] = useState<ResidentialProxyStatus | null>(null);
+  const [pairCode, setPairCode] = useState("");
+  const [pairing, setPairing] = useState(false);
   const [kiwify, setKiwify] = useState<KiwifyAdminSettings | null>(null);
   const [systemConfig, setSystemConfig] = useState<PublicConfig | null>(null);
   const [cookiesB64, setCookiesB64] = useState("");
@@ -74,6 +81,44 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
   }
 
   useEffect(() => { void refresh(); }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const update = async () => {
+      try {
+        const status = await adminResidentialProxy();
+        if (!disposed) setResidential(status);
+      } catch { /* Existing services may be awaiting their first deployment. */ }
+    };
+    void update();
+    const timer = window.setInterval(() => void update(), 10000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, []);
+
+  async function pairResidential() {
+    if (pairing) return;
+    setPairing(true);
+    setMessage("");
+    try {
+      const result = await adminPairResidentialProxy();
+      setPairCode(result.code);
+      setResidential(await adminResidentialProxy());
+      setMessage("Código criado. Cole no cliente do computador e mantenha-o aberto durante os processamentos.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Falha ao preparar a conexão residencial.");
+    } finally { setPairing(false); }
+  }
+
+  async function disableResidential() {
+    setPairing(true);
+    try {
+      setResidential(await adminDisableResidentialProxy());
+      setPairCode("");
+      setMessage("Conexão residencial desativada.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Falha ao desconectar.");
+    } finally { setPairing(false); }
+  }
 
   async function saveSystemConfig(event: FormEvent) {
     event.preventDefault();
@@ -231,6 +276,19 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
             <label className="text-xs font-black">Limite mensal padrão<input type="number" min={1} max={100000} value={systemConfig.base_plan_job_limit} onChange={(e) => setSystemConfig({ ...systemConfig, base_plan_job_limit: Math.max(1, Number(e.target.value) || 1) })} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-normal" /></label>
           </div>
         </form>}
+
+        <div className="mt-6 sf-card p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-black">Conexão residencial para YouTube</h3>
+            <span role="status" aria-live="polite" className="text-xs font-bold">{residential?.connected ? "Computador conectado" : residential?.enabled ? "Aguardando computador" : "Desativada"}</span>
+          </div>
+          <p className="mt-2 text-xs text-[#6e7971]">Baixe pelos links do YouTube usando a internet do seu computador. Mantenha o cliente aberto durante os processamentos. A conexão permite apenas os destinos HTTPS necessários do YouTube.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" disabled={pairing || residential?.connected} onClick={() => void pairResidential()} className="sf-button sf-button-primary disabled:opacity-50">Gerar código de conexão</button>
+            {residential?.enabled && <button type="button" disabled={pairing} onClick={() => void disableResidential()} className="sf-button sf-button-outline disabled:opacity-50">Desativar conexão residencial</button>}
+          </div>
+          {pairCode && <label className="mt-4 block text-xs font-black">Código temporário — use somente no cliente deste computador<input readOnly value={pairCode} autoComplete="off" spellCheck={false} onFocus={(event) => event.currentTarget.select()} className="mt-2 w-full rounded-xl border border-black/10 px-3 py-3 font-mono text-xs" /><span className="mt-1 block font-normal">Válido por até seis horas. Não envie o código pelo chat.</span></label>}
+        </div>
 
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <form onSubmit={saveDownloadAuth} className="sf-card p-5">

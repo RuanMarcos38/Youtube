@@ -139,6 +139,27 @@ def _transcribe_local(
                     word_timestamps=False,
                 )
                 chunk_segments = list(chunk_segments)
+                # Animated/music-heavy audio can be rejected almost entirely
+                # by VAD. Retry only abnormally sparse long chunks, retaining
+                # Whisper's actual timestamps rather than inventing speech.
+                speech_seconds = sum(
+                    max(0.0, float(segment.end) - float(segment.start))
+                    for segment in chunk_segments if str(segment.text or "").strip()
+                )
+                if float(getattr(_info, "duration", 0.0)) >= 60.0 and speech_seconds < 20.0:
+                    retry_segments, _retry_info = model.transcribe(
+                        str(audio_path), language=language,
+                        beam_size=max(1, int(settings.local_whisper_beam_size)),
+                        vad_filter=False, condition_on_previous_text=False,
+                        temperature=0.0, word_timestamps=False,
+                    )
+                    retry_segments = list(retry_segments)
+                    retry_speech_seconds = sum(
+                        max(0.0, float(segment.end) - float(segment.start))
+                        for segment in retry_segments if str(segment.text or "").strip()
+                    )
+                    if retry_speech_seconds > speech_seconds:
+                        chunk_segments = retry_segments
         except Exception as exc:
             raise TranscriptionError(
                 f"Local Faster-Whisper transcription failed for {audio_path.name}: {exc}"

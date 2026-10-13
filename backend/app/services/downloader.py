@@ -9,9 +9,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from ..config import settings
 from .runtime_download_auth import cookie_override_file, effective_proxy_url
+from .residential_proxy import connection_status as residential_status
 
 
 COOKIE_RUNTIME_FILE = Path("/tmp/shortsflow-youtube-cookies.txt")
@@ -225,7 +227,7 @@ def _hls_client_args(player_client: str = "web_safari", *, skip_webpage: bool = 
 
 def _impersonated_client_args(player_client: str, *, skip_webpage: bool = False) -> dict:
     variant = _client_args(player_client, skip_webpage=skip_webpage)
-    variant["impersonate"] = "chrome"
+    variant["impersonate"] = ImpersonateTarget.from_str("chrome")
     return variant
 
 
@@ -267,12 +269,16 @@ def _strategy_variants() -> list[tuple[str, dict, bool, str]]:
         ("guest:android_vr", _client_args("android_vr", skip_webpage=True)),
         ("guest:ios", _client_args("ios", skip_webpage=True)),
         ("guest:web_embedded", _client_args("web_embedded", skip_webpage=True)),
-        ("guest:chrome+mweb+pot", {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
+        ("guest:chrome+mweb+pot", {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": ImpersonateTarget.from_str("chrome")}),
         ("guest:chrome:web_safari", _impersonated_client_args("web_safari", skip_webpage=True)),
         ("guest:default", {}),
     ]
     for name, variant in guest:
         strategies.append((name, variant, False, "none"))
+    if residential_status(settings.data_path)["enabled"]:
+        # Public links should not wait for rejected, rotated account cookies.
+        # Keep account strategies available afterward for content requiring login.
+        strategies.sort(key=lambda strategy: strategy[2])
     return strategies
 
 
@@ -343,6 +349,9 @@ def _primary_failure(errors: list[str]) -> str:
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
+    residential = residential_status(settings.data_path)
+    if residential["enabled"] and not residential["connected"]:
+        return {"ok": False, "error": "A conexão residencial está offline. Abra o cliente no computador e conecte antes de testar.", "mode": "residential", "attempts": 0}
     errors: list[str] = []
     attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
@@ -385,6 +394,9 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
 
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
+    residential = residential_status(settings.data_path)
+    if residential["enabled"] and not residential["connected"]:
+        raise DownloadError("A conexão residencial está offline. Mantenha o cliente aberto no computador para baixar vídeos pelos links do YouTube.")
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     attempts = 0
@@ -421,3 +433,4 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
             )
         raise DownloadError(f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}")
     raise DownloadError("yt-dlp terminou sem produzir um arquivo de vídeo")
+
