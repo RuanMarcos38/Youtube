@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from ..config import settings
 from .runtime_download_auth import cookie_override_file, effective_proxy_url
@@ -225,7 +226,7 @@ def _hls_client_args(player_client: str = "web_safari", *, skip_webpage: bool = 
 
 def _impersonated_client_args(player_client: str, *, skip_webpage: bool = False) -> dict:
     variant = _client_args(player_client, skip_webpage=skip_webpage)
-    variant["impersonate"] = "chrome"
+    variant["impersonate"] = ImpersonateTarget.from_str("chrome")
     return variant
 
 
@@ -267,7 +268,7 @@ def _strategy_variants() -> list[tuple[str, dict, bool, str]]:
         ("guest:android_vr", _client_args("android_vr", skip_webpage=True)),
         ("guest:ios", _client_args("ios", skip_webpage=True)),
         ("guest:web_embedded", _client_args("web_embedded", skip_webpage=True)),
-        ("guest:chrome+mweb+pot", {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": "chrome"}),
+        ("guest:chrome+mweb+pot", {**_pot_provider_args("mweb", skip_webpage=True), "impersonate": ImpersonateTarget.from_str("chrome")}),
         ("guest:chrome:web_safari", _impersonated_client_args("web_safari", skip_webpage=True)),
         ("guest:default", {}),
     ]
