@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..config import settings
+from .residential_proxy import PROXY_PORT, enabled as residential_enabled
 
 
 COOKIE_OVERRIDE_FILE = settings.data_path / "youtube_download_cookies_override.txt"
@@ -74,6 +75,8 @@ def proxy_override_url() -> str:
 
 
 def effective_proxy_url() -> str:
+    if residential_enabled(settings.data_path):
+        return f"http://127.0.0.1:{PROXY_PORT}"
     return proxy_override_url() or settings.ytdlp_proxy_url.strip()
 
 

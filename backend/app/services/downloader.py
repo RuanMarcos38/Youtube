@@ -13,6 +13,7 @@ from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from ..config import settings
 from .runtime_download_auth import cookie_override_file, effective_proxy_url
+from .residential_proxy import connection_status as residential_status
 
 
 COOKIE_RUNTIME_FILE = Path("/tmp/shortsflow-youtube-cookies.txt")
@@ -344,6 +345,9 @@ def _primary_failure(errors: list[str]) -> str:
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
+    residential = residential_status(settings.data_path)
+    if residential["enabled"] and not residential["connected"]:
+        return {"ok": False, "error": "A conexão residencial está offline. Abra o cliente no computador e conecte antes de testar.", "mode": "residential", "attempts": 0}
     errors: list[str] = []
     attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
@@ -386,6 +390,9 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
 
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
+    residential = residential_status(settings.data_path)
+    if residential["enabled"] and not residential["connected"]:
+        raise DownloadError("A conexão residencial está offline. Mantenha o cliente aberto no computador para baixar vídeos pelos links do YouTube.")
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     attempts = 0
@@ -422,3 +429,4 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
             )
         raise DownloadError(f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}")
     raise DownloadError("yt-dlp terminou sem produzir um arquivo de vídeo")
+

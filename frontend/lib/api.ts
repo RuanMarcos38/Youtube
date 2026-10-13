@@ -18,6 +18,11 @@ import type {
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+export type ResidentialProxyStatus = { enabled: boolean; connected: boolean };
+export const adminResidentialProxy = () => api<ResidentialProxyStatus>("/api/admin/residential-proxy");
+export const adminPairResidentialProxy = () => api<{ code: string; expires_in_seconds: number }>("/api/admin/residential-proxy/pair", { method: "POST" });
+export const adminDisableResidentialProxy = () => api<ResidentialProxyStatus>("/api/admin/residential-proxy/disable", { method: "POST" });
+
 function apiErrorMessage(body: unknown, fallback: string): string {
   if (!body || typeof body !== "object") return fallback;
   const detail = (body as { detail?: unknown }).detail;
