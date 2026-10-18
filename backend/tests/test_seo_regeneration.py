@@ -114,3 +114,8 @@ class SeoRegenerationTests(unittest.TestCase):
         result = seo_ai.build_ai_qualified_seo(**CONTEXT)
         assert youtube_tag_budget(result.tags) <= 500
         assert len(result.tags) == len(set(result.tags))
+
+    def test_whitespace_output_is_rejected(self):
+        fake_ai(self, [package(title="     ")])
+        with self.assertRaises(seo_ai.SeoGenerationError):
+            seo_ai.build_ai_qualified_seo(**CONTEXT)

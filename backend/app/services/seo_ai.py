@@ -41,6 +41,10 @@ def _reused(value: str, previous: str) -> bool:
 def _qualify_package(package: SeoPackage) -> QualifiedSeo:
     # Keep semantic phrases created by AI. Literal word overlap is not evidence
     # of search demand and must not replace valid AI copy with transcript text.
+    title = smart_title_case(package.title)
+    description = package.description.strip()
+    if len(title) < 5 or len(title) > 100 or len(description) < 30:
+        raise SeoGenerationError("A IA retornou metadados incompletos. O SEO atual foi mantido.")
     tags: list[str] = []
     scores: dict[str, int] = {}
     seen: set[str] = set()
@@ -55,8 +59,8 @@ def _qualify_package(package: SeoPackage) -> QualifiedSeo:
     if len(tags) < 3:
         raise SeoGenerationError("A IA não retornou tags suficientes dentro do limite. Tente novamente.")
     return QualifiedSeo(
-        title=smart_title_case(package.title),
-        description=package.description.strip(),
+        title=title,
+        description=description,
         tags=tags,
         tag_scores=scores,
     )

@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { generateClipSeo, listClips } from "@/lib/api";
 import type { Clip } from "@/lib/types";
@@ -31,10 +31,12 @@ export default function ShortsSeoPanel() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress>({ done: 0, total: 0 });
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const refreshVersion = useRef(0);
   const [previous, setPrevious] = useState<Record<number, Clip>>({});
   const [clipErrors, setClipErrors] = useState<Record<number, string>>({});
 
   function acceptResult(before: Clip, updated: Clip) {
+    refreshVersion.current += 1;
     setPrevious((current) => ({ ...current, [updated.id]: before }));
     setClipErrors((current) => ({ ...current, [updated.id]: "" }));
     setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
@@ -63,8 +65,11 @@ export default function ShortsSeoPanel() {
   }, []);
 
   async function refresh({ silent = true }: { silent?: boolean } = {}) {
+    const version = ++refreshVersion.current;
     try {
-      setClips(await listClips());
+      const result = await listClips();
+      if (version !== refreshVersion.current) return;
+      setClips(result);
       if (!silent) setError("");
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : "Não foi possível carregar os Shorts para SEO.");
@@ -75,11 +80,15 @@ export default function ShortsSeoPanel() {
     if (!visible || busyId !== null || bulkBusy) return;
     void refresh({ silent: false });
     const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      refreshVersion.current += 1;
+    };
   }, [visible, busyId, bulkBusy]);
 
   async function generate(clip: Clip) {
     if (BLOCKED.has(clip.status) || bulkBusy || busyId !== null) return;
+    refreshVersion.current += 1;
     setBusyId(clip.id);
     setNotice("");
     setError("");
@@ -106,6 +115,7 @@ export default function ShortsSeoPanel() {
       return;
     }
 
+    refreshVersion.current += 1;
     setBulkBusy(true);
     setBulkProgress({ done: 0, total: targets.length });
     setNotice("");
