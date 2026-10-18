@@ -68,21 +68,40 @@ class ResidentialRelay:
         self._code_hash = ""
         self._expires = 0.0
         self._sequence = 0
+        self._device_file = self.data_path / "residential_proxy_device.json"
+        self._device_hash = ""
+        try:
+            value = json.loads(self._device_file.read_text(encoding="utf-8"))
+            digest = value.get("hash", "") if isinstance(value, dict) else ""
+            if isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest):
+                self._device_hash = digest
+        except (OSError, ValueError, TypeError):
+            pass
 
-    def issue_code(self) -> str:
+    def issue_code(self, *, persistent: bool = False) -> str:
         if self.websocket is not None:
             raise ValueError("A conexão residencial já está ativa. Desconecte antes de gerar outro código.")
         token = secrets.token_urlsafe(32)
-        self._code_hash = hashlib.sha256(token.encode()).hexdigest()
-        self._expires = time.time() + PAIR_SECONDS
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        if persistent:
+            # Store only a verifier, never the device's bearer credential.
+            _private_json(self._device_file, {"hash": digest})
+            self._device_hash = digest
+        else:
+            self._code_hash = digest
+            self._expires = time.time() + PAIR_SECONDS
         flag = self.data_path / "residential_proxy_enabled"
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.touch(mode=0o600, exist_ok=True)
         return token
 
     def authorized(self, token: str) -> bool:
+        if not token or len(token) > 128 or not enabled(self.data_path):
+            return False
         digest = hashlib.sha256(token.encode()).hexdigest()
-        return bool(self._code_hash) and time.time() < self._expires and secrets.compare_digest(digest, self._code_hash)
+        device_ok = bool(self._device_hash) and secrets.compare_digest(digest, self._device_hash)
+        temporary_ok = bool(self._code_hash) and time.time() < self._expires and secrets.compare_digest(digest, self._code_hash)
+        return device_ok or temporary_ok
 
     def _status(self, connected: bool) -> None:
         _private_json(self.data_path / "residential_proxy_status.json", {"connected": connected, "checked_at": time.time()})
@@ -104,6 +123,8 @@ class ResidentialRelay:
     async def disable(self) -> None:
         self._code_hash = ""
         self._expires = 0
+        self._device_hash = ""
+        self._device_file.unlink(missing_ok=True)
         (self.data_path / "residential_proxy_enabled").unlink(missing_ok=True)
         await self.stop()
         await self.start()
@@ -117,9 +138,9 @@ class ResidentialRelay:
             else:
                 await self.websocket.send_json(message)
 
-    async def _heartbeat(self) -> None:
+    async def _heartbeat(self, token: str) -> None:
         while self.websocket is not None:
-            if time.time() >= self._expires:
+            if not self.authorized(token):
                 await self.websocket.close(code=1008)
                 return
             self._status(True)
@@ -133,7 +154,7 @@ class ResidentialRelay:
             await websocket.accept()
             self.websocket = websocket
         self._status(True)
-        heartbeat = asyncio.create_task(self._heartbeat())
+        heartbeat = asyncio.create_task(self._heartbeat(token))
         try:
             while True:
                 message = await asyncio.wait_for(websocket.receive(), 45)

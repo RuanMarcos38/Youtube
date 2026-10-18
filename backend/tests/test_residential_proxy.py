@@ -171,3 +171,86 @@ def test_offline_relay_does_not_accept_connect(tmp_path):
         await writer.wait_closed()
         await relay.stop()
     asyncio.run(run())
+
+def test_persistent_pairing_survives_expiry_and_server_restart(tmp_path, monkeypatch):
+    relay = ResidentialRelay(tmp_path, port=0)
+    token = relay.issue_code(persistent=True)
+    stored = (tmp_path / "residential_proxy_device.json").read_text()
+    assert token not in stored
+    monkeypatch.setattr("app.services.residential_proxy.time.time", lambda: 10**12)
+    assert relay.authorized(token)
+    restored = ResidentialRelay(tmp_path, port=0)
+    assert restored.authorized(token)
+    assert not restored.authorized("incorrect")
+
+
+def test_persistent_pairing_rotation_and_disable_revoke_old_device(tmp_path):
+    async def run():
+        relay = ResidentialRelay(tmp_path, port=0)
+        old = relay.issue_code(persistent=True)
+        token = relay.issue_code(persistent=True)
+        assert not relay.authorized(old)
+        assert relay.authorized(token)
+        await relay.disable()
+        assert not relay.authorized(token)
+        assert not ResidentialRelay(tmp_path, port=0).authorized(token)
+        assert not (tmp_path / "residential_proxy_device.json").exists()
+        await relay.stop()
+    asyncio.run(run())
+
+
+def test_malformed_device_state_fails_closed(tmp_path):
+    (tmp_path / "residential_proxy_device.json").write_text('{"hash": []}')
+    assert not ResidentialRelay(tmp_path, port=0).authorized("incorrect")
+
+
+def test_persistent_heartbeat_does_not_expire_at_six_hours(tmp_path, monkeypatch):
+    async def run():
+        relay = ResidentialRelay(tmp_path, port=0)
+        token = relay.issue_code(persistent=True)
+        class Socket:
+            async def close(self, **_):
+                pytest.fail("Persistent device must not expire with temporary codes")
+        relay.websocket = Socket()
+        async def sleep(_):
+            relay.websocket = None
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+        monkeypatch.setattr("app.services.residential_proxy.time.time", lambda: 10**12)
+        await relay._heartbeat(token)
+    asyncio.run(run())
+
+
+def test_background_client_reconnects_and_stops_on_revocation(monkeypatch, capsys):
+    async def run():
+        calls, delays = [], []
+        class Response:
+            status_code = 403
+        class Revoked(Exception):
+            response = Response()
+        async def connect(url, token):
+            calls.append((url, token))
+            if len(calls) == 1:
+                raise OSError("synthetic-secret")
+            if len(calls) == 3:
+                raise Revoked()
+        async def sleep(seconds):
+            delays.append(seconds)
+        monkeypatch.setattr(client, "run_connection", connect)
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+        assert await client.run_reconnecting("https://example.test", "synthetic-token") == 2
+        assert len(calls) == 3
+        assert delays == [1, 2]
+    asyncio.run(run())
+    output = capsys.readouterr().out
+    assert "synthetic-secret" not in output
+    assert "synthetic-token" not in output
+
+
+def test_persistent_pairing_endpoint_requires_superadmin():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.residential_proxy import router
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    with TestClient(app) as api:
+        assert api.post("/api/admin/residential-proxy/pair", json={"persistent": True}).status_code == 401

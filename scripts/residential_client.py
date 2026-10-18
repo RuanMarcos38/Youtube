@@ -143,19 +143,48 @@ async def run_connection(url: str, code: str):
     # Authentication stays in a header, never in URLs, logs or files.
     async with connect(endpoint, additional_headers={"Authorization": "Bearer " + code},
                        max_size=MAX_CHUNK + 4, open_timeout=20, close_timeout=5, compression=None) as websocket:
-        print("Conexão residencial ativa. Mantenha esta janela aberta. Ctrl+C desconecta.", flush=True)
+        print("Conexão residencial ativa.", flush=True)
         await ClientRelay(websocket).run()
+
+
+def authorization_rejected(exc) -> bool:
+    response = getattr(exc, "response", None)
+    received = getattr(exc, "rcvd", None)
+    return (getattr(response, "status_code", None) in {401, 403}
+            or getattr(received, "code", None) == 1008)
+
+
+async def run_reconnecting(url: str, code: str):
+    delay = 1
+    while True:
+        started = asyncio.get_running_loop().time()
+        try:
+            await run_connection(url, code)
+        except Exception as exc:
+            if authorization_rejected(exc):
+                print("Autorizacao recusada. Pareie novamente no painel.", flush=True)
+                return 2
+            # Exceptions can contain request details; log only a fixed message.
+            print("Conexao indisponivel. Tentando reconectar automaticamente.", flush=True)
+        if asyncio.get_running_loop().time() - started > 60:
+            delay = 1
+        await asyncio.sleep(delay)
+        delay = min(60, delay * 2)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Conexão residencial privada do ShortsFlow")
     parser.add_argument("--url", default="https://shorts.r2rmarketingdigital.com.br")
+    parser.add_argument("--code-stdin", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--reconnect", action="store_true", help="Reconectar apos quedas de rede")
     args = parser.parse_args()
     print("Este cliente abre apenas conexões HTTPS para os destinos permitidos do YouTube.")
-    code = getpass.getpass("Cole o código temporário gerado no painel (entrada oculta): ").strip()
+    code = (sys.stdin.readline() if args.code_stdin else getpass.getpass("Cole o codigo gerado no painel (entrada oculta): ")).strip()
     if not code:
         raise SystemExit("Informe o código temporário.")
     try:
+        if args.reconnect:
+            raise SystemExit(asyncio.run(run_reconnecting(args.url, code)))
         asyncio.run(run_connection(args.url, code))
     except KeyboardInterrupt:
         print("Conexão encerrada.")
