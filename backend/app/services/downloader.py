@@ -12,7 +12,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from ..config import settings
-from .runtime_download_auth import cookie_override_file, effective_proxy_url
+from .runtime_download_auth import cookie_override_file, effective_proxy_url, permanent_proxy_url
 from .residential_proxy import connection_status as residential_status
 
 
@@ -275,7 +275,7 @@ def _strategy_variants() -> list[tuple[str, dict, bool, str]]:
     ]
     for name, variant in guest:
         strategies.append((name, variant, False, "none"))
-    if residential_status(settings.data_path)["enabled"]:
+    if residential_status(settings.data_path)["enabled"] and not permanent_proxy_url():
         # Public links should not wait for rejected, rotated account cookies.
         # Keep account strategies available afterward for content requiring login.
         strategies.sort(key=lambda strategy: strategy[2])
@@ -350,7 +350,7 @@ def _primary_failure(errors: list[str]) -> str:
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
     residential = residential_status(settings.data_path)
-    if residential["enabled"] and not residential["connected"]:
+    if residential["enabled"] and not residential["connected"] and not permanent_proxy_url():
         return {"ok": False, "error": "A conexão residencial está offline. Abra o cliente no computador e conecte antes de testar.", "mode": "residential", "attempts": 0}
     errors: list[str] = []
     attempted: list[str] = []
@@ -395,7 +395,7 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
     residential = residential_status(settings.data_path)
-    if residential["enabled"] and not residential["connected"]:
+    if residential["enabled"] and not residential["connected"] and not permanent_proxy_url():
         raise DownloadError("A conexão residencial está offline. Mantenha o cliente aberto no computador para baixar vídeos pelos links do YouTube.")
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []

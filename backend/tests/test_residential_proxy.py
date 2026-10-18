@@ -171,3 +171,41 @@ def test_offline_relay_does_not_accept_connect(tmp_path):
         await writer.wait_closed()
         await relay.stop()
     asyncio.run(run())
+
+@pytest.mark.parametrize("source", ["override", "environment"])
+def test_permanent_proxy_bypasses_offline_computer_without_mutating_pairing(tmp_path, monkeypatch, source):
+    from app.services import downloader, runtime_download_auth as auth
+    proxy = "http://proxy.example:8080"
+    monkeypatch.setattr(auth, "proxy_override_url", lambda: proxy if source == "override" else "")
+    monkeypatch.setattr(auth.settings, "ytdlp_proxy_url", proxy if source == "environment" else "")
+    monkeypatch.setattr(auth, "residential_enabled", lambda _: True)
+    monkeypatch.setattr(downloader, "residential_status", lambda _: {"enabled": True, "connected": False})
+    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(downloader, "_strategy_variants", lambda: [("guest:test", {}, False, "none")])
+    calls = []
+    def download(_url, output, options):
+        calls.append(options["proxy"])
+        video = output / "source.mp4"
+        video.write_bytes(b"synthetic-video")
+        return video
+    class Youtube:
+        def __init__(self, options):
+            calls.append(options["proxy"])
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            pass
+        def extract_info(self, *_args, **_kwargs):
+            return {"id": "test", "title": "Synthetic"}
+    monkeypatch.setattr(downloader, "_download_with_options", download)
+    monkeypatch.setattr(downloader, "YoutubeDL", Youtube)
+    assert auth.effective_proxy_url() == proxy
+    assert downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path).is_file()
+    assert downloader.validate_download_session()["ok"] is True
+    assert calls == [proxy, proxy]
+    assert auth.residential_enabled(tmp_path) is True
+    # Removing the explicit proxy restores the unchanged temporary route.
+    monkeypatch.setattr(auth, "proxy_override_url", lambda: "")
+    monkeypatch.setattr(auth.settings, "ytdlp_proxy_url", "")
+    assert auth.effective_proxy_url() == "http://127.0.0.1:18888"
+    assert downloader.validate_download_session()["attempts"] == 0
