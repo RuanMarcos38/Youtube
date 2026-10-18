@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_user
+from ..config import settings
+from ..services.seo_quality import clip_transcript_text
 from ..database import get_db
 from ..models import Clip, Job, User
 from ..schemas import ClipOut
-from ..services.seo_ai import build_ai_qualified_seo
+from ..services.seo_ai import SeoGenerationError, build_ai_qualified_seo
 from ..services.serializers import clip_to_dict
 
 
@@ -64,16 +66,32 @@ def regenerate_clip_seo(
     source_title = clip.job.source_video.title if clip.job and clip.job.source_video else ""
     content_text = _plain_subtitle_text(clip.subtitle_path)
     if not content_text:
-        content_text = " ".join(part for part in (clip.hook, clip.title, source_title) if part)
+        # The original timed transcript survives removal of visible subtitles.
+        path = settings.data_path / "users" / str(user.id) / "jobs" / str(clip.job_id) / "segments.json"
+        try:
+            segments = json.loads(path.read_text(encoding="utf-8"))
+            content_text = clip_transcript_text(segments, clip.start_seconds, clip.end_seconds)
+        except (OSError, ValueError, TypeError, AttributeError):
+            content_text = ""
+    if not content_text:
+        raise HTTPException(status_code=422, detail="A transcrição deste corte não está disponível. O SEO atual foi mantido.")
 
-    # Usa a IA já configurada no projeto quando a chave OpenAI está disponível.
-    # Em qualquer falha de IA, o serviço cai automaticamente para o gerador local
-    # qualificado, evitando quebrar o fluxo de publicação.
-    seo = build_ai_qualified_seo(
-        source_title=source_title,
-        hook=clip.hook,
-        content_text=content_text,
-    )
+    try:
+        seo = build_ai_qualified_seo(
+            source_title=source_title,
+            hook=clip.hook,
+            content_text=content_text,
+            current_title=clip.title,
+            current_description=clip.description,
+            require_ai=True,
+        )
+    except SeoGenerationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    # Recheck publication state after the external call before writing metadata.
+    db.refresh(clip)
+    if clip.status in _BLOCKED_STATUSES:
+        raise HTTPException(status_code=409, detail="O Short entrou na fila de envio durante a geração. O SEO atual foi mantido.")
 
     clip.title = seo.title
     clip.description = seo.description

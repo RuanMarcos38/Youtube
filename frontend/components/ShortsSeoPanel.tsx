@@ -31,6 +31,14 @@ export default function ShortsSeoPanel() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress>({ done: 0, total: 0 });
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [previous, setPrevious] = useState<Record<number, Clip>>({});
+  const [clipErrors, setClipErrors] = useState<Record<number, string>>({});
+
+  function acceptResult(before: Clip, updated: Clip) {
+    setPrevious((current) => ({ ...current, [updated.id]: before }));
+    setClipErrors((current) => ({ ...current, [updated.id]: "" }));
+    setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
+  }
 
   useEffect(() => {
     setMounted(true);
@@ -64,23 +72,25 @@ export default function ShortsSeoPanel() {
   }
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || busyId !== null || bulkBusy) return;
     void refresh({ silent: false });
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(timer);
-  }, [visible]);
+  }, [visible, busyId, bulkBusy]);
 
   async function generate(clip: Clip) {
-    if (BLOCKED.has(clip.status) || bulkBusy) return;
+    if (BLOCKED.has(clip.status) || bulkBusy || busyId !== null) return;
     setBusyId(clip.id);
     setNotice("");
     setError("");
     try {
       const updated = await generateClipSeo(clip.id);
-      setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
-      setNotice(`SEO IA do Short #${clip.id} gerado com Título + Descrição + Tags qualificadas (filtro 60+).`);
+      acceptResult(clip, updated);
+      setNotice(`SEO IA do Short #${clip.id} criado e salvo com novo título, descrição e tags.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível gerar o SEO deste Short.");
+      const message = err instanceof Error ? err.message : "Não foi possível gerar o SEO deste Short.";
+      setError(message);
+      setClipErrors((current) => ({ ...current, [clip.id]: message }));
     } finally {
       setBusyId(null);
     }
@@ -112,9 +122,11 @@ export default function ShortsSeoPanel() {
 
         try {
           const updated = await generateClipSeo(clip.id);
-          setClips((current) => current.map((item) => item.id === updated.id ? updated : item));
+          acceptResult(clip, updated);
           success += 1;
-        } catch {
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Não foi possível gerar o SEO deste Short.";
+          setClipErrors((current) => ({ ...current, [clip.id]: message }));
           failed += 1;
         }
 
@@ -160,6 +172,7 @@ export default function ShortsSeoPanel() {
         <aside
           id="shorts-seo-panel"
           data-shorts-seo-panel="true"
+          aria-label="Criação de SEO com IA"
           className="fixed right-5 top-[212px] z-[120] flex max-h-[calc(100vh-232px)] w-[min(470px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-[#e5e5e5] bg-white shadow-2xl"
         >
           <div className="flex items-start justify-between gap-4 border-b border-[#ededed] p-4">
@@ -167,7 +180,7 @@ export default function ShortsSeoPanel() {
               <div className="text-[11px] font-bold uppercase tracking-[.08em] text-[#ff0000]">SEO por Short</div>
               <h3 className="mt-1 text-base font-bold text-[#111]">Título + Descrição + Tags com IA</h3>
               <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Gere por IA, com capitalização otimizada, filtro interno de relevância 60+ e tags dentro do limite oficial de 500 caracteres do YouTube.
+                Crie um novo título, descrição e tags a partir do assunto real do corte. O resultado é salvo e exibido abaixo para revisão.
               </p>
             </div>
             <button
@@ -191,10 +204,10 @@ export default function ShortsSeoPanel() {
             >
               {bulkBusy
                 ? `Gerando SEO em massa ${bulkProgress.done}/${bulkProgress.total}`
-                : `Gerar Título + Descrição + Tags com IA (${eligibleCount})`}
+                : `Criar novo SEO com IA (${eligibleCount})`}
             </button>
             <div className="mt-2 text-center text-[10px] leading-4 text-[#777]">
-              Processa todos os Shorts disponíveis com IA. Tags irrelevantes são descartadas pelo filtro 60+ e o pacote respeita até 500 caracteres.
+              Tags relevantes, sem preencher os 500 caracteres por obrigação. Se a IA falhar, os metadados atuais são mantidos.
             </div>
 
             {bulkBusy && (
@@ -213,8 +226,8 @@ export default function ShortsSeoPanel() {
             )}
           </div>
 
-          {notice && <div className="mx-4 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">{notice}</div>}
-          {error && <div className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">{error}</div>}
+          {notice && <div role="status" className="mx-4 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">{notice}</div>}
+          {error && <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">{error}</div>}
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {clips.map((clip) => {
@@ -226,13 +239,34 @@ export default function ShortsSeoPanel() {
                       <div className="text-[10px] font-bold uppercase tracking-[.06em] text-[#777]">
                         Short #{clip.id} · {clip.tags.length} tags · {youtubeTagBudget(clip.tags)}/500 caracteres
                       </div>
-                      <div className="mt-1 text-sm font-bold leading-5 text-[#111]">{clip.title || "Título ainda não gerado"}</div>
-                      <div className="mt-2 text-[11px] leading-5 text-[#667085]">{clip.description || "Descrição ainda não gerada."}</div>
-                      {!!clip.tags.length && (
-                        <div className="mt-2 text-[10px] leading-4 text-[#555]">
-                          {clip.tags.slice(0, 10).map((tag) => `#${tag.replace(/\s+/g, "")}`).join(" ")}
+                      {previous[clip.id] && (
+                        <div className="mt-2 rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+                          Novo SEO criado por IA e salvo
                         </div>
                       )}
+                      <div className="mt-3 text-[10px] font-bold uppercase text-[#777]">Título · {clip.title.length}/100</div>
+                      <div className="mt-1 text-sm font-bold leading-5 text-[#111]">{clip.title || "Título ainda não gerado"}</div>
+                      <div className="mt-3 text-[10px] font-bold uppercase text-[#777]">Descrição</div>
+                      <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-[#667085]">{clip.description || "Descrição ainda não gerada."}</div>
+                      <div className="mt-3 text-[10px] font-bold uppercase text-[#777]">Tags para o YouTube</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {clip.tags.map((tag) => (
+                          <span key={tag} className="rounded-md border border-[#ddd] bg-white px-2 py-1 text-[11px] text-[#444]">{tag}</span>
+                        ))}
+                        {!clip.tags.length && <span className="text-xs text-[#777]">Tags ainda não geradas.</span>}
+                      </div>
+                      {previous[clip.id] && (
+                        <details className="mt-3 rounded-lg border border-[#ddd] bg-white p-2 text-xs text-[#667085]">
+                          <summary className="cursor-pointer font-semibold">Comparar com a versão anterior</summary>
+                          <p className="mt-2 font-bold">Título anterior</p>
+                          <p>{previous[clip.id].title}</p>
+                          <p className="mt-2 font-bold">Descrição anterior</p>
+                          <p className="whitespace-pre-wrap">{previous[clip.id].description}</p>
+                          <p className="mt-2 font-bold">Tags anteriores</p>
+                          <p>{previous[clip.id].tags.join(", ")}</p>
+                        </details>
+                      )}
+                      {clipErrors[clip.id] && <p role="alert" className="mt-2 text-xs text-red-700">{clipErrors[clip.id]}</p>}
                     </div>
                   </div>
 
@@ -241,9 +275,9 @@ export default function ShortsSeoPanel() {
                     onClick={() => void generate(clip)}
                     disabled={blocked || busyId !== null || bulkBusy}
                     className="mt-3 w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-xs font-bold text-[#222] transition hover:border-[#ff0000] hover:text-[#d90000] disabled:cursor-not-allowed disabled:opacity-40"
-                    title={blocked ? "SEO fica bloqueado depois que o Short entra na fila/publicação." : "Gerar por IA usando o conteúdo real deste Short, com filtro SEO 60+ e até 500 caracteres de tags"}
+                    title={blocked ? "SEO fica bloqueado depois que o Short entra na fila/publicação." : "Criar metadados originais com base no conteúdo real deste corte"}
                   >
-                    {busyId === clip.id ? "Gerando com IA..." : blocked ? "SEO bloqueado após envio" : "Gerar Título + Descrição + Tags com IA"}
+                    {busyId === clip.id ? "Gerando com IA..." : blocked ? "SEO bloqueado após envio" : "Criar novo SEO com IA"}
                   </button>
                 </article>
               );
