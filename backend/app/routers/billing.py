@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user, require_owner, require_superadmin
 from ..config import settings
 from ..database import SessionLocal, get_db
-from ..models import SystemSetting, User
+from ..models import SystemSetting, TenantPlan, User
 from ..services.asaas import (
     ASAAS_WEBHOOK_EVENTS,
+    _pending_checkout,
     apply_asaas_webhook,
     asaas_configured,
     create_checkout,
@@ -52,6 +53,46 @@ def _asaas_environment_label() -> str:
     if "api.asaas.com" in base:
         return "production"
     return "custom"
+
+
+def _checkout_session_url(checkout_id: str) -> str:
+    host = "https://sandbox.asaas.com" if "sandbox" in settings.asaas_base_url.lower() else "https://asaas.com"
+    return f"{host}/checkoutSession/show?id={checkout_id}"
+
+
+def _reusable_asaas_checkout(db: Session, user: User, plan_code: str, billing_cycle: str) -> dict | None:
+    """Reopen the same pending Asaas checkout instead of creating a duplicate.
+
+    Closing the hosted Asaas page does not cancel the checkout. While the
+    existing checkout remains pending, a second click for the same plan/cycle
+    must send the owner back to the original checkout URL. This keeps the
+    one-checkout-at-a-time protection while removing the dead end in /planos.
+    """
+    tenant_plan = db.query(TenantPlan).filter(TenantPlan.tenant_id == user.tenant_id).first()
+    if not tenant_plan or not tenant_plan.asaas_checkout_id:
+        return None
+
+    provider = (getattr(tenant_plan, "billing_provider", "") or "").strip().lower()
+    billing_status = (tenant_plan.billing_status or "").strip().lower()
+    if provider == "asaas" and billing_status in {"active", "paid", "past_due"}:
+        return None
+    if billing_status in {"inactive", "canceled", "cancelled"}:
+        return None
+
+    checkout_id = str(tenant_plan.asaas_checkout_id).strip()
+    pending = _pending_checkout(db, checkout_id)
+    if not pending or int(pending.get("tenant_id") or 0) != int(user.tenant_id):
+        return None
+    if pending.get("plan_code") != plan_code or pending.get("billing_cycle") != billing_cycle:
+        return None
+
+    return {
+        "checkout_id": checkout_id,
+        "checkout_url": _checkout_session_url(checkout_id),
+        "plan_code": plan_code,
+        "billing_cycle": billing_cycle,
+        "amount_cents": int(pending.get("amount_cents") or 0),
+    }
 
 
 @router.get("/public")
@@ -96,6 +137,11 @@ def create_asaas_checkout(
 ):
     if not asaas_configured():
         raise HTTPException(status_code=503, detail="O checkout Asaas ainda não foi habilitado no servidor.")
+
+    reusable = _reusable_asaas_checkout(db, user, payload.plan_code, payload.billing_cycle)
+    if reusable:
+        return reusable
+
     try:
         return create_checkout(db, user, payload.plan_code, payload.billing_cycle)
     except ValueError as exc:
