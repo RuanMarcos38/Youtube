@@ -209,3 +209,36 @@ def test_compact_error_limits_repeated_ui_noise():
 
     assert len(compact) <= 500
     assert compact.endswith("...")
+
+def test_download_bypasses_broken_proxy_after_first_proxy_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
+    monkeypatch.setattr(downloader.settings, "ytdlp_proxy_url", "http://proxy.invalid:8080")
+    monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "")
+    monkeypatch.setattr(downloader, "cookie_override_file", lambda: None)
+    monkeypatch.setattr(downloader, "effective_proxy_url", lambda: "http://proxy.invalid:8080")
+    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+
+    calls = []
+
+    def fake_download(_url, output_dir, options):
+        calls.append("proxy" in options)
+        if "proxy" in options:
+            raise RuntimeError("Unable to connect to proxy: Tunnel connection failed: 402 Payment Required")
+        path = output_dir / "source.mp4"
+        path.write_bytes(b"ok")
+        return path
+
+    monkeypatch.setattr(downloader, "_download_with_options", fake_download)
+
+    result = downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path / "job")
+
+    assert result.exists()
+    assert calls[:2] == [True, False]
+
+
+def test_proxy_failure_classifier_catches_provider_402():
+    assert downloader._is_proxy_failure(
+        "ProxyError: Unable to connect to proxy, OSError('Tunnel connection failed: 402 Payment Required')"
+    )
+
