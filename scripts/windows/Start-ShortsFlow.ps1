@@ -5,7 +5,7 @@ if (-not $taskMutex.WaitOne(0)) { exit 0 }
 try {
     $taskCredential = Join-Path $taskRoot 'authorization.dpapi'
     if (-not (Test-Path -LiteralPath $taskCredential)) { exit 2 }
-    $taskSecure = Get-Content -LiteralPath $taskCredential -Raw | ConvertTo-SecureString
+    $taskSecure = (Get-Content -LiteralPath $taskCredential -Raw).Trim() | ConvertTo-SecureString
     $taskPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($taskSecure)
     try { $taskCode = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($taskPointer) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($taskPointer) }
@@ -39,6 +39,7 @@ try {
         }
     }
     $taskProcess.WaitForExit()
+    Add-Content -LiteralPath $taskLog -Value ('Cliente encerrado. Codigo: ' + $taskProcess.ExitCode) -Encoding utf8
     exit $taskProcess.ExitCode
 } catch {
     # Never serialize exception details or decrypted credentials to a log.
