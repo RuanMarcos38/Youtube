@@ -20,6 +20,38 @@ $taskButton.SetBounds(180,140,250,36)
 $taskStatus = New-Object Windows.Forms.Label
 $taskStatus.SetBounds(20,185,570,50)
 $taskForm.Controls.AddRange(@($taskLabel,$taskInput,$taskButton,$taskStatus))
+$taskTimer = New-Object Windows.Forms.Timer
+$taskTimer.Interval = 1000
+$script:taskInstallStarted = $null
+$taskTimer.Add_Tick({
+    try {
+        $taskLog = Join-Path $taskDestination 'connection.log'
+        if ((Test-Path -LiteralPath $taskLog) -and (Get-Item -LiteralPath $taskLog).LastWriteTime -ge $script:taskInstallStarted) {
+            $taskText = Get-Content -LiteralPath $taskLog -Raw
+            if ($taskText -match 'residencial ativa') {
+                $taskTimer.Stop()
+                $taskStatus.ForeColor = [Drawing.Color]::Green
+                $taskStatus.Text = 'CONECTADO. Inicio automatico registrado e conexao confirmada.'
+                return
+            }
+            if ($taskText -match 'Autorizacao recusada|Falha ao iniciar|Cliente encerrado') {
+                $taskTimer.Stop()
+                $taskStatus.ForeColor = [Drawing.Color]::Red
+                $taskStatus.Text = 'Inicio registrado, mas a conexao falhou. Use o reparador ou gere um novo codigo na pagina /conexao-automatica.'
+                $taskButton.Enabled = $true
+                return
+            }
+        }
+        if (((Get-Date) - $script:taskInstallStarted).TotalSeconds -gt 45) {
+            $taskTimer.Stop()
+            $taskStatus.Text = 'Inicio registrado. Conexao ainda nao confirmada; o cliente continuara tentando em segundo plano.'
+        }
+    } catch {
+        $taskTimer.Stop()
+        $taskStatus.Text = 'Inicio registrado. Confira no painel se o computador aparece conectado.'
+    }
+})
+$taskForm.Add_FormClosing({ $taskTimer.Stop() })
 $taskButton.Add_Click({
     try {
         $taskCode = $taskInput.Text.Trim()
@@ -49,8 +81,10 @@ $taskButton.Add_Click({
         $taskLaunch = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $taskRunner + '"'
         $taskVbs = 'CreateObject("WScript.Shell").Run "' + $taskLaunch.Replace('"','""') + '", 0, False'
         Set-Content -LiteralPath $taskStartup -Value $taskVbs -Encoding unicode
+        $script:taskInstallStarted = Get-Date
         Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $taskStartup + '"') -WindowStyle Hidden
-        $taskStatus.Text = 'Ativado. O cliente inicia em segundo plano ao entrar no Windows e reconecta apos quedas de internet.'
+        $taskStatus.Text = 'Inicio registrado. Aguardando confirmacao da conexao...'
+        $taskTimer.Start()
         $taskButton.Enabled = $false
     } catch {
         $taskStatus.Text = 'Nao foi possivel concluir. Verifique a permissao de gravacao na Inicializacao do Windows.'
