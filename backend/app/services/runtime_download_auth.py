@@ -74,10 +74,17 @@ def proxy_override_url() -> str:
         return ""
 
 
+def permanent_proxy_url() -> str:
+    return proxy_override_url() or settings.ytdlp_proxy_url.strip()
+
+
 def effective_proxy_url() -> str:
+    configured = permanent_proxy_url()
+    if configured:
+        return configured
     if residential_enabled(settings.data_path):
         return f"http://127.0.0.1:{PROXY_PORT}"
-    return proxy_override_url() or settings.ytdlp_proxy_url.strip()
+    return ""
 
 
 def status_payload() -> dict:
