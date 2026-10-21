@@ -18,6 +18,13 @@ import type {
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export type ResidentialProxyStatus = { enabled: boolean; connected: boolean };
 export const adminResidentialProxy = () => api<ResidentialProxyStatus>("/api/admin/residential-proxy");
 export const adminPairResidentialProxy = () => api<{ code: string; expires_in_seconds: number }>("/api/admin/residential-proxy/pair", { method: "POST" });
@@ -70,7 +77,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       const body: unknown = await response.json();
       message = apiErrorMessage(body, fallback);
     } catch {}
-    throw new Error(`${path}: ${message}`);
+    throw new ApiError(`${path}: ${message}`, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json();
