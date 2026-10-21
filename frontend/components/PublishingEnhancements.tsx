@@ -257,7 +257,6 @@ export default function PublishingEnhancements() {
           setCreatorError("");
           setPrivacy((current) => {
             if (info.privacy_level_options.includes(current)) return current;
-            if (info.public_posting_blocked && info.privacy_level_options.includes("SELF_ONLY")) return "SELF_ONLY";
             return "";
           });
         } catch (err) {

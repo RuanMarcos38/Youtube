@@ -76,11 +76,12 @@ def _claim_next_job_id() -> int | None:
         job = db.query(Job).filter(Job.status == "queued").order_by(Job.id.asc()).first()
         if not job:
             return None
-        job.status = "checking_ffmpeg"
-        job.progress = max(1, job.progress or 0)
-        job.error = None
+        claimed = db.query(Job).filter(Job.id == job.id, Job.status == "queued").update(
+            {Job.status: "checking_ffmpeg", Job.progress: 1, Job.error: None},
+            synchronize_session=False,
+        )
         db.commit()
-        return job.id
+        return job.id if claimed else None
     finally:
         db.close()
 
@@ -164,7 +165,6 @@ def _collect_finished_jobs(active: dict[Future, int]) -> None:
                 job = db.get(Job, job_id)
                 if job and job.status not in {"failed", "ready_for_review"}:
                     job.status = "failed"
-                    job.progress = 100
                     job.error = f"Worker failure: {exc}"
                     db.commit()
             finally:

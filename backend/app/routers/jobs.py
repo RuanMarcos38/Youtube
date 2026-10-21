@@ -159,12 +159,23 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
     duration_seconds = max(0, int(original.source_video.duration_seconds or 0))
     _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips)
 
-    # Cria primeiro a nova tentativa, preservando o vídeo de origem e todas as
-    # credenciais/configurações. Depois remove somente a tentativa antiga que já
-    # terminou em falha, evitando cartões duplicados na tela de processamentos.
-    result = _create_queued_job(db, user, original.source_video, original.requested_clips)
-    _remove_failed_job(db, user.id, original)
-    return result
+    # Serialize retries of this source in both PostgreSQL and SQLite. The
+    # no-op write holds a lock until the new attempt is committed.
+    db.query(SourceVideo).filter(SourceVideo.id == original.source_video_id).update(
+        {SourceVideo.rights_confirmed: SourceVideo.rights_confirmed}, synchronize_session=False,
+    )
+    active = (
+        db.query(Job).options(joinedload(Job.source_video), joinedload(Job.clips))
+        .filter(Job.user_id == user.id, Job.source_video_id == original.source_video_id,
+                Job.status.notin_(("failed", "ready_for_review")))
+        .order_by(Job.id.desc()).first()
+    )
+    if active:
+        result = job_to_dict(active)
+        db.commit()
+        return result
+    # Keep the failed attempt and its partial media as history.
+    return _create_queued_job(db, user, original.source_video, original.requested_clips)
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -10,14 +10,15 @@ from .seo_quality import build_qualified_local_seo, clip_transcript_text
 from .transcription import transcribe_chunks
 
 
-def _set_status(job_id: int, status: str, progress: int, error: str | None = None) -> None:
+def _set_status(job_id: int, status: str, progress: int | None, error: str | None = None) -> None:
     db = SessionLocal()
     try:
         job = db.get(Job, job_id)
         if not job:
             return
         job.status = status
-        job.progress = max(0, min(100, int(progress)))
+        if progress is not None:
+            job.progress = max(0, min(100, int(progress)))
         job.error = error
         db.commit()
     finally:
@@ -77,10 +78,11 @@ def run_pipeline(job_id: int) -> None:
         job = db.query(Job).options(joinedload(Job.source_video), joinedload(Job.clips)).filter(Job.id == job_id).first()
         if not job:
             return
+        if job.status == "ready_for_review":
+            return
+        if job.clips:
+            raise RuntimeError("Processamento interrompido com cortes preservados. Use Tentar novamente para criar uma nova tentativa.")
         source = job.source_video
-        for existing_clip in list(job.clips):
-            db.delete(existing_clip)
-        db.commit()
 
         work_dir = settings.data_path / "users" / str(job.user_id) / "jobs" / str(job_id)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +160,6 @@ def run_pipeline(job_id: int) -> None:
         _set_status(job_id, "ready_for_review", 100)
     except Exception as exc:
         db.rollback()
-        _set_status(job_id, "failed", 100, str(exc))
+        _set_status(job_id, "failed", None, str(exc))
     finally:
         db.close()
