@@ -187,6 +187,11 @@ def _local_post_summary(db: Session, user_id: int) -> dict:
     counts: dict[str, int] = {}
     for row in rows:
         counts[row.status] = counts.get(row.status, 0) + 1
+    latest_failure = max(
+        (row for row in rows if row.status == "failed" and row.error),
+        key=lambda row: ((row.updated_at or row.created_at).replace(tzinfo=timezone.utc), row.id),
+        default=None,
+    )
     return {
         "total_attempts": len(rows),
         "published_confirmed": counts.get("published", 0),
@@ -194,6 +199,7 @@ def _local_post_summary(db: Session, user_id: int) -> dict:
         "failed": counts.get("failed", 0),
         "paused_limit": counts.get("paused_limit", 0),
         "queued": counts.get("queued", 0),
+        "latest_failure_message": str(latest_failure.error)[:2000] if latest_failure else None,
     }
 
 
@@ -226,7 +232,11 @@ def _alerts(local: dict, period: dict, growth: dict, normalized_videos: list[dic
         alerts.append({
             "kind": "danger",
             "title": "Falhas de publicação",
-            "detail": f"{local['failed']} tentativa(s) falharam. Revise os motivos antes de reenviar em lote.",
+            "detail": (
+                f"{local['failed']} tentativa(s) falharam. Motivo mais recente: {local['latest_failure_message']}"
+                if local.get("latest_failure_message")
+                else f"{local['failed']} tentativa(s) falharam. Revise os motivos antes de reenviar em lote."
+            ),
         })
     if local.get("processing"):
         alerts.append({

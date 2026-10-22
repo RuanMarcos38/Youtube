@@ -12,6 +12,8 @@ from .services.bootstrap import ensure_superadmin
 from .services.caption_removal_runtime import install_editor_api_caption_queue
 from .services.daily_admin_audit import daily_admin_audit_loop
 from .services.database_bootstrap import initialize_database
+from .routers import residential_proxy
+from .services.residential_proxy import relay as residential_relay
 
 
 # Preserve the existing editor routes and storage. This only makes the current
@@ -24,10 +26,12 @@ async def lifespan(_: FastAPI):
     settings.data_path.mkdir(parents=True, exist_ok=True)
     initialize_database()
     ensure_superadmin()
+    await residential_relay.start()
     audit_task = asyncio.create_task(daily_admin_audit_loop())
     try:
         yield
     finally:
+        await residential_relay.stop()
         audit_task.cancel()
         with suppress(asyncio.CancelledError):
             await audit_task
@@ -58,6 +62,7 @@ app.include_router(system.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(billing.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
+app.include_router(residential_proxy.router, prefix=settings.api_prefix)
 app.include_router(admin_insights.router, prefix=settings.api_prefix)
 app.include_router(diagnostics.router, prefix=settings.api_prefix)
 app.include_router(videos.router, prefix=settings.api_prefix)

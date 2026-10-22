@@ -157,7 +157,7 @@ def tiktok_publication_history(user: User = Depends(get_current_user), db: Sessi
     rows = (
         db.query(TikTokPost)
         .filter(TikTokPost.user_id == user.id)
-        .order_by(TikTokPost.id.desc())
+        .order_by(TikTokPost.updated_at.desc(), TikTokPost.id.desc())
         .limit(200)
         .all()
     )
