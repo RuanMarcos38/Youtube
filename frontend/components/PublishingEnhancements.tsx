@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createEditorProjectFromClip,
@@ -173,6 +173,8 @@ export default function PublishingEnhancements() {
   const [remaining, setRemaining] = useState(0);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const pendingTikTokBatch = useRef<Set<number> | null>(null);
+  const queueRefreshInFlight = useRef(false);
   const [error, setError] = useState("");
   const [ttStatus, setTtStatus] = useState<TikTokStatus | null>(null);
   const [creator, setCreator] = useState<TikTokCreatorInfo | null>(null);
@@ -220,6 +222,10 @@ export default function PublishingEnhancements() {
   }, []);
 
   async function refreshQueues({ silent = true }: { silent?: boolean } = {}) {
+    if (queueRefreshInFlight.current) return;
+    queueRefreshInFlight.current = true;
+    const trackedBatch = pendingTikTokBatch.current;
+    try {
     const [youtube, tiktok] = await Promise.allSettled([youtubePublicationClips(), tiktokPublicationClips()]);
     const failures: string[] = [];
 
@@ -237,6 +243,22 @@ export default function PublishingEnhancements() {
       const tVisible = new Set(tiktok.value.clips.filter(isTikTokSelectable).map((clip) => clip.id));
       setTiktokClips(tiktok.value.clips);
       setTiktokSelected((current) => new Set([...current].filter((id) => tVisible.has(id))));
+      const pending = trackedBatch;
+      if (pending && pending === pendingTikTokBatch.current) {
+        const returned = tiktok.value.clips.filter((clip) => pending.has(clip.id));
+        const interrupted = returned.find((clip) => ["failed", "paused_limit"].includes(clip.tiktok_status || ""));
+        const released = returned.some((clip) => clip.tiktok_status === "ready");
+        if (interrupted || released) {
+          pendingTikTokBatch.current = null;
+          setNotice("");
+          setError(interrupted?.tiktok_error || "O lote foi interrompido e os cortes foram liberados. Isso não confirma publicação. Confira o motivo em Métricas TikTok antes de reenviar.");
+          void refreshTikTok();
+          void refreshMetrics(metricDays);
+        } else if (!returned.length) {
+          pendingTikTokBatch.current = null;
+          setNotice("");
+        }
+      }
     } else {
       failures.push(`TikTok: ${tiktok.reason instanceof Error ? tiktok.reason.message : "não foi possível atualizar"}`);
     }
@@ -244,6 +266,7 @@ export default function PublishingEnhancements() {
     if (failures.length && !silent) {
       setError(`A fila foi aceita, mas a atualização da tela falhou em ${failures.join(" / ")}. Recarregue a página se o status não mudar.`);
     }
+    } finally { queueRefreshInFlight.current = false; }
   }
 
   async function refreshTikTok() {
@@ -404,6 +427,7 @@ export default function PublishingEnhancements() {
       const { batches, result } = await uploadIdsInBatches(selectedIds, (ids) => tiktokUploadBatch(ids, payload));
       const queuedIds = new Set(result.clip_ids);
       if (queuedIds.size) {
+        pendingTikTokBatch.current = queuedIds;
         setTiktokClips((current) => current.map((clip) => (
           queuedIds.has(clip.id)
             ? { ...clip, tiktok_status: "queued", tiktok_error: null, tiktok_publish_id: null }
