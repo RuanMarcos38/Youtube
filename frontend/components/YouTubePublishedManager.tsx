@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 
-import { deleteYouTubePublication, youtubePublishedClips } from "@/lib/publications-api";
+import { cleanPublishedLocalFiles, deleteYouTubePublication, youtubePublishedClips } from "@/lib/publications-api";
 import type { Clip } from "@/lib/types";
 
 function fmtDateTime(value?: string) {
@@ -21,9 +21,10 @@ function fmtDateTime(value?: string) {
 
 export default function YouTubePublishedManager() {
   const [host, setHost] = useState<HTMLElement | null>(null);
-  const [published, setPublished] = useState<Clip[]>([]);
+  const [published, setPublished] = useState<Array<Clip & { local_files_cleaned?: boolean }>>([]);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [cleaningId, setCleaningId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -114,6 +115,19 @@ export default function YouTubePublishedManager() {
     }
   }
 
+  async function cleanFiles(clip: Clip) {
+    if (!window.confirm(`Remover permanentemente o vídeo renderizado e a legenda local de “${clip.title}”?\n\nO vídeo publicado no YouTube, o histórico e o original serão preservados. Para enviar este corte ao TikTok depois, será necessário gerá-lo novamente. Esta limpeza não renova a franquia do proxy.`)) return;
+    setCleaningId(clip.id); setError(""); setNotice("");
+    try {
+      const result = await cleanPublishedLocalFiles(clip.id);
+      setPublished((current) => current.map((item) => item.id === clip.id ? { ...item, local_files_cleaned: true } : item));
+      setNotice(`Arquivos locais removidos. ${(result.freed_bytes / 1024 / 1024).toFixed(1)} MB liberados. Vídeo no YouTube e histórico preservados. A franquia do proxy não foi alterada.`);
+      window.dispatchEvent(new CustomEvent("shortsflow:clips-changed"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível limpar os arquivos.");
+    } finally { setCleaningId(null); }
+  }
+
   if (!host) return null;
 
   const needsReconnect = error.toLowerCase().includes("reconecte o youtube");
@@ -136,6 +150,8 @@ export default function YouTubePublishedManager() {
       <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10px] font-medium leading-5 text-amber-900">
         Exclusão permanente: o botão abaixo só aparece para vídeos que o ShortsFlow confirmou como publicados. Antes de excluir, o sistema solicita uma confirmação adicional.
       </div>
+
+      <p className="mt-3 text-xs leading-5 text-[#667085]">Após publicar, use “Limpar arquivos do servidor” para liberar o espaço do corte e da legenda. O original e o histórico são preservados. Isso não renova a franquia do proxy.</p>
 
       {notice && <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">{notice}</div>}
       {error && (
@@ -162,14 +178,19 @@ export default function YouTubePublishedManager() {
                   <a href={`https://www.youtube.com/watch?v=${clip.youtube_video_id}`} target="_blank" rel="noreferrer" className="font-black text-red-600 hover:underline">Abrir no YouTube</a>
                 </div>
               </div>
+              <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => void cleanFiles(clip)} disabled={deletingId !== null || cleaningId !== null || clip.local_files_cleaned} className="sf-button sf-button-outline disabled:opacity-40">
+                {cleaningId === clip.id ? "Limpando arquivos..." : clip.local_files_cleaned ? "Arquivos locais removidos" : "Limpar arquivos do servidor"}
+              </button>
               <button
                 type="button"
                 onClick={() => void removePublishedVideo(clip)}
-                disabled={deletingId !== null}
+                disabled={deletingId !== null || cleaningId !== null}
                 className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100 disabled:opacity-40"
               >
                 {deletingId === clip.id ? "Excluindo no YouTube..." : "Excluir do ShortsFlow e YouTube"}
               </button>
+              </div>
             </article>
           ))}
         </div>
