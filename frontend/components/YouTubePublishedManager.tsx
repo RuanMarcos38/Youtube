@@ -25,6 +25,7 @@ export default function YouTubePublishedManager() {
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [cleaningId, setCleaningId] = useState<number | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -163,7 +164,9 @@ export default function YouTubePublishedManager() {
         </div>
       )}
 
-      {published.length ? (
+      {published.length > 0 && <button type="button" onClick={() => setShowHistory((current) => !current)} aria-expanded={showHistory} className="sf-button sf-button-outline mt-3">{showHistory ? "Fechar histórico" : `Ver publicados e limpar arquivos (${published.length})`}</button>}
+
+      {published.length && showHistory ? (
         <div className="mt-4 divide-y divide-[#ededed] overflow-hidden rounded-xl border border-[#e7e7e7]">
           {published.map((clip) => (
             <article key={clip.id} className="grid gap-3 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
@@ -194,7 +197,7 @@ export default function YouTubePublishedManager() {
             </article>
           ))}
         </div>
-      ) : (
+      ) : published.length ? null : (
         <div className="mt-4 rounded-xl border border-dashed border-[#ddd] bg-[#fafafa] p-6 text-center text-xs text-[#777]">
           Nenhum vídeo publicado pelo ShortsFlow disponível para exclusão.
         </div>
