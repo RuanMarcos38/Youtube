@@ -119,7 +119,13 @@ export const youtubePublicationClips = () =>
   request<{ platform: "youtube"; availability: YouTubeAvailability; clips: Clip[] }>("/api/publications/youtube");
 
 export const youtubePublishedClips = () =>
-  request<{ platform: "youtube"; clips: Clip[] }>("/api/publications/youtube/history");
+  request<{ platform: "youtube"; clips: Array<Clip & { local_files_cleaned?: boolean }> }>("/api/publications/youtube/history");
+
+export const cleanPublishedLocalFiles = (clipId: number) =>
+  request<{ ok: boolean; freed_bytes: number }>(`/api/publications/youtube/${clipId}/clean-local-files`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed: true }),
+  });
 
 export const deleteYouTubePublication = (clipId: number) =>
   request<{ ok: boolean; clip_id: number; youtube_video_id: string; already_missing: boolean }>(`/api/publications/youtube/${clipId}`, {
