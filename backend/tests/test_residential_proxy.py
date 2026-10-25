@@ -126,13 +126,57 @@ def test_admin_pairing_and_websocket_require_authorization():
         assert error.value.code == 1008
 
 
-def test_downloader_never_falls_back_to_vps_when_residential_is_offline(tmp_path, monkeypatch):
+def test_downloader_uses_server_when_residential_is_offline(tmp_path, monkeypatch):
     from app.services import downloader
+    from app.services import runtime_download_auth as auth
     monkeypatch.setattr(downloader, "residential_status", lambda _: {"enabled": True, "connected": False})
-    monkeypatch.setattr(downloader, "_download_with_options", lambda *_: pytest.fail("Offline mode must not contact YouTube"))
-    with pytest.raises(downloader.DownloadError, match="offline"):
-        downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path)
-    assert downloader.validate_download_session()["attempts"] == 0
+    monkeypatch.setattr(auth, "residential_status", lambda _: {"enabled": True, "connected": False})
+    monkeypatch.setattr(auth, "permanent_proxy_url", lambda: "")
+    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
+    calls = []
+    def download(_url, output, options):
+        calls.append(options)
+        assert "proxy" not in options
+        video = output / "source.mp4"
+        video.write_bytes(b"synthetic-video")
+        return video
+    monkeypatch.setattr(downloader, "_download_with_options", download)
+    assert downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path).is_file()
+    assert len(calls) == 1
+
+    class Probe:
+        def __init__(self, options):
+            assert "proxy" not in options
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            pass
+        def extract_info(self, *_args, **_kwargs):
+            return {"id": "test", "title": "Server probe"}
+    monkeypatch.setattr(downloader, "YoutubeDL", Probe)
+    result = downloader.validate_download_session()
+    assert result["ok"] is True
+    assert result["attempts"] == 1
+
+
+@pytest.mark.parametrize("enabled,connected,expected", [
+    (True, False, ""),
+    (False, False, ""),
+    (False, True, ""),
+    (True, True, "http://127.0.0.1:18888"),
+])
+def test_proxy_selection_requires_live_residential_client(monkeypatch, enabled, connected, expected):
+    from app.services import runtime_download_auth as auth
+    monkeypatch.setattr(auth, "permanent_proxy_url", lambda: "")
+    monkeypatch.setattr(auth, "residential_status", lambda _: {"enabled": enabled, "connected": connected})
+    assert auth.effective_proxy_url() == expected
+
+
+def test_permanent_proxy_keeps_priority_with_desktop_offline(monkeypatch):
+    from app.services import runtime_download_auth as auth
+    monkeypatch.setattr(auth, "permanent_proxy_url", lambda: "http://server-proxy:8080")
+    monkeypatch.setattr(auth, "residential_status", lambda _: {"enabled": True, "connected": False})
+    assert auth.effective_proxy_url() == "http://server-proxy:8080"
 
 
 def test_residential_public_download_does_not_retry_stale_account_cookies(tmp_path, monkeypatch):

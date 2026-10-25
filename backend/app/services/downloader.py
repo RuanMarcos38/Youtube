@@ -349,9 +349,6 @@ def _primary_failure(errors: list[str]) -> str:
 
 
 def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
-    residential = residential_status(settings.data_path)
-    if residential["enabled"] and not residential["connected"] and not permanent_proxy_url():
-        return {"ok": False, "error": "A conexão residencial está offline. Abra o cliente no computador e conecte antes de testar.", "mode": "residential", "attempts": 0}
     errors: list[str] = []
     attempted: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shortsflow-ytdlp-check-") as tmp:
@@ -394,9 +391,6 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
 
 
 def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | None = None) -> Path:
-    residential = residential_status(settings.data_path)
-    if residential["enabled"] and not residential["connected"] and not permanent_proxy_url():
-        raise DownloadError("A conexão residencial está offline. Mantenha o cliente aberto no computador para baixar vídeos pelos links do YouTube.")
     output_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     attempts = 0
