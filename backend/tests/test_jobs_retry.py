@@ -198,7 +198,7 @@ def test_retry_authorization_and_missing_job():
         db.close()
 
 
-@pytest.mark.parametrize("unavailable", ["worker", "residential", "download_auth"])
+@pytest.mark.parametrize("unavailable", ["worker", "download_auth"])
 def test_retry_unavailable_dependency_does_not_create_job(monkeypatch, unavailable):
     from app.models import SystemSetting
     if unavailable == "worker":
@@ -219,7 +219,7 @@ def test_retry_unavailable_dependency_does_not_create_job(monkeypatch, unavailab
         db.close()
 
 
-@pytest.mark.parametrize("connected,permanent", [(True, ""), (False, "http://proxy.example:8080")])
+@pytest.mark.parametrize("connected,permanent", [(True, ""), (False, "http://proxy.example:8080"), (False, "")])
 def test_retry_available_acquisition_path(monkeypatch, connected, permanent):
     monkeypatch.setattr(jobs_router, "residential_status", lambda _: {"enabled": True, "connected": connected})
     monkeypatch.setattr(jobs_router, "permanent_proxy_url", lambda: permanent)

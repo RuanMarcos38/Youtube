@@ -18,6 +18,29 @@ import type {
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+export function uploadVideoJob(file: File, requestedClips: number, rightsConfirmed: boolean, onProgress: (percent: number) => void): Promise<Job> {
+  const data = new FormData();
+  data.append("file", file);
+  data.append("requested_clips", String(requestedClips));
+  data.append("rights_confirmed", String(rightsConfirmed));
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_URL}/api/jobs/upload`);
+    request.withCredentials = true;
+    request.responseType = "json";
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100));
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) resolve(request.response as Job);
+      else reject(new ApiError(apiErrorMessage(request.response, "Não foi possível enviar o vídeo."), request.status));
+    };
+    request.onerror = () => reject(new Error("O envio foi interrompido. Verifique sua conexão e tente novamente."));
+    request.onabort = () => reject(new Error("Envio cancelado."));
+    request.send(data);
+  });
+}
+
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
