@@ -12,6 +12,6 @@
    original section header intact, but hide the legacy mixed YouTube/TikTok card
    list that follows our host. This is presentation-only: no project data,
    credentials, media files or backend routes are removed. */
-#cortes > .sf-card > [data-publishing-enhancements-host] ~ * {
+#cortes > .sf-card > [data-publishing-enhancements-host] ~ :not([data-youtube-published-manager-host]) {
   display: none !important;
 }

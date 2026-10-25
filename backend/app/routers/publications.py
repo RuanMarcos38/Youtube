@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from ..auth import get_current_user
 from ..database import get_db
+from ..config import settings
 from ..errors import YouTubeAuthError
 from ..models import Clip, SystemSetting, TikTokPost, User
 from ..services.database_bootstrap import PUBLICATIONS_RESET_KEY
@@ -15,6 +18,63 @@ from ..services.youtube_upload_availability import upload_availability
 
 
 router = APIRouter(prefix="/publications", tags=["publications"])
+
+
+class LocalCleanupRequest(BaseModel):
+    confirmed: bool = False
+
+
+@router.post("/youtube/{clip_id}/clean-local-files")
+def clean_local_files(
+    clip_id: int,
+    payload: LocalCleanupRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    clip = db.query(Clip).filter(Clip.id == clip_id, Clip.user_id == user.id).with_for_update().first()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada para este perfil.")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Confirme a remoção permanente dos arquivos locais.")
+    if clip.status != "uploaded" or not (clip.youtube_video_id or "").strip():
+        raise HTTPException(status_code=409, detail="A limpeza exige publicação confirmada no YouTube.")
+    post = db.query(TikTokPost).filter(TikTokPost.clip_id == clip.id).first()
+    if post and post.status != "published":
+        raise HTTPException(status_code=409, detail="Conclua ou cancele o envio ao TikTok antes de limpar este arquivo.")
+
+    # Only the exact rendered video and subtitle in this user's job directory.
+    # Never recursively remove a directory, source video, or another project.
+    root = settings.data_path.resolve()
+    expected = root / "users" / str(user.id) / "jobs" / str(clip.job_id)
+    paths = []
+    for value in (clip.file_path, clip.subtitle_path):
+        if not value:
+            continue
+        path = Path(value)
+        if path.is_symlink() or path.resolve().parent != expected or expected.resolve() != expected:
+            raise HTTPException(status_code=409, detail="Arquivo fora da pasta segura deste processamento.")
+        if path.name.startswith("source.") or path.suffix.lower() not in {".mp4", ".srt"}:
+            raise HTTPException(status_code=409, detail="Este arquivo não é um corte ou legenda removível.")
+        # Do not remove a shared artifact referenced by another clip.
+        shared = db.query(Clip).filter(Clip.id != clip.id, (Clip.file_path == value) | (Clip.subtitle_path == value)).first()
+        if shared:
+            raise HTTPException(status_code=409, detail="Arquivo compartilhado com outro corte; limpeza bloqueada.")
+        paths.append(path)
+    removed = 0
+    freed_bytes = 0
+    try:
+        for path in set(paths):
+            if path.is_file():
+                size = path.stat().st_size
+                path.unlink()
+                removed += 1
+                freed_bytes += size
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail="Não foi possível concluir a limpeza. Tente novamente.") from exc
+    clip.file_path = ""
+    clip.subtitle_path = ""
+    db.commit()
+    return {"ok": True, "clip_id": clip.id, "removed_files": removed, "freed_bytes": freed_bytes}
 
 
 def _utc(value: datetime) -> datetime:
@@ -70,7 +130,7 @@ def youtube_publication_history(user: User = Depends(get_current_user), db: Sess
     ]
     return {
         "platform": "youtube",
-        "clips": [clip_to_dict(clip) for clip in rows],
+        "clips": [{**clip_to_dict(clip), "local_files_cleaned": not bool(clip.file_path)} for clip in rows],
     }
 
 
@@ -127,7 +187,7 @@ def tiktok_publications(user: User = Depends(get_current_user), db: Session = De
     id. Inbox/draft delivery is not treated as a completed publication.
     """
     recover_retryable_draft_uploads(db, user_id=user.id)
-    clips = [clip for clip in _base_clips(user, db) if clip.status != "archived"]
+    clips = [clip for clip in _base_clips(user, db) if clip.status != "archived" and clip.file_path]
     ids = [clip.id for clip in clips]
     posts = {
         post.clip_id: post
