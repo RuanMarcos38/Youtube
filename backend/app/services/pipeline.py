@@ -1,4 +1,5 @@
 import json
+import shutil
 from sqlalchemy.orm import joinedload
 from ..database import SessionLocal
 from ..models import Clip, Job
@@ -8,6 +9,7 @@ from .downloader import download_video
 from .ffmpeg_service import ensure_ffmpeg, extract_audio_chunks, get_duration, render_vertical_clip, write_clip_srt
 from .seo_quality import build_qualified_local_seo, clip_transcript_text
 from .transcription import transcribe_chunks
+from .source_uploads import source_upload_path
 
 
 def _set_status(job_id: int, status: str, progress: int | None, error: str | None = None) -> None:
@@ -89,8 +91,15 @@ def run_pipeline(job_id: int) -> None:
 
         _set_status(job_id, "checking_ffmpeg", 5)
         ensure_ffmpeg()
-        _set_status(job_id, "downloading", 15)
-        video_path = download_video(source.original_url, work_dir, progress_hook=_download_progress_updater(job_id))
+        uploaded_path = source_upload_path(job.user_id, source.original_url)
+        if uploaded_path is not None:
+            if not uploaded_path.is_file():
+                raise RuntimeError("O arquivo original não está mais disponível. Envie o vídeo novamente.")
+            video_path = work_dir / f"source{uploaded_path.suffix}"
+            shutil.copyfile(uploaded_path, video_path)
+        else:
+            _set_status(job_id, "downloading", 15)
+            video_path = download_video(source.original_url, work_dir, progress_hook=_download_progress_updater(job_id))
 
         _set_status(job_id, "extracting_audio", 30)
         duration = get_duration(video_path)

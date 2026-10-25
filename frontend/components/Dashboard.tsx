@@ -20,6 +20,7 @@ import {
 import type { Clip, Job, TrendingVideo, UserProfile, YouTubeDashboardAlert, YouTubeLiveMetrics } from "@/lib/types";
 import BrandLogo from "./BrandLogo";
 import LanguageSelector from "./LanguageSelector";
+import VideoUploadPanel from "./VideoUploadPanel";
 import {
   ArrowIcon,
   CheckIcon,
@@ -124,6 +125,9 @@ function youtubeOauthErrorMessage(reason: string) {
 
 function jobErrorMessage(error: string) {
   const normalized = error.toLowerCase();
+  if (normalized.includes("conexão residencial está offline")) {
+    return "Esta tentativa falhou antes da correção da conexão. O servidor já pode trabalhar sem o cliente residencial. Para processar sem depender do download do YouTube, vá em Criar Shorts e envie o vídeo original. O histórico desta tentativa foi preservado.";
+  }
   if (
     normalized.includes("rate_limit_exceeded") ||
     normalized.includes("tokens per min") ||
@@ -972,6 +976,13 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             </div>
             <button onClick={() => openSection("automacao")} className="sf-button sf-button-outline w-fit">Voltar ao painel</button>
           </div>
+          <VideoUploadPanel onQueued={(job) => {
+            jobsRevision.current += 1;
+            setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+            setError("");
+            setMessage("Vídeo recebido. O servidor continuará o processamento; você já pode fechar esta página.");
+            openSection("processamento");
+          }} />
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
             <div className="sf-card overflow-hidden">
               <div className="border-b border-[#e8e8e8] px-5 py-4"><h3 className="text-sm font-semibold text-[#111]">Buscar conteúdo</h3><p className="mt-1 text-xs text-[#666]">Encontre vídeos com potencial para cortes.</p></div>
