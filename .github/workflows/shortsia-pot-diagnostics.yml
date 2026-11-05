@@ -1,0 +1,65 @@
+name: Diagnose ShortsFlow PO provider (read only)
+on:
+  push:
+    branches:
+      - diagnostics/shortsia-pot-readonly-20261105
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect only ShortsFlow PO provider via EasyPanel API
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          const target = { projectName: 'r2rmarketingdigital', serviceName: 'shortsia-pot' };
+          if (!process.env.EASYPANEL_API_KEY) throw Error('EasyPanel credential unavailable');
+          const headers = { 'Authorization': 'Bearer ' + process.env.EASYPANEL_API_KEY, 'Accept': 'application/json' };
+          const base = process.env.EASYPANEL_URL;
+          const redact = (x) => String(x ?? '').replace(/https?:\/\/[^\s"'<>]+/gi, '[URL]').replace(/[a-z0-9_-]{35,}/gi, '[REDACTED]').slice(0, 280);
+          for (const endpoint of ['inspectAppService','getServiceError']) {
+            const url = new URL(base + '/api/' + endpoint);
+            Object.entries(target).forEach(([key,val])=>url.searchParams.set(key,val));
+            try {
+              const res = await fetch(url,{headers,signal:AbortSignal.timeout(25000)});
+              const val = await res.json().catch(()=>null);
+              const v = val?.data ?? val?.result ?? val;
+              // Never print full inspect data: it may include credentials and environment.
+              console.log(endpoint,'http_status=',res.status,'exists=',v!=null);
+              if (v && typeof v==='object') {
+                console.log(endpoint,'top_level_keys=',Object.keys(v).filter(k=>/^(status|state|type|name|running|enabled|error|message|serviceName|projectName|buildStatus|deployStatus)$/i.test(k)).join(','));
+                for (const key of ['status','state','running','type','buildStatus','deployStatus']) {
+                  if (typeof v[key]==='boolean' || typeof v[key]==='number' || (typeof v[key]==='string' && v[key].length<35)) console.log(endpoint,key,'=',redact(v[key]));
+                }
+                if (endpoint==='getServiceError') {
+                  for (const key of ['error','message']) if (typeof v[key]==='string') console.log(key,'=',redact(v[key]));
+                }
+              }
+            } catch(e) { console.log(endpoint,'request_error=',redact(e?.name || 'unknown')); }
+          }
+          const ws = new WebSocket(base.replace(/^http/,'ws') + '/ws/serviceLogs?token=' + encodeURIComponent(process.env.EASYPANEL_API_KEY) + '&service=r2rmarketingdigital_shortsia-pot&compose=false');
+          let printed=0;
+          const done=()=>{try{ws.close()}catch{}};
+          const timeout=setTimeout(done,12000);
+          ws.addEventListener('message',(e)=>{
+            let raw=String(e.data||'');
+            try {const parsed=JSON.parse(raw);raw=typeof parsed.output==='string'?parsed.output:raw;}catch{}
+            for(const line of raw.split('\n')) {
+              if (printed>=22) break;
+              if (!/error|exception|failed|fatal|exited|cannot|not found|port|start|listening|crash|permission/i.test(line))continue;
+              // Mask URLs, tokens, credential-looking key/value pairs and high-entropy values.
+              const cleaned=redact(line.replace(/(password|token|secret|key|authorization|cookie|proxy)\s*[:=]\s*[^\s,]+/gi,'$1=[REDACTED]'));
+              console.log('pot_log:',cleaned);
+              printed++;
+            }
+            if(printed>=22)done();
+          });
+          ws.addEventListener('error',()=>console.log('pot_log: websocket_error'));
+          ws.addEventListener('close',()=>clearTimeout(timeout));
+          await new Promise(resolve=>{ws.addEventListener('close',resolve);setTimeout(resolve,13500)});
+          JS
