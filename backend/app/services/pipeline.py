@@ -5,6 +5,7 @@ from ..models import Clip, Job
 from ..config import settings
 from .ai_service import select_clips
 from .downloader import download_video
+from .local_uploads import is_local_source, resolve_local_source
 from .ffmpeg_service import ensure_ffmpeg, extract_audio_chunks, get_duration, render_vertical_clip, write_clip_srt
 from .seo_quality import build_qualified_local_seo, clip_transcript_text
 from .transcription import transcribe_chunks
@@ -88,7 +89,11 @@ def run_pipeline(job_id: int) -> None:
         _set_status(job_id, "checking_ffmpeg", 5)
         ensure_ffmpeg()
         _set_status(job_id, "downloading", 15)
-        video_path = download_video(source.original_url, work_dir, progress_hook=_download_progress_updater(job_id))
+        video_path = (
+            resolve_local_source(source.original_url, job.user_id)
+            if is_local_source(source.original_url)
+            else download_video(source.original_url, work_dir, progress_hook=_download_progress_updater(job_id))
+        )
 
         _set_status(job_id, "extracting_audio", 30)
         duration = get_duration(video_path)
