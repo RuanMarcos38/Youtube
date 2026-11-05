@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -17,7 +18,8 @@ from .transcription import transcribe_chunks
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mpeg", ".mpg", ".webm"}
-MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "2048")))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 PRESETS: dict[str, dict[str, Any]] = {
     "tiktok_shop_sales": {
