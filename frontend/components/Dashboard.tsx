@@ -6,6 +6,7 @@ import {
   approveClip,
   createEditorProjectFromClip,
   createJob,
+  createUploadedShortsJob,
   searchYoutubeVideos,
   listClips,
   listJobs,
@@ -512,6 +513,10 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const [days, setDays] = useState(14);
   const [requestedClips, setRequestedClips] = useState(3);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [originalClips, setOriginalClips] = useState(10);
+  const [originalRights, setOriginalRights] = useState(false);
+  const [uploadingOriginal, setUploadingOriginal] = useState(false);
   const [videos, setVideos] = useState<TrendingVideo[]>([]);
   const [nextVideoPageToken, setNextVideoPageToken] = useState<string | null>(null);
   const [selected, setSelected] = useState<TrendingVideo | null>(null);
@@ -611,6 +616,27 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     setActiveSection(id);
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${id}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function uploadOriginal() {
+    if (!originalFile) return setError("Selecione um arquivo de vídeo.");
+    if (originalFile.size === 0 || originalFile.size > 2048 * 1024 * 1024) {
+      return setError("Selecione um vídeo não vazio de até 2 GiB.");
+    }
+    if (!originalRights) return setError("Confirme os direitos de uso do vídeo.");
+    setUploadingOriginal(true); setError(""); setMessage("");
+    try {
+      const created = await createUploadedShortsJob(originalFile, originalClips);
+      setOriginalFile(null);
+      setOriginalRights(false);
+      await refresh();
+      setMessage(`Vídeo original recebido. Processamento #${created.id} adicionado à fila.`);
+      openSection("processamento");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível enviar o vídeo.");
+    } finally {
+      setUploadingOriginal(false);
+    }
   }
 
   async function search() {
@@ -941,6 +967,30 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               <p className="mt-2 text-sm text-[#666]">Pesquise tendências usando a YouTube Data API e gere cortes verticais.</p>
             </div>
             <button onClick={() => openSection("automacao")} className="sf-button sf-button-outline w-fit">Voltar ao painel</button>
+          </div>
+          <div className="sf-card mb-5 p-5">
+            <h3 className="text-base font-semibold text-[#111]">Enviar vídeo original</h3>
+            <p className="mt-2 text-sm leading-6 text-[#666]">Gere Shorts usando um arquivo próprio, sem depender do download do YouTube. O processamento continua no servidor após o envio.</p>
+            <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+              <label className="min-w-0 text-xs font-medium text-[#222]">
+                Arquivo de vídeo
+                <input type="file" accept=".mp4,.mov,.m4v,.mpeg,.mpg,.webm,.mkv,video/*" className="sf-input mt-2 w-full min-w-0 p-2 text-sm" onChange={(event) => setOriginalFile(event.target.files?.[0] ?? null)} />
+                <span className="mt-1 block text-[#777]">MP4, MOV, MKV, WebM ou M4V · até 2 GiB · com áudio</span>
+              </label>
+              <label className="text-xs font-medium text-[#222]">
+                Quantidade de Shorts
+                <select value={originalClips} onChange={(event) => setOriginalClips(Number(event.target.value))} className="sf-input mt-2 w-full p-2.5">
+                  {[1, 2, 3, 5, 10].map((n) => <option value={n} key={n}>{n}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="mt-4 flex items-start gap-2 text-xs text-[#555]">
+              <input type="checkbox" checked={originalRights} onChange={(event) => setOriginalRights(event.target.checked)} className="mt-0.5 accent-[#ff0000]" />
+              Confirmo que possuo direitos ou autorização para editar e reutilizar este vídeo.
+            </label>
+            <button type="button" onClick={() => void uploadOriginal()} disabled={uploadingOriginal || !originalFile || !originalRights} className="sf-button sf-button-youtube mt-4 disabled:opacity-50">
+              {uploadingOriginal ? "Enviando vídeo ao servidor..." : "Enviar e gerar Shorts"}
+            </button>
           </div>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
             <div className="sf-card overflow-hidden">

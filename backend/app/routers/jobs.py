@@ -1,4 +1,8 @@
 import shutil
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import File, Form, UploadFile
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -10,6 +14,9 @@ from ..models import Job, SourceVideo, User
 from ..schemas import JobCreate, JobOut
 from ..services.billing import can_use_tool, ensure_plan
 from ..services.downloader import download_access_configured
+from ..services.ffmpeg_service import get_duration
+from ..services.local_uploads import MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, upload_path, source_reference, is_local_source
+from ..services.editor_ai import ALLOWED_EXTENSIONS
 from ..services.plans import can_create_job
 from ..services.serializers import job_to_dict
 from ..services.youtube_search import get_video_duration_seconds
@@ -19,7 +26,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 HIDDEN_PROCESSING_STATUSES = ("ready_for_review",)
 
 
-def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, requested_clips: int) -> None:
+def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, requested_clips: int, *, local_upload: bool = False) -> None:
     allowed, reason = can_use_tool(db, user)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
@@ -30,7 +37,7 @@ def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, re
         if not allowed:
             raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
 
-    if settings.environment.strip().lower() == "production" and not download_access_configured():
+    if not local_upload and settings.environment.strip().lower() == "production" and not download_access_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="O download do YouTube ainda não está autenticado no servidor. O administrador precisa renovar a sessão de download.",
@@ -124,6 +131,74 @@ def create_job(payload: JobCreate, user: User = Depends(get_current_user), db: S
     return _create_queued_job(db, user, source, payload.requested_clips)
 
 
+@router.post("/upload", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+async def create_uploaded_job(
+    file: UploadFile = File(...),
+    requested_clips: int = Form(3),
+    rights_confirmed: bool = Form(False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a normal Shorts job from an authorized uploaded video.
+
+    The file is streamed to a tenant-scoped persistent volume. External YouTube
+    downloader credentials are neither needed nor changed.
+    """
+    if not rights_confirmed:
+        raise HTTPException(status_code=400, detail="Confirme os direitos de uso do vídeo.")
+    if not 1 <= requested_clips <= 10:
+        raise HTTPException(status_code=422, detail="Escolha de 1 a 10 Shorts.")
+    name = Path(file.filename or "video.mp4").name
+    extension = Path(name).suffix.lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Formato de vídeo não permitido.")
+    # Check billing before accepting a potentially multi-gigabyte file.
+    allowed, reason = can_use_tool(db, user)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+    upload_id = uuid4().hex
+    target = upload_path(user.id, upload_id, extension)
+    target.parent.mkdir(parents=True, exist_ok=False)
+    size = 0
+    try:
+        with target.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=f"O vídeo excede {MAX_UPLOAD_MB} MiB.")
+                output.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="O arquivo enviado está vazio.")
+        try:
+            duration = int(get_duration(target))
+        except Exception as exc:
+            raise HTTPException(status_code=415, detail="Vídeo inválido ou sem mídia decodificável.") from exc
+        if duration <= 0 or duration > 86400:
+            raise HTTPException(status_code=422, detail="Duração do vídeo inválida.")
+        _ensure_job_can_be_queued(user, db, duration, requested_clips, local_upload=True)
+        source = SourceVideo(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            youtube_id=upload_id,
+            title=name[:500],
+            channel_title="Vídeo original enviado",
+            original_url=source_reference(upload_id, extension),
+            thumbnail_url="",
+            duration_seconds=duration,
+            rights_confirmed=True,
+        )
+        db.add(source)
+        db.flush()
+        result = _create_queued_job(db, user, source, requested_clips)
+        return result
+    except Exception:
+        db.rollback()
+        shutil.rmtree(target.parent, ignore_errors=True)
+        raise
+    finally:
+        await file.close()
+
+
 @router.get("", response_model=list[JobOut])
 def list_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     jobs = (
@@ -157,7 +232,7 @@ def retry_job(job_id: int, user: User = Depends(get_current_user), db: Session =
     # nova da API do YouTube. Eles continuam sujeitos ao limite de Shorts, mas
     # não são cobrados retroativamente em minutos.
     duration_seconds = max(0, int(original.source_video.duration_seconds or 0))
-    _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips)
+    _ensure_job_can_be_queued(user, db, duration_seconds, original.requested_clips, local_upload=is_local_source(original.source_video.original_url))
 
     # Cria primeiro a nova tentativa, preservando o vídeo de origem e todas as
     # credenciais/configurações. Depois remove somente a tentativa antiga que já

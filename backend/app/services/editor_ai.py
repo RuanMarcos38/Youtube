@@ -17,7 +17,7 @@ from .ffmpeg_service import ensure_ffmpeg, extract_audio_chunks, get_duration
 from .transcription import transcribe_chunks
 
 
-ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mpeg", ".mpg", ".webm"}
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mpeg", ".mpg", ".webm", ".mkv"}
 MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "2048")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
