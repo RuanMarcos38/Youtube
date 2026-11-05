@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime, timezone
 
 from fastapi import File, Form, UploadFile
 
@@ -14,6 +15,7 @@ from ..models import Job, SourceVideo, User
 from ..schemas import JobCreate, JobOut
 from ..services.billing import can_use_tool, ensure_plan
 from ..services.downloader import download_access_configured
+from ..services.download_probe import read_download_probe
 from ..services.ffmpeg_service import get_duration
 from ..services.local_uploads import MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, upload_path, source_reference, is_local_source
 from ..services.editor_ai import ALLOWED_EXTENSIONS
@@ -26,6 +28,25 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 HIDDEN_PROCESSING_STATUSES = ("ready_for_review",)
 
 
+def _youtube_probe_blocked() -> bool:
+    """Block *new* remote jobs only on recent, explicitly failed probes.
+
+    A stale/absent probe must not be treated as proof of external unavailability.
+    Local uploads never depend on this check.
+    """
+    probe = read_download_probe()
+    if not isinstance(probe, dict) or probe.get("ok") is not False:
+        return False
+    try:
+        checked_at = datetime.fromisoformat(str(probe.get("checked_at") or "").replace("Z", "+00:00"))
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - checked_at).total_seconds()
+    except (ValueError, TypeError, OverflowError):
+        return False
+    return 0 <= age <= 20 * 60 and probe.get("failure_kind") == "youtube_ip_challenge"
+
+
 def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, requested_clips: int, *, local_upload: bool = False) -> None:
     allowed, reason = can_use_tool(db, user)
     if not allowed:
@@ -36,6 +57,17 @@ def _ensure_job_can_be_queued(user: User, db: Session, duration_seconds: int, re
         allowed, reason = can_create_job(db, plan, duration_seconds, requested_clips)
         if not allowed:
             raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=reason)
+
+    if not local_upload and settings.environment.strip().lower() == "production" and _youtube_probe_blocked():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "O YouTube está recusando o download autorizado no servidor. "
+                "Nenhum processamento foi criado ou consumido. "
+                "Use Criar Shorts > Enviar vídeo original, ou tente novamente "
+                "após o teste de download do Administrador ser aprovado."
+            ),
+        )
 
     if not local_upload and settings.environment.strip().lower() == "production" and not download_access_configured():
         raise HTTPException(
