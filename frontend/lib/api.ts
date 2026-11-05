@@ -161,6 +161,25 @@ export async function createJob(video: TrendingVideo, requestedClips: number): P
   });
 }
 
+/** Upload is multipart: do not set application/json Content-Type. */
+export async function createUploadedShortsJob(file: File, requestedClips: number): Promise<Job> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("requested_clips", String(requestedClips));
+  form.append("rights_confirmed", "true");
+  const response = await fetch(`${API_URL}/api/jobs/upload`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (!response.ok) {
+    let detail = `Falha no envio (HTTP ${response.status}).`;
+    try { detail = apiErrorMessage(await response.json(), detail); } catch {}
+    throw new Error(detail);
+  }
+  return response.json() as Promise<Job>;
+}
+
 export const listJobs = () => api<Job[]>("/api/jobs");
 export const retryJob = (id: number) => api<Job>(`/api/jobs/${id}/retry`, { method: "POST" });
 export const deleteJob = (id: number) => api<void>(`/api/jobs/${id}`, { method: "DELETE" });
