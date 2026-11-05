@@ -25,6 +25,7 @@ jobs:
             const u=new URL(base+'/api/inspectAppService');u.searchParams.set('projectName','r2rmarketingdigital');u.searchParams.set('serviceName',service);
             const x=unpack(await get(u));
             if(!x||x.name!==service)throw Error('Unexpected service identity');
+            console.log('SERVICE_COMMIT',service,typeof x.commit==='string'?x.commit.slice(0,40):typeof x.commit==='object'?String(x.commit?.sha??'unknown').slice(0,40):'unknown');
             console.log('SERVICE',service,'enabled',x.enabled===true,'source',x.source?.type,'branch',x.source?.ref??'none','build',x.build?.type,'replicas',x.deploy?.replicas,'mounts',x.mounts?.length??0,'ports',x.ports?.length??0);
             console.log('SERVICE',service,'env_keys',Object.keys(x.env||{}).filter(k=>!/(token|secret|key|cookie|password|auth|proxy)/i.test(k)).join(',').slice(0,400));
             const c=new URL(base+'/api/getDockerContainers');c.searchParams.set('service','r2rmarketingdigital_'+service);
