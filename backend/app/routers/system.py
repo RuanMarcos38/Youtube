@@ -95,6 +95,8 @@ def health():
         "youtube_download_proxy_configured": download_proxy_configured(),
         "youtube_download_ready": download_access_configured(),
         "youtube_download_probe_ok": None if download_probe is None else bool(download_probe.get("ok")),
+        # Configuration is not proof that the remote platform accepted a download.
+        "youtube_download_operational": None if download_probe is None else bool(download_probe.get("ok")),
         "youtube_download_external_blocked": download_external_blocked,
         "youtube_download_runtime_blocking": download_runtime_blocking,
     }
