@@ -407,7 +407,7 @@ export default function EditorIAPage() {
           </div>
           <div className="flex flex-wrap gap-2 text-[11px] text-[#475467]">
             <span className="rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5">MP4 · MOV · WEBM</span>
-            <span className="rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5">Até 500 MB</span>
+            <span className="rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5">Até 2 GB</span>
             <span className="rounded-md border border-[#e4e7ec] bg-white px-2.5 py-1.5">TikTok · Reels · Shorts</span>
           </div>
         </div>
