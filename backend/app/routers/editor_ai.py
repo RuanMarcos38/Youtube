@@ -22,6 +22,7 @@ from ..services.billing import can_use_tool
 from ..services.editor_ai import (
     ALLOWED_EXTENSIONS,
     MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_MB,
     PRESETS,
     create_project_record,
     list_projects,
@@ -874,7 +875,7 @@ async def upload_video(
                     break
                 total += len(chunk)
                 if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail="O vídeo excede o limite de 500 MB.")
+                    raise HTTPException(status_code=413, detail=f"O vídeo excede o limite de {MAX_UPLOAD_MB} MB.")
                 output.write(chunk)
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
