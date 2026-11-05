@@ -35,6 +35,11 @@ jobs:
                 console.log(endpoint,'all_top_level_keys=',Object.keys(v).join(','));
                 if(endpoint==='inspectAppService') {
                   console.log('enabled_boolean=',String(v.enabled===true));
+                  for (const [obj, keys] of [[v.source,['type','repo','path','ref']],[v.build,['type','file']],[v.deploy,['command','replicas']]]) {
+                    for (const key of keys) if(obj && Object.prototype.hasOwnProperty.call(obj,key)) console.log('config_'+key+'=',redact(String(obj[key])));
+                  }
+                  console.log('ports_count=',Array.isArray(v.ports)?v.ports.length:'n/a');
+                  console.log('mounts_count=',Array.isArray(v.mounts)?v.mounts.length:'n/a');
                   for(const key of ['source','deployment','deploy','app','build','docker','image','replicas','scale','service','network','status','state']) {
                     if(v[key] && typeof v[key]==='object') console.log(key+'_keys=',Object.keys(v[key]).join(','));
                   }
