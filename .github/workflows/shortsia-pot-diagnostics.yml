@@ -32,7 +32,13 @@ jobs:
               // Never print full inspect data: it may include credentials and environment.
               console.log(endpoint,'http_status=',res.status,'exists=',v!=null);
               if (v && typeof v==='object') {
-                console.log(endpoint,'top_level_keys=',Object.keys(v).filter(k=>/^(status|state|type|name|running|enabled|error|message|serviceName|projectName|buildStatus|deployStatus)$/i.test(k)).join(','));
+                console.log(endpoint,'all_top_level_keys=',Object.keys(v).join(','));
+                if(endpoint==='inspectAppService') {
+                  console.log('enabled_boolean=',String(v.enabled===true));
+                  for(const key of ['source','deployment','deploy','app','build','docker','image','replicas','scale','service','network','status','state']) {
+                    if(v[key] && typeof v[key]==='object') console.log(key+'_keys=',Object.keys(v[key]).join(','));
+                  }
+                }
                 for (const key of ['status','state','running','type','buildStatus','deployStatus']) {
                   if (typeof v[key]==='boolean' || typeof v[key]==='number' || (typeof v[key]==='string' && v[key].length<35)) console.log(endpoint,key,'=',redact(v[key]));
                 }
