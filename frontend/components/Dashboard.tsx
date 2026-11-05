@@ -974,8 +974,8 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
               <label className="min-w-0 text-xs font-medium text-[#222]">
                 Arquivo de vídeo
-                <input type="file" accept=".mp4,.mov,.m4v,.mpeg,.mpg,.webm,video/*" className="sf-input mt-2 w-full min-w-0 p-2 text-sm" onChange={(event) => setOriginalFile(event.target.files?.[0] ?? null)} />
-                <span className="mt-1 block text-[#777]">MP4, MOV, MKV não suportado neste fluxo, WebM ou M4V · até 2 GiB · com áudio</span>
+                <input type="file" accept=".mp4,.mov,.m4v,.mpeg,.mpg,.webm,.mkv,video/*" className="sf-input mt-2 w-full min-w-0 p-2 text-sm" onChange={(event) => setOriginalFile(event.target.files?.[0] ?? null)} />
+                <span className="mt-1 block text-[#777]">MP4, MOV, MKV, WebM ou M4V · até 2 GiB · com áudio</span>
               </label>
               <label className="text-xs font-medium text-[#222]">
                 Quantidade de Shorts
