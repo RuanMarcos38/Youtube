@@ -1,0 +1,45 @@
+name: Forensic read-only ShortsFlow audit
+on:
+  push:
+    branches: [audit/shortsflow-production-20261105]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check targeted EasyPanel services and published health
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          if(!process.env.EASYPANEL_API_KEY)throw Error('EasyPanel authentication unavailable');
+          const base=process.env.EASYPANEL_URL;
+          const headers={Authorization:'Bearer '+process.env.EASYPANEL_API_KEY,Accept:'application/json'};
+          const get=async url=>{const res=await fetch(url,{headers,signal:AbortSignal.timeout(20000)});if(!res.ok)throw Error('HTTP '+res.status+' for '+url.pathname);return res.json()};
+          const unpack=x=>x?.data??x?.result??x;
+          for(const service of ['shortsia','shortsia-pot']){
+            const u=new URL(base+'/api/inspectAppService');u.searchParams.set('projectName','r2rmarketingdigital');u.searchParams.set('serviceName',service);
+            const x=unpack(await get(u));
+            if(!x||x.name!==service)throw Error('Unexpected service identity');
+            console.log('SERVICE',service,'enabled',x.enabled===true,'source',x.source?.type,'branch',x.source?.ref??'none','build',x.build?.type,'replicas',x.deploy?.replicas,'mounts',x.mounts?.length??0,'ports',x.ports?.length??0);
+            console.log('SERVICE',service,'env_keys',Object.keys(x.env||{}).filter(k=>!/(token|secret|key|cookie|password|auth|proxy)/i.test(k)).join(',').slice(0,400));
+            const c=new URL(base+'/api/getDockerContainers');c.searchParams.set('service','r2rmarketingdigital_'+service);
+            const cx=unpack(await get(c));
+            const containers=Array.isArray(cx)?cx:Array.isArray(cx?.containers)?cx.containers:[];
+            console.log('CONTAINERS',service,'count',containers.length);
+            for(const y of containers.slice(0,2)) {
+              const state=String(y.State??y.state??'unknown').slice(0,30);
+              const image=String(y.Image??y.image??'unknown').replace(/[^a-zA-Z0-9_:./@-]/g,'').slice(0,120);
+              const health=y.Health??y.health;
+              console.log('CONTAINER',service,'state',state,'image',image,'health',typeof health==='object'?(health?.Status??health?.status??'object'):String(health??'unknown'));
+            }
+          }
+          const res=await fetch('https://shorts.r2rmarketingdigital.com.br/api/health',{signal:AbortSignal.timeout(20000)});
+          if(!res.ok)throw Error('Health endpoint HTTP '+res.status);
+          const h=await res.json();const c=h.checks||{};
+          console.log('PUBLIC_HEALTH',JSON.stringify({status:h.status,version:h.version,worker_alive:c.worker_alive,ffmpeg_available:c.ffmpeg_available,ffprobe_available:c.ffprobe_available,pot_provider_alive:c.pot_provider_alive,youtube_api_configured:c.youtube_api_configured,youtube_download_ready:c.youtube_download_ready,youtube_download_probe_ok:c.youtube_download_probe_ok,youtube_download_external_blocked:c.youtube_download_external_blocked,probe_checked_at:h.youtube_download_probe?.checked_at,probe_failure_kind:h.youtube_download_probe?.failure_kind}));
+          JS
