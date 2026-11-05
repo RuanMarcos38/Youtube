@@ -1,0 +1,60 @@
+name: Repair only disabled ShortsFlow PO provider
+on:
+  push:
+    branches:
+      - diagnostics/shortsia-pot-readonly-20261105
+permissions:
+  contents: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verify isolated service and deploy provider-only image
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+          PROVIDER_DOCKERFILE: ${{ vars.UNUSED_PROVIDER_DOCKERFILE }}
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          const target={projectName:'r2rmarketingdigital',serviceName:'shortsia-pot'};
+          if (!process.env.EASYPANEL_API_KEY) throw Error('Missing EasyPanel authorization');
+          const base=process.env.EASYPANEL_URL;
+          const headers={Authorization:'Bearer '+process.env.EASYPANEL_API_KEY,Accept:'application/json','Content-Type':'application/json'};
+          const req=async(endpoint,method='GET',body)=>{
+            const url=new URL(base+'/api/'+endpoint);
+            if(method==='GET') Object.entries(target).forEach(([k,v])=>url.searchParams.set(k,v));
+            const res=await fetch(url,{method,headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(600000)});
+            if(!res.ok) throw Error(endpoint+' failed with HTTP '+res.status);
+            return await res.json().catch(()=>null);
+          };
+          const unwrap=(v)=>v?.data??v?.result??v;
+          const existing=unwrap(await req('inspectAppService'));
+          if (!existing || existing.name!==target.serviceName || existing.projectName!==target.projectName ||
+              existing.enabled!==false || existing.source?.repo!=='Youtube' ||
+              existing.source?.type!=='github' || existing.build?.file!=='Dockerfile' ||
+              (existing.deploy?.replicas??1)!==1 || (existing.mounts?.length??0)!==0 ||
+              (existing.ports?.length??0)!==0)
+            throw Error('Unexpected service settings; no writes performed');
+          console.log('Guard passed: exact disabled duplicate service has no storage or public ports');
+          const dockerfile="FROM node:22-bookworm-slim\nWORKDIR /app\nADD https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/1.3.1.tar.gz /tmp/provider.tar.gz\nRUN tar -xzf /tmp/provider.tar.gz --strip-components=2 bgutil-ytdlp-pot-provider-1.3.1/server \\\n    && npm ci --no-audit --no-fund \\\n    && npx tsc \\\n    && npm prune --omit=dev --no-audit --no-fund \\\n    && rm -f /tmp/provider.tar.gz\nENV NODE_ENV=production\nEXPOSE 4416\nHEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD node -e \"fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"\nCMD [\"node\", \"build/main.js\", \"--port\", \"4416\"]";
+          await req('updateAppSourceDockerfile','POST',{...target,dockerfile});
+          const afterSource=unwrap(await req('inspectAppService'));
+          if(afterSource?.source?.type!=='dockerfile' || afterSource.enabled!==false)
+            throw Error('Source replacement not confirmed; refusing to start');
+          console.log('Dedicated Dockerfile configuration saved. Building provider-only service...');
+          await req('deployAppService','POST',{...target,forceRebuild:true});
+          console.log('Provider image deploy command accepted; verifying isolated source...');
+          const afterDeploy=unwrap(await req('inspectAppService'));
+          if(afterDeploy?.source?.type!=='dockerfile')
+            throw Error('Service source mismatch after deploy; refusing to start');
+          if(afterDeploy.enabled===false) {
+            await req('startAppService','POST',target);
+            console.log('Start service accepted');
+          }
+          const afterStart=unwrap(await req('inspectAppService'));
+          console.log('PO provider enabled=',afterStart?.enabled===true,'source=',afterStart?.source?.type);
+          if(afterStart?.enabled!==true) throw Error('PO provider did not become enabled');
+          // Never read/write app environment, secrets, mounts or other EasyPanel services.
+          JS
