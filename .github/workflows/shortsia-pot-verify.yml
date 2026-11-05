@@ -1,0 +1,45 @@
+name: Verify ShortsFlow PO provider runtime
+on:
+  push:
+    branches: [diagnostics/shortsia-pot-verify-20261105]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read-only verify exact provider and main service containers
+        env:
+          EASYPANEL_API_KEY: ${{ secrets.EASYPANEL_API_KEY }}
+          EASYPANEL_URL: https://ke4n49.easypanel.host
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          if(!process.env.EASYPANEL_API_KEY)throw Error('Missing EasyPanel token');
+          const headers={Authorization:'Bearer '+process.env.EASYPANEL_API_KEY,Accept:'application/json'};
+          const base=process.env.EASYPANEL_URL;
+          for(const service of ['shortsia-pot','shortsia']){
+            const name='r2rmarketingdigital_'+service;
+            const url=new URL(base+'/api/getDockerContainers');url.searchParams.set('service',name);
+            const res=await fetch(url,{headers,signal:AbortSignal.timeout(20000)});
+            if(!res.ok)throw Error('Containers query for '+service+' returned HTTP '+res.status);
+            const raw=await res.json().catch(()=>null);
+            const value=raw?.result??raw?.data??raw;
+            const a=Array.isArray(value)?value:Array.isArray(value?.containers)?value.containers:[];
+            console.log(service,'running_containers=',a.length);
+            for(const c of a.slice(0,3)){
+              // Only boolean health/state; never log env, labels, IDs or auth.
+              const status=String(c.State??c.state??c.status??c.Status??'').slice(0,30);
+              console.log(service,'state=',status,'health=',String(c.Health??c.health??'unknown').slice(0,30));
+            }
+            if(service==='shortsia-pot'&&a.length===0)throw Error('PO provider has no running containers');
+          }
+          const health=await fetch('https://shorts.r2rmarketingdigital.com.br/api/health',{signal:AbortSignal.timeout(20000)});
+          if(!health.ok)throw Error('Main health endpoint HTTP '+health.status);
+          const body=await health.json();
+          console.log('main_app_health=',body.status);
+          console.log('main_internal_pot_alive=',body.checks?.pot_provider_alive===true);
+          console.log('youtube_probe_ok=',body.checks?.youtube_download_probe_ok===true);
+          console.log('youtube_external_blocked=',body.checks?.youtube_download_external_blocked===true);
+          JS
