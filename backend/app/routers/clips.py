@@ -244,12 +244,8 @@ def upload_clip(
     if not get_connection_status(db, user.id)["connected"]:
         raise HTTPException(status_code=409, detail="Conecte o YouTube deste perfil antes de publicar.")
 
-    # Public is the only allowed publication mode in ShortsFlow. The request
-    # field is kept for backward compatibility with already deployed frontends,
-    # but private/unlisted values are intentionally ignored.
-    _ = payload
     clip.status = "upload_queued"
-    clip.upload_privacy = PUBLIC_UPLOAD_PRIVACY
+    clip.upload_privacy = payload.privacy_status
     clip.upload_error = None
     db.commit()
     db.refresh(clip)
