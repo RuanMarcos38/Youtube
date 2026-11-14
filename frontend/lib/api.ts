@@ -181,6 +181,9 @@ export async function searchYoutubeVideos(
   return api(`/api/videos/search?${params}`);
 }
 
+export const getYoutubeVideoById = (id: string) =>
+  api<TrendingVideo>(`/api/videos/youtube/${encodeURIComponent(id)}`);
+
 export async function createJob(video: TrendingVideo, requestedClips: number): Promise<Job> {
   return api("/api/jobs", {
     method: "POST",
