@@ -22,6 +22,9 @@ ProgressHook = Callable[[dict], None]
 TEST_VIDEO_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 
+YOUTUBE_ACCESS_DENIED = "O YouTube recusou o acesso a este vídeo. Envie um arquivo próprio ou autorizado para criar os Shorts."
+
+
 class DownloadError(RuntimeError):
     pass
 
@@ -374,6 +377,9 @@ def validate_download_session(url: str = TEST_VIDEO_URL) -> dict:
                 }
             except Exception as exc:
                 message = _compact_error(str(exc))
+                if _is_bot_block(message):
+                    errors.append(message)
+                    break
                 if message and message not in errors:
                     errors.append(message)
     return {
@@ -409,22 +415,13 @@ def download_video(url: str, output_dir: Path, progress_hook: ProgressHook | Non
                 return video_path
         except Exception as exc:
             error = _compact_error(str(exc))
+            if _is_bot_block(error):
+                raise DownloadError(YOUTUBE_ACCESS_DENIED) from None
             if error:
                 tagged = f"{strategy}: {error}"
                 if tagged not in errors:
                     errors.append(tagged)
     if errors:
-        if any(_is_bot_block(error) for error in errors):
-            if not download_proxy_configured():
-                raise DownloadError(
-                    "O backend alcançou o YouTube por IPv4, mas o IP/sessão atual foi recusado pelo mecanismo anti-bot. "
-                    "O runtime já tentou PO Token automático, clientes alternativos, web_safari/HLS, Chromium/Deno/Node e fallbacks públicos. "
-                    "Para estabilizar a produção, configure no Administrador > Download YouTube um proxy residencial/estático com IP persistente e renove os cookies usando o mesmo IP do proxy."
-                )
-            raise DownloadError(
-                "O backend alcançou o YouTube por IPv4 através do proxy configurado, mas o IP/sessão ainda foi recusado. "
-                "Mantenha um proxy residencial/estático persistente e gere/renove os cookies pela mesma saída do proxy antes de testar novamente."
-            )
         raise DownloadError(f"yt-dlp falhou após {attempts} estratégias: {' | '.join(errors)}")
     raise DownloadError("yt-dlp terminou sem produzir um arquivo de vídeo")
 
