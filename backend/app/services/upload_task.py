@@ -16,11 +16,9 @@ def _pause_user_upload_queue(db, user_id: int, message: str, current_clip_id: in
     if current:
         current.status = "approved"
         current.upload_error = message
-        current.upload_privacy = "public"
     for queued in db.query(Clip).filter(Clip.user_id == user_id, Clip.status == "upload_queued").all():
         queued.status = "approved"
         queued.upload_error = message
-        queued.upload_privacy = "public"
     db.commit()
     mark_upload_blocked(db, user_id, message, hours=24)
 
@@ -41,13 +39,12 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         if not allowed:
             clip.status = "approved"
             clip.upload_error = availability["message"]
-            clip.upload_privacy = "public"
             db.commit()
             return
 
         clip.status = "uploading"
         clip.upload_error = None
-        clip.upload_privacy = "public"
+        clip.upload_privacy = privacy_status
         db.commit()
 
         try:
@@ -75,7 +72,6 @@ def run_upload(clip_id: int, privacy_status: str) -> None:
         clip.tags_json = json.dumps(metadata.tags, ensure_ascii=False)
         db.commit()
 
-        privacy_status = "public"
         video_id = upload_video(
             Path(clip.file_path),
             metadata.title,
