@@ -100,7 +100,7 @@ def _claim_next_upload() -> tuple[int, str] | None:
             # ShortsFlow caption layer was removed from the actual video file.
             if not auto_clip_publish_verified(db, clip):
                 continue
-            privacy = "public"
+            privacy = clip.upload_privacy or "private"
             clip.upload_privacy = privacy
             clip.status = "uploading"
             clip.upload_error = None
