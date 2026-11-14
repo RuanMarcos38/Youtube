@@ -177,20 +177,22 @@ def test_guest_strategies_include_pot_hls_and_impersonation(monkeypatch):
     assert not any("ipv6" in name for name in names)
 
 
-def test_bot_challenge_without_proxy_has_actionable_message(tmp_path, monkeypatch):
-    monkeypatch.setattr(downloader.settings, "ytdlp_cookie_file", "")
-    monkeypatch.setattr(downloader.settings, "ytdlp_cookies_b64", "")
-    monkeypatch.setattr(downloader.settings, "ytdlp_proxy_url", "")
-    monkeypatch.setattr(downloader.settings, "ytdlp_pot_provider_url", "http://127.0.0.1:4416")
-    monkeypatch.setattr(downloader, "YTDLP_CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(
-        downloader,
-        "_download_with_options",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("Sign in to confirm you're not a bot")),
-    )
+def test_access_denial_stops_download_and_offers_authorized_upload(tmp_path, monkeypatch):
+    attempts = []
+    def denied(*args):
+        attempts.append(args)
+        raise RuntimeError("Sign in to confirm you're not a bot")
 
-    with pytest.raises(downloader.DownloadError, match="proxy residencial/estático"):
+    monkeypatch.setattr(downloader, "_strategy_variants", lambda: [
+        ("initial", {}, False, "auto"),
+        ("alternate", {}, False, "auto"),
+    ])
+    monkeypatch.setattr(downloader, "_base_options", lambda *args, **kwargs: {})
+    monkeypatch.setattr(downloader, "_download_with_options", denied)
+
+    with pytest.raises(downloader.DownloadError, match="arquivo próprio ou autorizado"):
         downloader.download_video("https://www.youtube.com/watch?v=test", tmp_path / "job")
+    assert len(attempts) == 1
 
 
 def test_primary_failure_prefers_youtube_challenge_over_network_noise():
