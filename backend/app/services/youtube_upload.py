@@ -48,7 +48,8 @@ def upload_video(
 
     # ShortsFlow is public-only on YouTube. Ignore legacy caller values so an
     # old frontend or queued record can never turn a new upload private.
-    privacy_status = "public"
+    if privacy_status not in {"private", "unlisted", "public"}:
+        raise ValueError("Invalid YouTube privacy status")
     youtube = build("youtube", "v3", credentials=get_credentials(user_id), cache_discovery=False)
     body = {
         "snippet": {
