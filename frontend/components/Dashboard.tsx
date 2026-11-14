@@ -7,6 +7,7 @@ import {
   approveClip,
   createEditorProjectFromClip,
   createJob,
+  getYoutubeVideoById,
   searchYoutubeVideos,
   listClips,
   listJobs,
@@ -32,6 +33,23 @@ import {
   UploadIcon,
   YoutubeIcon,
 } from "./Icons";
+
+function youtubeVideoId(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    let id: string | null = null;
+    if (url.hostname === "youtu.be" && parts.length === 1) id = parts[0];
+    if (["youtube.com", "www.youtube.com", "m.youtube.com"].includes(url.hostname)) {
+      if (url.pathname === "/watch") id = url.searchParams.get("v");
+      if (parts.length === 2 && ["shorts", "live", "embed"].includes(parts[0])) id = parts[1];
+    }
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 type SectionId = "automacao" | "configurar" | "processamento" | "cortes";
 type CaptionDraft = {
@@ -512,6 +530,12 @@ function ClipPreview({ clip, mediaSrc, draft }: { clip: Clip; mediaSrc: string; 
 
 export default function Dashboard({ user }: { user: UserProfile }) {
   const [activeSection, setActiveSection] = useState<SectionId>("automacao");
+  const [youtubeLink, setYoutubeLink] = useState("");
+  const [linkVideo, setLinkVideo] = useState<TrendingVideo | null>(null);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState("");
+  const [blockedTitle, setBlockedTitle] = useState("");
+  const linkRequest = useRef(false);
   const [keyword, setKeyword] = useState("marketing digital");
   const [region, setRegion] = useState("BR");
   const [days, setDays] = useState(14);
@@ -635,6 +659,29 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function lookupYoutubeLink() {
+    if (linkRequest.current) return;
+    const id = youtubeVideoId(youtubeLink);
+    setLinkVideo(null);
+    setLinkError("");
+    setRightsConfirmed(false);
+    if (!id) {
+      setLinkError("Cole um link válido de um vídeo do YouTube.");
+      return;
+    }
+    linkRequest.current = true;
+    setLinkLoading(true);
+    try {
+      const video = await getYoutubeVideoById(id);
+      setLinkVideo(video);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "Não foi possível consultar o vídeo.");
+    } finally {
+      linkRequest.current = false;
+      setLinkLoading(false);
+    }
+  }
+
   async function search() {
     setLoading(true); setError(""); setMessage("");
     try {
@@ -666,12 +713,12 @@ export default function Dashboard({ user }: { user: UserProfile }) {
     }
   }
 
-  async function processSelected() {
-    if (!selected) return setError("Escolha um vídeo para continuar.");
+  async function processSelected(video = selected) {
+    if (!video) return setError("Escolha um vídeo para continuar.");
     if (!rightsConfirmed) return setError("Confirme que você possui direitos ou autorização para reutilizar o conteúdo.");
-    setActionId(`video-${selected.video_id}`); setError(""); setMessage("");
+    setActionId(`video-${video.video_id}`); setError(""); setMessage("");
     try {
-      await createJob(selected, requestedClips);
+      await createJob(video, requestedClips);
       await refresh();
       setMessage("Processamento iniciado. Acompanhe o andamento abaixo.");
       openSection("processamento");
@@ -976,6 +1023,30 @@ export default function Dashboard({ user }: { user: UserProfile }) {
             </div>
             <button onClick={() => openSection("automacao")} className="sf-button sf-button-outline w-fit">Voltar ao painel</button>
           </div>
+          <section className="sf-card mb-5 p-5" aria-labelledby="youtube-link-title">
+            <h3 id="youtube-link-title" className="text-base font-semibold text-[#111]">Colar link do YouTube</h3>
+            <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void lookupYoutubeLink(); }}>
+              <input aria-label="Link do YouTube" type="url" required maxLength={2048} disabled={linkLoading || Boolean(actionId)} value={youtubeLink} onChange={(event) => { setYoutubeLink(event.target.value); setLinkVideo(null); setLinkError(""); setBlockedTitle(""); }} placeholder="https://www.youtube.com/watch?v=…" className="sf-input min-w-0 flex-1 px-3 py-2.5" />
+              <button type="submit" disabled={linkLoading || Boolean(actionId)} className="sf-button sf-button-primary disabled:opacity-40">{linkLoading ? "Consultando..." : "Conferir vídeo"}</button>
+            </form>
+            {linkError && <p role="alert" className="mt-3 text-sm text-red-700">{linkError}</p>}
+            {linkVideo && <div className="mt-4 space-y-3">
+              <div className="flex items-center gap-3">
+                {linkVideo.thumbnail_url && <img src={linkVideo.thumbnail_url} alt="" className="h-16 w-28 rounded-md object-cover" />}
+                <div><div className="text-sm font-semibold">{linkVideo.title}</div><p className="text-xs text-[#666]">{linkVideo.channel_title} · {fmtDuration(linkVideo.duration_seconds)}</p></div>
+              </div>
+              {linkVideo.duration_seconds >= 15 ? <>
+                <label className="flex items-center gap-2 text-sm">Quantidade de Shorts
+                  <select value={requestedClips} onChange={(event) => setRequestedClips(Number(event.target.value))} className="sf-input px-2 py-1">
+                    {[1, 2, 3, 5, 10].map((count) => <option key={count} value={count}>{count}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} />Confirmo que tenho autorização para reutilizar o vídeo.</label>
+                <button type="button" onClick={() => void processSelected(linkVideo)} disabled={!rightsConfirmed || Boolean(actionId)} className="sf-button sf-button-youtube disabled:opacity-40">Gerar cortes</button>
+              </> : <p className="text-sm text-[#666]">A geração pelo link exige um vídeo com duração disponível de pelo menos 15 segundos.</p>}
+            </div>}
+            {blockedTitle && <p role="status" className="mt-3 text-sm text-[#666]">O YouTube recusou o acesso a “{blockedTitle}”. Envie o arquivo original autorizado abaixo.</p>}
+          </section>
           <VideoUploadPanel onQueued={(job) => {
             jobsRevision.current += 1;
             setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
@@ -1040,7 +1111,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <div className="mt-5"><LanguageSelector /></div>
                 <label className="mt-5 flex items-start gap-3 text-xs leading-5 text-[#666]"><input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#ff0000]" /><span>Confirmo que possuo direitos ou autorização para reutilizar o conteúdo.</span></label>
                 {selected && <div className="mt-4 rounded-lg bg-[#f7f7f7] p-3 text-xs"><div className="text-[#777]">Selecionado</div><div className="mt-1 line-clamp-2 font-medium text-[#222]">{selected.title}</div></div>}
-                <button onClick={processSelected} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="sf-button sf-button-youtube mt-5 w-full disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
+                <button onClick={() => void processSelected()} disabled={Boolean(actionId?.startsWith("video-")) || !selected} className="sf-button sf-button-youtube mt-5 w-full disabled:opacity-40">{actionId?.startsWith("video-") ? "Iniciando..." : `Gerar ${requestedClips} Shorts`}</button>
               </div>
             </div>
           </div>
@@ -1058,7 +1129,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
                 <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#ececec]"><div className={`h-full rounded-full transition-all duration-700 ${job.status === "failed" ? "bg-red-500" : "bg-[#ff0000]"}`} style={{ width: `${job.progress}%` }} /></div>
                 {job.error && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700 sm:flex-row sm:items-center sm:justify-between">
                   <p className="leading-5">{accessDenied ? "O YouTube recusou o acesso a este vídeo. Envie um arquivo próprio ou autorizado para criar os Shorts." : jobErrorMessage(job.error)}</p>
-                  {accessDenied && <button onClick={() => openSection("configurar")} className="sf-button sf-button-primary w-fit flex-none"><UploadIcon className="h-4 w-4" />Enviar vídeo autorizado</button>}
+                  {accessDenied && <button onClick={() => { setBlockedTitle(job.source_video.title); setLinkVideo(null); setLinkError(""); setRightsConfirmed(false); openSection("configurar"); }} className="sf-button sf-button-primary w-fit flex-none"><UploadIcon className="h-4 w-4" />Enviar vídeo autorizado</button>}
                   {job.status === "failed" && !accessDenied && <button onClick={() => retryFailedJob(job.id)} disabled={actionId !== null} className="inline-flex w-fit flex-none items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><RefreshIcon className="h-3.5 w-3.5" />{actionId === `retry-${job.id}` ? "Recriando..." : "Tentar novamente"}</button>}
                 </div>}
               </article>;
