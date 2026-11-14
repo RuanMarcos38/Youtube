@@ -206,8 +206,8 @@ export const updateClipCaptions = (
   id: number,
   payload: { caption_position: string; caption_margin_v: number; caption_font_size: number; subtitle_srt?: string },
 ) => api<Clip>(`/api/clips/${id}/captions`, { method: "PATCH", body: JSON.stringify(payload) });
-export const uploadClip = (id: number, _privacyStatus = "public") =>
-  api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: "public" }) });
+export const uploadClip = (id: number, privacyStatus = "public") =>
+  api<Clip>(`/api/clips/${id}/upload`, { method: "POST", body: JSON.stringify({ privacy_status: privacyStatus }) });
 export const uploadClipsBatch = (clipIds: number[]) =>
   api<{ queued: number; skipped: number; clip_ids: number[] }>("/api/clips/upload-batch", {
     method: "POST",
