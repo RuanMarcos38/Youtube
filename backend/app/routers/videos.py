@@ -1,10 +1,12 @@
+from googleapiclient.errors import HttpError
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import get_current_user
-from ..errors import YouTubeAuthError, YouTubeQuotaError
+from ..errors import YouTubeAuthError, YouTubeQuotaError, raise_for_youtube_error
 from ..models import User
 from ..schemas import TrendingVideo, TrendingVideoPage
-from ..services.youtube_search import discover_videos, discover_videos_page
+from ..services.youtube_search import _fetch_video_details, _normalize_video, _youtube_public_client, discover_videos, discover_videos_page
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -48,3 +50,24 @@ def trending_videos(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/youtube/{video_id}", response_model=TrendingVideo)
+def youtube_video_by_id(video_id: str, _user: User = Depends(get_current_user)):
+    if len(video_id) != 11 or not all(c.isascii() and (c.isalnum() or c in "_-") for c in video_id):
+        raise HTTPException(status_code=400, detail="ID de vídeo do YouTube inválido.")
+    try:
+        try:
+            items = _fetch_video_details(_youtube_public_client(), [video_id])
+        except HttpError as exc:
+            raise_for_youtube_error(exc)
+            raise HTTPException(status_code=502, detail="O YouTube não retornou os dados do vídeo.") from exc
+    except YouTubeQuotaError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except YouTubeAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="A consulta ao YouTube está indisponível.") from exc
+    if not items:
+        raise HTTPException(status_code=404, detail="O vídeo não está disponível para consulta pelo link.")
+    return _normalize_video(items[0])
