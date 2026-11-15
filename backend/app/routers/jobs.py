@@ -1,8 +1,10 @@
 import shutil
+import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool
 
@@ -19,6 +21,7 @@ from ..services.youtube_search import get_video_duration_seconds
 from ..services.residential_proxy import connection_status as residential_status
 from ..services.runtime_download_auth import permanent_proxy_url
 from ..services.source_uploads import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, inspect_uploaded_video, source_upload_path
+from ..services import resumable_uploads as uploads
 from .system import _worker_alive
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -186,6 +189,102 @@ async def upload_job(
         raise
     finally:
         await file.close()
+
+
+class UploadSessionCreate(BaseModel):
+    filename: str = Field(min_length=1, max_length=500)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    attempt: uuid.UUID
+    size: int = Field(ge=1, le=uploads.MAX_RESUMABLE_BYTES)
+    requested_clips: int = Field(ge=1, le=10)
+    rights_confirmed: bool
+
+
+@router.post("/uploads")
+def start_upload(payload: UploadSessionCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not payload.rights_confirmed:
+        raise HTTPException(400, "Confirme que você tem autorização para reutilizar o vídeo.")
+    filename = Path(payload.filename.replace("\\", "/")).name
+    if Path(filename).suffix.lower() not in ALLOWED_EXTENSIONS:
+        raise HTTPException(415, "Use um vídeo MP4, MOV, MKV, WebM ou M4V.")
+    metadata = payload.model_dump(mode="json")
+    metadata["filename"] = filename
+    with uploads.locked_upload(user.id) as root:
+        session = uploads.read_session(root)
+        if not session or session["expires"] <= time.time() or any(session[k] != v for k, v in metadata.items()):
+            allowed, reason = can_use_tool(db, user)
+            if not allowed:
+                raise HTTPException(402, reason)
+            partial = root / "video.part"
+            reusable = partial.stat().st_size if partial.exists() else 0
+            uploads.check_space(root, max(0, payload.size - reusable))
+            session = dict(metadata, id=uuid.uuid4().hex, offset=0, expires=time.time() + uploads.SESSION_TTL)
+            partial.touch(mode=0o600, exist_ok=True)
+            uploads.write_session(root, session)
+        return {"id": session["id"], "offset": session["offset"], "chunk_bytes": uploads.CHUNK_BYTES}
+
+
+@router.get("/uploads/{token}")
+def upload_offset(token: str, user: User = Depends(get_current_user)):
+    with uploads.locked_upload(user.id) as root:
+        return {"offset": uploads.get_session(root, token)["offset"]}
+
+
+@router.put("/uploads/{token}")
+async def upload_chunk(token: str, offset: int, request: Request, user: User = Depends(get_current_user)):
+    if request.headers.get("content-type") != "application/octet-stream":
+        raise HTTPException(415, "Formato da parte inválido.")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > uploads.CHUNK_BYTES:
+            raise HTTPException(413, "A parte excede 8 MiB.")
+        data.extend(chunk)
+
+    def store():
+        with uploads.locked_upload(user.id) as root:
+            session = uploads.get_session(root, token)
+            uploads.append_chunk(root, session, offset, data)
+            return {"offset": session["offset"]}
+
+    return await run_in_threadpool(store)
+
+
+@router.post("/uploads/{token}/complete", response_model=JobOut, status_code=202)
+def complete_upload(token: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with uploads.locked_upload(user.id) as root:
+        session = uploads.get_session(root, token)
+        if session["offset"] != session["size"]:
+            raise HTTPException(409, "Ainda faltam partes do vídeo.")
+        reference = f"upload://{token}/source{Path(session['filename']).suffix.lower()}"
+        target = source_upload_path(user.id, reference)
+        existing = (
+            db.query(Job).join(SourceVideo).options(joinedload(Job.clips))
+            .filter(Job.user_id == user.id, Job.tenant_id == user.tenant_id, SourceVideo.original_url == reference)
+            .order_by(Job.id).first()
+        )
+        if existing:
+            return job_to_dict(existing)
+        partial = root / "video.part"
+        candidate = target if target.exists() else partial
+        if not candidate.is_file() or candidate.stat().st_size != session["size"]:
+            raise HTTPException(409, "Arquivo incompleto. Reinicie o envio.")
+        try:
+            duration = inspect_uploaded_video(candidate)
+        except ValueError as exc:
+            raise HTTPException(415, str(exc)) from exc
+        uploads.check_space(root, 0)
+        _ensure_job_can_be_queued(user, db, duration, session["requested_clips"], requires_download=False)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if candidate == partial:
+            partial.replace(target)
+        source = SourceVideo(
+            tenant_id=user.tenant_id, user_id=user.id, youtube_id=f"upload_{token[:24]}",
+            title=Path(session["filename"]).stem[:500] or "Vídeo enviado", channel_title="Vídeo enviado",
+            original_url=reference, thumbnail_url="", duration_seconds=duration, rights_confirmed=True,
+        )
+        db.add(source)
+        db.flush()
+        return _create_queued_job(db, user, source, session["requested_clips"])
 
 
 @router.get("", response_model=list[JobOut])

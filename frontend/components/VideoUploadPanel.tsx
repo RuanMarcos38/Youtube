@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { uploadVideoJob } from "@/lib/api";
+import { MAX_VIDEO_JOB_BYTES, uploadVideoJob } from "@/lib/api";
 import type { Job } from "@/lib/types";
 
 export default function VideoUploadPanel({ onQueued }: { onQueued: (job: Job) => void }) {
@@ -15,8 +15,8 @@ export default function VideoUploadPanel({ onQueued }: { onQueued: (job: Job) =>
 
   async function send() {
     if (inFlight.current || !file || !rights) return;
-    if (file.size === 0 || file.size > 500 * 1024 * 1024) {
-      setError("Selecione um vídeo com até 500 MB que não esteja vazio.");
+    if (file.size === 0 || file.size > MAX_VIDEO_JOB_BYTES) {
+      setError("Selecione um vídeo com até 5 GB que não esteja vazio.");
       return;
     }
     inFlight.current = true;
@@ -42,7 +42,7 @@ export default function VideoUploadPanel({ onQueued }: { onQueued: (job: Job) =>
         <div>
           <label htmlFor="shorts-source-file" className="text-xs font-medium text-[#222]">Arquivo de vídeo</label>
           <input id="shorts-source-file" type="file" accept=".mp4,.mov,.mkv,.webm,.m4v" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(""); }} className="sf-input mt-2 block w-full min-w-0 p-3 text-sm" />
-          <p className="mt-1 text-xs text-[#777]">MP4, MOV, MKV, WebM ou M4V · até 500 MB · com áudio</p>
+          <p className="mt-1 text-xs text-[#777]">MP4, MOV, MKV, WebM ou M4V · até 5 GB · com áudio</p>
         </div>
         <div>
           <label htmlFor="upload-clips" className="text-xs font-medium text-[#222]">Quantidade de Shorts</label>

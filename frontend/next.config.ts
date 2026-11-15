@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     // O Editor aceita arquivos de até 500 MB. No Next.js 16 o proxy interno
     // possui um limite de body independente; sem este ajuste uploads grandes
     // podem ser truncados antes de chegar ao FastAPI e terminar em HTTP 500.
+    // O envio para gerar Shorts usa partes de 8 MiB através do mesmo proxy.
     proxyClientMaxBodySize: "520mb",
   },
   async rewrites() {

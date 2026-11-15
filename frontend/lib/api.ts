@@ -18,27 +18,55 @@ import type {
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-export function uploadVideoJob(file: File, requestedClips: number, rightsConfirmed: boolean, onProgress: (percent: number) => void): Promise<Job> {
-  const data = new FormData();
-  data.append("file", file);
-  data.append("requested_clips", String(requestedClips));
-  data.append("rights_confirmed", String(rightsConfirmed));
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("POST", `${API_URL}/api/jobs/upload`);
-    request.withCredentials = true;
-    request.responseType = "json";
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100));
-    };
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300) resolve(request.response as Job);
-      else reject(new ApiError(apiErrorMessage(request.response, "Não foi possível enviar o vídeo."), request.status));
-    };
-    request.onerror = () => reject(new Error("O envio foi interrompido. Verifique sua conexão e tente novamente."));
-    request.onabort = () => reject(new Error("Envio cancelado."));
-    request.send(data);
+export const MAX_VIDEO_JOB_BYTES = 5 * 1024 ** 3;
+
+export async function uploadVideoJob(file: File, requestedClips: number, rightsConfirmed: boolean, onProgress: (percent: number) => void): Promise<Job> {
+  const sampleBytes = 64 * 1024;
+  const middle = Math.floor(file.size / 2);
+  const sample = new Blob([
+    String(file.lastModified), file.slice(0, sampleBytes), file.slice(middle, middle + sampleBytes),
+    file.slice(Math.max(0, file.size - sampleBytes)),
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", await sample.arrayBuffer());
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const key = `shortsflow:upload:${fingerprint}:${file.size}:${requestedClips}`;
+  const attempt = localStorage.getItem(key) || crypto.randomUUID();
+  localStorage.setItem(key, attempt);
+  const session = await api<{ id: string; offset: number; chunk_bytes: number }>("/api/jobs/uploads", {
+    method: "POST",
+    body: JSON.stringify({
+      filename: file.name, fingerprint, attempt, size: file.size, requested_clips: requestedClips,
+      rights_confirmed: rightsConfirmed,
+    }),
   });
+  const path = `/api/jobs/uploads/${session.id}`;
+  let offset = session.offset;
+  let retries = 0;
+  onProgress(Math.floor(offset / file.size * 100));
+  while (offset < file.size) {
+    try {
+      const result = await api<{ offset: number }>(`${path}?offset=${offset}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file.slice(offset, offset + session.chunk_bytes),
+      });
+      offset = result.offset;
+      retries = 0;
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 507 || (error.status < 500 && ![408, 409, 429].includes(error.status)))) throw error;
+      if (++retries > 3) throw new Error("Envio interrompido. Selecione o mesmo vídeo e tente novamente para retomar.");
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** retries));
+      try {
+        offset = (await api<{ offset: number }>(path)).offset;
+      } catch (statusError) {
+        if (statusError instanceof ApiError && statusError.status === 404) throw statusError;
+      }
+    }
+    onProgress(Math.floor(offset / file.size * 100));
+  }
+  const job = await api<Job>(`${path}/complete`, { method: "POST" });
+  localStorage.removeItem(key);
+  return job;
 }
 
 export class ApiError extends Error {

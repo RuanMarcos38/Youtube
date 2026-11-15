@@ -1,3 +1,4 @@
+import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from .services.download_probe import run_and_store_download_probe
 from .services.editor_ai import claim_next_editor_task, recover_interrupted_editor_tasks
 from .services.editor_ai_runtime import run_claimed_editor_task
 from .services.pipeline import run_pipeline
+from .services.resumable_uploads import discard_expired_uploads
 from .services.tiktok_policy import recover_retryable_draft_uploads
 from .services.tiktok_upload_task import refresh_tiktok_post, run_tiktok_upload
 from .services.upload_task import run_upload
@@ -189,6 +191,7 @@ def main() -> None:
     last_tiktok_status_started = 0.0
     last_tiktok_upload_started = 0.0
     last_automation_started = 0.0
+    last_upload_cleanup = 0.0
 
     with (
         ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="shortsflow-job") as job_pool,
@@ -202,6 +205,13 @@ def main() -> None:
         while True:
             _heartbeat()
             _collect_finished_jobs(active_jobs)
+            now = time.monotonic()
+            if now - last_upload_cleanup >= 300:
+                last_upload_cleanup = now
+                try:
+                    discard_expired_uploads()
+                except OSError:
+                    logging.getLogger(__name__).exception("Could not discard expired video uploads")
 
             if active_upload is not None and active_upload.done():
                 try:

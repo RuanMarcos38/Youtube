@@ -1,5 +1,7 @@
 import json
+import os
 import shutil
+import struct
 import subprocess
 from types import SimpleNamespace
 
@@ -119,6 +121,28 @@ def test_upload_requires_login(runtime):
     assert runtime.db.query(Job).count() == 0
 
 
+def test_resumable_upload_recovers_offset_and_enqueues_once(runtime, monkeypatch):
+    monkeypatch.setattr(jobs.uploads, "CHUNK_BYTES", 4)
+    monkeypatch.setattr(jobs.uploads, "DISK_RESERVE_BYTES", 0)
+    payload = dict(filename="original.mp4", fingerprint="a" * 64, attempt="08dd4b5b-8047-4dce-9480-0a25213441e1",
+                   size=7, requested_clips=1, rights_confirmed=True)
+    endpoint = "/api/jobs/uploads"
+    session = runtime.client.post(endpoint, json=payload).json()
+    path = f"{endpoint}/{session['id']}"
+    headers = {"Content-Type": "application/octet-stream"}
+    assert runtime.client.post(f"{path}/complete").status_code == 409
+    assert runtime.client.put(f"{path}?offset=0", content=b"abcd", headers=headers).json() == {"offset": 4}
+    assert runtime.client.post(endpoint, json=payload).json() == {**session, "offset": 4}
+    assert runtime.client.put(f"{path}?offset=0", content=b"abcd", headers=headers).status_code == 409
+    assert runtime.client.put(f"{path}?offset=4", content=b"efg", headers=headers).json() == {"offset": 7}
+    result = runtime.client.post(f"{path}/complete")
+    assert result.status_code == 202, result.text
+    assert runtime.client.post(f"{path}/complete").json()["id"] == result.json()["id"]
+    source = runtime.db.query(SourceVideo).one()
+    assert source_uploads.source_upload_path(runtime.user.id, source.original_url).read_bytes() == b"abcdefg"
+    assert runtime.db.query(Job).count() == 1
+
+
 @pytest.mark.parametrize("reference", ["upload:///etc/passwd", "upload://../source.mp4", "upload://" + "a" * 32 + "/../../secret.mp4"])
 def test_source_reference_rejects_path_traversal(reference):
     with pytest.raises(ValueError):
@@ -129,14 +153,44 @@ def test_real_video_reaches_render_without_any_youtube_download(runtime, monkeyp
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("FFmpeg required for real media verification")
     media = runtime.root / "fixture.mp4"
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=25", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(media)], check=True, capture_output=True)
+    speech = os.environ.get("SHORTSFLOW_TEST_SPEECH")
+    audio = ["-stream_loop", "3", "-i", speech] if speech else ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000"]
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=25", *audio, "-t", "40" if speech else "2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(media)], check=True, capture_output=True)
     monkeypatch.setattr(jobs, "inspect_uploaded_video", source_uploads.inspect_uploaded_video)
-    response = submit(runtime, media.read_bytes(), clips="1")
+    if os.environ.get("SHORTSFLOW_TEST_MAX_UPLOAD") == "1":
+        size = jobs.uploads.MAX_RESUMABLE_BYTES
+        with media.open("r+b") as handle:
+            remaining = size - handle.seek(0, 2)
+            handle.write(struct.pack(">I4sQ", 1, b"free", remaining))
+            handle.truncate(size)
+        monkeypatch.setattr(jobs.uploads, "DISK_RESERVE_BYTES", 0)
+        endpoint = "/api/jobs/uploads"
+        payload = dict(filename=media.name, fingerprint="b" * 64, attempt="08dd4b5b-8047-4dce-9480-0a25213441e1",
+                       size=size, requested_clips=1, rights_confirmed=True)
+        assert runtime.client.post(endpoint, json={**payload, "size": size + 1}).status_code == 422
+        session = runtime.client.post(endpoint, json=payload).json()
+        path = f"{endpoint}/{session['id']}"
+        headers = {"Content-Type": "application/octet-stream"}
+        with media.open("rb") as handle:
+            for offset in range(0, size, session["chunk_bytes"]):
+                part = handle.read(session["chunk_bytes"])
+                reply = runtime.client.put(f"{path}?offset={offset}", content=part, headers=headers)
+                assert reply.json() == {"offset": offset + len(part)}, reply.text
+                if offset == session["chunk_bytes"] * 16:
+                    assert runtime.client.post(endpoint, json=payload).json()["offset"] == offset + len(part)
+        response = runtime.client.post(f"{path}/complete")
+        media.unlink()
+    else:
+        response = submit(runtime, media.read_bytes(), clips="1")
     assert response.status_code == 202, response.text
     job_id = response.json()["id"]
     monkeypatch.setattr(pipeline, "download_video", lambda *_args, **_kwargs: pytest.fail("Uploaded media must never contact YouTube"))
-    monkeypatch.setattr(pipeline, "transcribe_chunks", lambda *_args, **_kwargs: ("Conteúdo de teste para criar um corte.", [{"start": 0, "end": 1.5, "text": "Conteúdo de teste para criar um corte."}]))
-    monkeypatch.setattr(pipeline, "select_clips", lambda *_args: [SimpleNamespace(start=0, end=1.5, hook="Conteúdo de teste", reason="test", title="Teste do servidor", description="Teste", tags=["teste"], copy="Teste")])
+    if speech:
+        monkeypatch.setattr(jobs.settings, "transcription_provider", "local")
+        monkeypatch.setattr(jobs.settings, "clip_planning_provider", "local")
+    else:
+        monkeypatch.setattr(pipeline, "transcribe_chunks", lambda *_args, **_kwargs: ("Conteúdo de teste para criar um corte.", [{"start": 0, "end": 1.5, "text": "Conteúdo de teste para criar um corte."}]))
+        monkeypatch.setattr(pipeline, "select_clips", lambda *_args: [SimpleNamespace(start=0, end=1.5, hook="Conteúdo de teste", reason="test", title="Teste do servidor", description="Teste", tags=["teste"], copy="Teste")])
     pipeline.run_pipeline(job_id)
     runtime.db.expire_all()
     job = runtime.db.get(Job, job_id)
