@@ -142,6 +142,7 @@ async def receive_chunk(
         return {"offset": current + len(body), "size": data["size"]}
 
 
+@router.post("/{upload_id}/complete", response_model=JobOut, status_code=202)
 @router.post("/{upload_id}/finish", response_model=JobOut, status_code=202)
 def finish(upload_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     data, target, part, manifest = _find_upload(user, upload_id)
