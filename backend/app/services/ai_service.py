@@ -459,10 +459,10 @@ def select_clips(
         return _select_clips_openai(
             segments, duration, requested_clips, source_title
         )
-    except AIPlanningError as exc:
-        message = str(exc)
-        if _is_credit_or_quota_error(message) or _is_rate_limit_error(message):
-            return _select_clips_local(
-                segments, duration, requested_clips, source_title
-            )
-        raise
+    except AIPlanningError:
+        # Automatic mode must remain available when the remote planner fails
+        # (network, model availability, malformed output, rate limits or quota).
+        # Explicit 'openai' mode still propagates the error as requested.
+        return _select_clips_local(
+            segments, duration, requested_clips, source_title
+        )
