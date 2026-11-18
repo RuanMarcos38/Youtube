@@ -517,6 +517,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
   const [originalClips, setOriginalClips] = useState(10);
   const [originalRights, setOriginalRights] = useState(false);
   const [uploadingOriginal, setUploadingOriginal] = useState(false);
+  const [originalUploadProgress, setOriginalUploadProgress] = useState(0);
   const [videos, setVideos] = useState<TrendingVideo[]>([]);
   const [nextVideoPageToken, setNextVideoPageToken] = useState<string | null>(null);
   const [selected, setSelected] = useState<TrendingVideo | null>(null);
@@ -620,13 +621,13 @@ export default function Dashboard({ user }: { user: UserProfile }) {
 
   async function uploadOriginal() {
     if (!originalFile) return setError("Selecione um arquivo de vídeo.");
-    if (originalFile.size === 0 || originalFile.size > 2048 * 1024 * 1024) {
-      return setError("Selecione um vídeo não vazio de até 2 GiB.");
+    if (originalFile.size === 0 || originalFile.size > 5 * 1024 * 1024 * 1024) {
+      return setError("Selecione um vídeo não vazio de até 5 GiB.");
     }
     if (!originalRights) return setError("Confirme os direitos de uso do vídeo.");
-    setUploadingOriginal(true); setError(""); setMessage("");
+    setUploadingOriginal(true); setOriginalUploadProgress(0); setError(""); setMessage("");
     try {
-      const created = await createUploadedShortsJob(originalFile, originalClips);
+      const created = await createUploadedShortsJob(originalFile, originalClips, setOriginalUploadProgress);
       setOriginalFile(null);
       setOriginalRights(false);
       await refresh();
@@ -989,7 +990,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               Confirmo que possuo direitos ou autorização para editar e reutilizar este vídeo.
             </label>
             <button type="button" onClick={() => void uploadOriginal()} disabled={uploadingOriginal || !originalFile || !originalRights} className="sf-button sf-button-youtube mt-4 disabled:opacity-50">
-              {uploadingOriginal ? "Enviando vídeo ao servidor..." : "Enviar e gerar Shorts"}
+              {uploadingOriginal ? "Enviando vídeo ao servidor... ${originalUploadProgress}%" : "Enviar e gerar Shorts"}
             </button>
           </div>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
