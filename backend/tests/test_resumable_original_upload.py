@@ -34,3 +34,11 @@ def test_zero_length_upload_rejected():
 
 def test_missing_partial_file_starts_at_zero(tmp_path: Path):
     assert _offset(tmp_path / "missing.part") == 0
+
+
+def test_both_complete_and_finish_routes_are_registered():
+    """Accept the current frontend endpoint without breaking older clients."""
+    from app.routers.upload_resumable import router
+    paths = {route.path for route in router.routes if "POST" in route.methods}
+    assert "/jobs/uploads/{upload_id}/complete" in paths
+    assert "/jobs/uploads/{upload_id}/finish" in paths
