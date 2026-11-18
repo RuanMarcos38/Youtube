@@ -990,7 +990,7 @@ export default function Dashboard({ user }: { user: UserProfile }) {
               Confirmo que possuo direitos ou autorização para editar e reutilizar este vídeo.
             </label>
             <button type="button" onClick={() => void uploadOriginal()} disabled={uploadingOriginal || !originalFile || !originalRights} className="sf-button sf-button-youtube mt-4 disabled:opacity-50">
-              {uploadingOriginal ? "Enviando vídeo ao servidor... ${originalUploadProgress}%" : "Enviar e gerar Shorts"}
+              {uploadingOriginal ? `Enviando vídeo ao servidor... ${originalUploadProgress}%` : "Enviar e gerar Shorts"}
             </button>
           </div>
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_360px]">
