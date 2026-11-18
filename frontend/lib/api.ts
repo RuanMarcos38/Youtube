@@ -161,23 +161,95 @@ export async function createJob(video: TrendingVideo, requestedClips: number): P
   });
 }
 
-/** Upload is multipart: do not set application/json Content-Type. */
-export async function createUploadedShortsJob(file: File, requestedClips: number): Promise<Job> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("requested_clips", String(requestedClips));
-  form.append("rights_confirmed", "true");
-  const response = await fetch(`${API_URL}/api/jobs/upload`, {
-    method: "POST",
-    body: form,
-    credentials: "include",
+/** Resume 8 MiB chunks across transient disconnections, without a multi-GB HTTP request. */
+export async function createUploadedShortsJob(
+  file: File,
+  requestedClips: number,
+  onProgress?: (percent: number) => void,
+): Promise<Job> {
+  const fingerprint = `shortsflow-original:${file.name}:${file.size}:${file.lastModified}`;
+  const chunkError = async (response: Response): Promise<Error> => {
+    let detail: unknown;
+    try { detail = await response.json(); } catch {}
+    const message = detail && typeof detail === "object" && "detail" in detail
+      ? (detail as { detail: unknown }).detail : null;
+    return new Error(typeof message === "string" ? message : `Falha no envio (HTTP ${response.status}).`);
+  };
+  const request = (path: string, init?: RequestInit) => fetch(`${API_URL}/api/jobs/uploads${path}`, {
+    ...init, credentials: "include", cache: "no-store",
   });
-  if (!response.ok) {
-    let detail = `Falha no envio (HTTP ${response.status}).`;
-    try { detail = apiErrorMessage(await response.json(), detail); } catch {}
-    throw new Error(detail);
+  const metadata = { name: file.name, size: file.size, requested_clips: requestedClips, rights_confirmed: true };
+  let id = typeof window !== "undefined" ? window.localStorage.getItem(fingerprint) : null;
+  let offset = 0;
+  let chunkSize = 8 * 1024 * 1024;
+  if (id) {
+    try {
+      const response = await request(`/${encodeURIComponent(id)}`);
+      if (response.ok) {
+        const state: { offset: number; size: number; name: string; chunk_size: number; completed: boolean } = await response.json();
+        if (state.size === file.size && state.name === file.name && !state.completed) {
+          offset = state.offset; chunkSize = state.chunk_size;
+        } else { id = null; }
+      } else { id = null; }
+    } catch { /* Do not start a duplicate session during a temporary network failure. */ 
+      throw new Error("Sem conexão para consultar o envio anterior. Verifique a rede e tente novamente.");
+    }
   }
-  return response.json() as Promise<Job>;
+  if (!id) {
+    const response = await request("/init", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metadata),
+    });
+    if (!response.ok) throw await chunkError(response);
+    const state: { upload_id: string; chunk_size: number; offset: number } = await response.json();
+    id = state.upload_id; chunkSize = state.chunk_size; offset = state.offset;
+    window.localStorage.setItem(fingerprint, id);
+  }
+  while (offset < file.size) {
+    const body = file.slice(offset, Math.min(file.size, offset + chunkSize));
+    let completed = false;
+    for (let attempt = 0; attempt < 5 && !completed; attempt++) {
+      try {
+        const response = await request(`/${encodeURIComponent(id)}/chunk?offset=${offset}`, {
+          method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body,
+        });
+        if (response.status === 409) {
+          const check = await request(`/${encodeURIComponent(id)}`);
+          if (!check.ok) throw await chunkError(check);
+          const state: { offset: number } = await check.json();
+          offset = state.offset;
+          completed = true;
+        } else if (response.ok) {
+          const state: { offset: number } = await response.json();
+          offset = state.offset;
+          completed = true;
+        } else if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
+          throw await chunkError(response);
+        } else {
+          throw Object.assign(await chunkError(response), { permanent: true });
+        }
+      } catch (error) {
+        if (error instanceof Error && "permanent" in error) throw error;
+        if (attempt === 4) throw new Error("Envio interrompido. Selecione o mesmo vídeo novamente para retomar do ponto salvo.");
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        // A timed-out part may have reached the server: inspect the true offset.
+        try {
+          const check = await request(`/${encodeURIComponent(id)}`);
+          if (check.ok) {
+            const state: { offset: number } = await check.json();
+            if (state.offset !== offset) { offset = state.offset; completed = true; }
+          }
+        } catch {}
+      }
+    }
+    onProgress?.(Math.min(100, Math.floor((offset / file.size) * 100)));
+  }
+  const response = await request(`/${encodeURIComponent(id)}/finish`, { method: "POST" });
+  if (!response.ok) throw await chunkError(response);
+  const result = await response.json() as Job;
+  window.localStorage.removeItem(fingerprint);
+  onProgress?.(100);
+  return result;
 }
 
 export const listJobs = () => api<Job[]>("/api/jobs");
